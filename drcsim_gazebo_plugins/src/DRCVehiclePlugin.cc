@@ -33,6 +33,8 @@
 #include <gz/sim/components/Collision.hh>
 #include <gz/sim/components/Geometry.hh>
 #include <gz/sim/components/JointAxis.hh>
+#include <sdf/Cylinder.hh>
+#include <sdf/Sphere.hh>
 
 using namespace drcsim_gazebo_plugins;
 
@@ -137,27 +139,27 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
   this->UpdateFNRSwitchTime();
 
   // get some vehicle parameters
-  this->frontTorque = _sdf->Get<double>("front_torque", 0.0);
-  this->backTorque = _sdf->Get<double>("back_torque", 2000.0);
+  this->frontTorque = _sdf->Get<double>("front_torque", 0.0).first;
+  this->backTorque = _sdf->Get<double>("back_torque", 2000.0).first;
   this->frontBrakeTorque =
-      _sdf->Get<double>("front_brake_torque", 2000.0);
+      _sdf->Get<double>("front_brake_torque", 2000.0).first;
   this->backBrakeTorque =
-      _sdf->Get<double>("back_brake_torque", 2000.0);
-  this->maxSpeed = _sdf->Get<double>("max_speed", 10.0);
-  this->maxSteer = _sdf->Get<double>("max_steer", 0.6);
-  this->minBrakePercent = _sdf->Get<double>("min_brake_percent", 0.02);
+      _sdf->Get<double>("back_brake_torque", 2000.0).first;
+  this->maxSpeed = _sdf->Get<double>("max_speed", 10.0).first;
+  this->maxSteer = _sdf->Get<double>("max_steer", 0.6).first;
+  this->minBrakePercent = _sdf->Get<double>("min_brake_percent", 0.02).first;
   this->fLwheelSteeringPgain =
-      _sdf->Get<double>("flwheel_steering_p_gain", 0.0);
+      _sdf->Get<double>("flwheel_steering_p_gain", 0.0).first;
   this->fRwheelSteeringPgain =
-      _sdf->Get<double>("frwheel_steering_p_gain", 0.0);
+      _sdf->Get<double>("frwheel_steering_p_gain", 0.0).first;
   this->fLwheelSteeringIgain =
-      _sdf->Get<double>("flwheel_steering_i_gain", 0.0);
+      _sdf->Get<double>("flwheel_steering_i_gain", 0.0).first;
   this->fRwheelSteeringIgain =
-      _sdf->Get<double>("frwheel_steering_i_gain", 0.0);
+      _sdf->Get<double>("frwheel_steering_i_gain", 0.0).first;
   this->fLwheelSteeringDgain =
-      _sdf->Get<double>("flwheel_steering_d_gain", 0.0);
+      _sdf->Get<double>("flwheel_steering_d_gain", 0.0).first;
   this->fRwheelSteeringDgain =
-      _sdf->Get<double>("frwheel_steering_d_gain", 0.0);
+      _sdf->Get<double>("frwheel_steering_d_gain", 0.0).first;
 
   this->UpdateHandWheelRatio();
 
