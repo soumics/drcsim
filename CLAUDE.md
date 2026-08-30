@@ -81,10 +81,13 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
    package in this migration. See "drcsim_gazebo_plugins — design decisions and
    lessons" below for everything learned; keep it as reference for Tier 2's
    `drcsim_gazebo_ros_plugins` (same API family, same gotchas will recur).
-9. ⬜ `drcsim_model_resources` — **not started.** Worlds/models/SDF version upgrade,
-   plus proprietary AtlasSimInterface binaries (v1.1.1/2.10.2/3.0.2) — will very likely
-   not link against Jazzy's toolchain; need a decision on rebuild vs. drop vs. stub
-   before this package can be finished.
+9. ✅ `drcsim_model_resources` — **done, 100% (7/7 checks).** Worlds (49) + models
+   (~28) + 3 AtlasSimInterface shim libraries. See "`drcsim_model_resources` —
+   design decisions and lessons" below — the AtlasSimInterface binary-linking risk
+   flagged in the original migration plan turned out not to apply (see below), but
+   real pre-existing content bugs in the worlds/models did turn up and got fixed.
+
+**Tier 0 is now fully complete — all 9 packages done, 100% passing.**
 
 **Tier 1+ (not started):** `atlas_msgs`, `atlas_description`, then Tier 2
 `drcsim_gazebo_ros_plugins` (huge — VRCPlugin, AtlasPlugin family tied to the
@@ -205,6 +208,103 @@ unsafe `.value_or(...)[0]` shortcut.
   *plugin itself* actually enables (not what seems obviously relevant) before
   writing a test assertion that reads either one; a continuously-rotating wheel
   joint's plugin only enables velocity, never position, for example.
+
+## `drcsim_model_resources` — design decisions and lessons (done, keep as reference)
+
+**AtlasSimInterface risk was overestimated in the original plan.** Only v1.1.1 ships
+a real prebuilt proprietary binary (a stripped ELF `.so` from ~2013); v2.10.2/v3.0.2
+are pure open-source "shim" source (`src/AtlasSimInterface.cc`, byte-identical across
+all 3 versions, confirmed via `diff`) that OSRF itself wrote as a stand-in, no
+proprietary content, no ABI risk. Decision (confirmed with the user): build the shim
+for **all three** versions, don't attempt the real v1 binary at all — zero
+proprietary-binary-linking risk, matches what v2/v3 always did anyway. Built as
+proper exported ament targets (`AtlasSimInterface1/2/3`, matching the library names
+`drcsim_gazebo_ros_plugins`'s CMakeLists.txt already expects for Tier 2) via
+`ament_export_targets`/`ament_export_include_directories`, so Tier 2 can
+`find_package(drcsim_model_resources)` the modern way instead of the old catkin
+`CFG_EXTRAS` variable convention.
+
+**Bulk-installed worlds/models/media** (same pattern as description packages):
+removed all 134 nested per-model/per-world `CMakeLists.txt` files (every one was a
+plain `install(FILES ...)`, confirmed via grep for `add_library`/`add_executable`/
+`configure_file`/`execute_process`/`add_custom` — none had custom logic) in favor of
+three `install(DIRECTORY ...)` calls. `GZ_SIM_RESOURCE_PATH` hook needed **two**
+entries here (`.../gazebo_models` and `.../worlds`), not just `share` like the
+description packages — confirmed via grep that world files use bare `model://golf_cart`
+URIs (no package-name prefix), so the resource path has to include the
+`gazebo_models` directory itself.
+
+**`ament_cpplint`/`ament_uncrustify` EXCLUDE wants file paths, not directory
+paths** — passing the 3 vendored `AtlasSimInterface_*/` directories directly was
+silently ignored (files inside them still got scanned and flagged; confirmed from
+real test output). Fix: `file(GLOB_RECURSE ...)` to enumerate every actual file
+under those directories, then pass that list to `EXCLUDE`. And once truly excluded,
+both tools **error on zero remaining files to check** rather than passing trivially
+(confirmed: `ament_uncrustify` returned "No files found" / exit 1) — this package
+has no first-party C++ source at all once the vendored shim is excluded, so both
+linters were dropped entirely rather than fought.
+
+**`gz sdf --check` run standalone can never resolve `model://` URIs, with or
+without `GZ_SIM_RESOURCE_PATH` set** — confirmed by testing both ways, identical
+failures either way. The error is explicit about why: `sdf::findFile()`'s
+URI-resolution callback is only ever registered by `gz-sim`'s own runtime server at
+startup; the generic `sdf` CLI tool never wires one up under any circumstance. Every
+`<include><uri>model://...</uri></include>` a file has reliably fails with
+`Error Code 14: ... Unable to find uri[...]`, regardless of whether the referenced
+model genuinely exists. **This is a permanent limitation of checking one file in
+isolation, not something fixable from the test** — `test_sdf_files_check.py` parses
+`gz sdf --check`'s stderr for `Error Code N:` markers and tolerates *only* code 14
+(plus, only when 14 is present, codes 17/25 — see below), failing on any other code
+as a genuine problem. Don't try another env var or flag to "fix" code 14 — it's been
+tried.
+
+**Pure nested-model wrappers cascade error 14 into 17/25.** A model that's just
+`<include>` of an external model + a `<plugin>` (e.g. `drc_vehicle`/
+`drc_vehicle_xp900`, composing in `polaris_ranger_ev`/`xp900` and attaching vehicle
+control) can't have its own links counted once the include fails to resolve — the
+checker can't see inside an unresolved include to find the links it would
+contribute, surfacing as `Error Code 17` ("must have at least one link") and `25`
+(frame graph) *alongside* 14. The test tolerates 17/25 **only when 14 is also
+present** (confirming that root cause) — a file with 17/25 and no 14 is a genuine
+standalone bug (this is exactly what caught `block_angle_steps`/`block_level_steps`
+as real bugs, see below).
+
+**Real pre-existing content bugs found and fixed** (all confirmed via actual
+`gz sdf --check` output before fixing, not guessed) — useful as a checklist if more
+turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
+- `<script><name>X</name></script>` with no `<uri>` (Error 9) — add
+  `<uri>file://media/materials/scripts/gazebo.material</uri>` for standard
+  `Gazebo/*` material names (this repo's own established convention, confirmed via
+  grep against files that already had it right).
+- `<script><uri>.../scripts</uri><uri>.../textures</uri></script>` with no `<name>`
+  (Error 8) — check the model's own `materials/scripts/*.material` file for the
+  actual `material <name>` line rather than guessing.
+- A model composed purely of `<include>`s with no link of its own, and genuinely
+  static (Error 17/25, **without** 14 present) — add `<static>true</static>`,
+  matching a sibling model with the identical pattern if one exists in the repo
+  (`block_angle_base` was the working precedent for `block_angle_steps`/
+  `block_level_steps`).
+- Root element `<gazebo version='1.2'>...</gazebo>` (Error 1/40) — the
+  pre-SDFormat Gazebo 1.x XML schema, from before SDF existed as its own spec.
+  Convert to `<sdf version="1.4">...</sdf>` (add the `<?xml version="1.0"?>`
+  prolog too if missing).
+- Stray/duplicate/mismatched closing tags (Error 1, XML parse errors) — e.g. an
+  extra `</link>` after a `<plugin>` block, an orphaned `</physics>` with no
+  matching open tag, a duplicated `</model>` at file end. **XML parsers stop at the
+  first fatal error** — fixing one such bug can unmask a second, previously-hidden
+  one in the same file (happened with `vrc_standpipe/model.sdf`); re-parse after
+  each fix rather than assuming one fix means the file's done.
+- Literal leftover text after the document's closing tag (e.g. the word `Success`
+  pasted in after `</gazebo>`) — "junk after document element."
+- Inertia tensor violating the triangle inequality every real rigid body must
+  satisfy (`izz <= ixx + iyy`, etc.) (Error 19, "invalid inertia") — e.g.
+  `ixx=0.1, iyy=0.1, izz=1.0` (1.0 > 0.2). Reduce the offending value to something
+  physically valid; for small decorative sub-parts with placeholder mass anyway, a
+  symmetric inertia (all three equal) is a safe default.
+- Sibling `<collision>`/`<visual>` elements sharing one literal `name` (Error, "Non-
+  unique names detected") — give the collision a distinct name (e.g. append
+  `_collision`), leaving the visual name as-is, matching how other pairs in the same
+  link were already named uniquely.
 
 ## Established per-package conversion pattern (message packages)
 
