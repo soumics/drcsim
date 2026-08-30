@@ -52,6 +52,28 @@ install(DIRECTORY include/${PROJECT_NAME}/
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)
   ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+
+  ament_add_gtest(test_drc_building_plugin
+    test/test_drc_building_plugin.cc)
+  target_link_libraries(test_drc_building_plugin gz-sim8::gz-sim8)
+  target_compile_definitions(test_drc_building_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:DRCBuildingPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_drc_building_plugin
+    DRCBuildingPlugin DRCVehiclePlugin)
+
+  ament_add_gtest(test_drc_vehicle_plugin
+    test/test_drc_vehicle_plugin.cc)
+  target_link_libraries(test_drc_vehicle_plugin gz-sim8::gz-sim8)
+  target_compile_definitions(test_drc_vehicle_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:DRCVehiclePlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_drc_vehicle_plugin
+    DRCBuildingPlugin DRCVehiclePlugin)
 endif()
 
 ament_package()
