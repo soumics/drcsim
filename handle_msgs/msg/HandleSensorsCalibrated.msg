@@ -3,27 +3,26 @@
 
 # not all the sensors were included, but only the one which were addressed at the moment
 
-# Currently only used for time stamp.  
+# Currently only used for time stamp.
 Header header
 
 # The tactile array for each finger.  In units of kPa.
 # [F1, F2, F3]
 # Note there are 12 proximal and 10 distal sensors.
-Finger[3] fingerTactile
+Finger[3] finger_tactile
 
 # The tactile array for the palm.  In units of kPa.
-float32[48] palmTactile
+float32[48] palm_tactile
 
 # The encoder on the F1 / F2 rotation.
 # Approx. 768 ticks to rotate the fingers 90 degrees.
-float32 fingerSpread
+float32 finger_spread
 
 # The proximal joint angle. Angle in radians
 # [F1, F2, F3]
-float32[3] proximalJointAngle
+float32[3] proximal_joint_angle
 
 # The finger distal joint flexture angle
 # [F1, F2, F3]
 # Note there are 4 readings on either side of the joint.
-Finger[3] distalJointAngle
-
+Finger[3] distal_joint_angle

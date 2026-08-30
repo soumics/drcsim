@@ -1,29 +1,40 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(handle_msgs)
 
-find_package(catkin REQUIRED COMPONENTS
-  geometry_msgs
-  message_generation
-  )
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-add_message_files(
-  DIRECTORY msg
-  FILES
-  CableTension.msg
-  Collision.msg
-  Finger.msg
-  HandleCollisions.msg
-  HandleControl.msg
-  HandleSensors.msg
-  HandleSensorsCalibrated.msg
-  )
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
-generate_messages(DEPENDENCIES
-  geometry_msgs
-  )
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/CableTension.msg"
+  "msg/Collision.msg"
+  "msg/Finger.msg"
+  "msg/HandleCollisions.msg"
+  "msg/HandleControl.msg"
+  "msg/HandleSensors.msg"
+  "msg/HandleSensorsCalibrated.msg"
+  DEPENDENCIES geometry_msgs
+)
 
-catkin_package(
-  CATKIN_DEPENDS
-  message_runtime
-  message_generation
-  )
+ament_export_dependencies(rosidl_default_runtime)
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(rclcpp REQUIRED)
+
+  rosidl_get_typesupport_target(cpp_typesupport_target
+    "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+
+  ament_add_gtest(test_handle_msgs test/test_handle_msgs.cpp)
+  target_link_libraries(test_handle_msgs "${cpp_typesupport_target}")
+  ament_target_dependencies(test_handle_msgs rclcpp geometry_msgs)
+endif()
+
+ament_package()
