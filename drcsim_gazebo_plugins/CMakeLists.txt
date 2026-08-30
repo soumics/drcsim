@@ -1,37 +1,57 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(drcsim_gazebo_plugins)
-# set(CMAKE_BUILD_TYPE "Debug")
 
-find_package(catkin) # REQUIRED COMPONENTS nothing)
-catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES DRCVehiclePlugin DRCBuildingPlugin
-)
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
 
-# Depend on system install of Gazebo and Boost
-find_package(gazebo REQUIRED)
-find_package(Boost REQUIRED COMPONENTS thread)
+find_package(ament_cmake REQUIRED)
+find_package(gz-sim8 REQUIRED)
+find_package(gz-plugin2 REQUIRED COMPONENTS register)
+find_package(gz-math7 REQUIRED)
+find_package(gz-common5 REQUIRED)
 
-include_directories(
-  ${PROJECT_SOURCE_DIR}/include  #hm, is this ok?
-  ${GAZEBO_INCLUDE_DIRS}
-)
-link_directories(
-  ${GAZEBO_LIBRARY_DIRS}
-)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${GAZEBO_CXX_FLAGS}")
+include_directories(include)
 
-# compile and install gazebo plugins
 add_library(DRCVehiclePlugin SHARED src/DRCVehiclePlugin.cc)
-target_link_libraries(DRCVehiclePlugin ${GAZEBO_LIBRARIES})
-install (TARGETS DRCVehiclePlugin DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+target_link_libraries(DRCVehiclePlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-math7::gz-math7
+  gz-common5::gz-common5
+)
+install(TARGETS DRCVehiclePlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 add_library(DRCBuildingPlugin SHARED src/DRCBuildingPlugin.cc)
-target_link_libraries(DRCBuildingPlugin ${GAZEBO_LIBRARIES})
-install (TARGETS DRCBuildingPlugin DESTINATION ${CATKIN_PACKAGE_LIB_DESTINATION})
+target_link_libraries(DRCBuildingPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-math7::gz-math7
+  gz-common5::gz-common5
+)
+install(TARGETS DRCBuildingPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
-## Mark cpp header files for installation
+# Let gz-sim find these plugin libraries at runtime.
+ament_environment_hooks(
+  "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
+)
+
 install(DIRECTORY include/${PROJECT_NAME}/
-  DESTINATION ${CATKIN_PACKAGE_INCLUDE_DESTINATION}
+  DESTINATION include/${PROJECT_NAME}
   FILES_MATCHING PATTERN "*.hh"
 )
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+ament_package()

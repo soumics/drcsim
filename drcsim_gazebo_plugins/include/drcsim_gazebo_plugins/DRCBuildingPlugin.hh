@@ -14,68 +14,70 @@
  * limitations under the License.
  *
 */
-#ifndef GAZEBO_DRC_BUILDING_PLUGIN_HH
-#define GAZEBO_DRC_BUILDING_PLUGIN_HH
+#ifndef DRCSIM_GAZEBO_PLUGINS_DRCBUILDINGPLUGIN_HH_
+#define DRCSIM_GAZEBO_PLUGINS_DRCBUILDINGPLUGIN_HH_
 
 #include <string>
 
-#include <boost/thread.hpp>
-#include <boost/thread/mutex.hpp>
+#include <gz/math/PID.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/System.hh>
 
-#include <gazebo/physics/physics.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <gazebo/common/Time.hh>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/common/Events.hh>
-
-namespace gazebo
+namespace drcsim_gazebo_plugins
 {
-  /// \defgroup drc_plugin DRC Plugins
-  /// \addtogroup drc_plugin
-  /// \{
-  class DRCBuildingPlugin : public ModelPlugin
+  /// \brief Position-controls a door and its handle joint. Ported from the
+  /// original Gazebo-Classic DRCBuildingPlugin (drcsim, ROS 1 era) to
+  /// gz-sim's System interface for Gazebo Harmonic.
+  ///
+  /// Design note vs. the original: the original additionally simulated a
+  /// door latch/lock by dynamically toggling the door joint's physics
+  /// limits (SetHighStop/SetLowStop) and hard-resetting its position to
+  /// zero once the handle and door were both near-zero. gz-sim has no
+  /// well-supported runtime joint-limit-mutation API (same issue as
+  /// DRCVehiclePlugin's wheel braking), so that toggle has been dropped;
+  /// the PID controller alone holds the door near zero when doorCmd is 0.
+  class DRCBuildingPlugin
+    : public gz::sim::System,
+      public gz::sim::ISystemConfigure,
+      public gz::sim::ISystemPreUpdate
   {
-    /// \brief Constructor
-    public: DRCBuildingPlugin();
+    public: DRCBuildingPlugin() = default;
 
-    /// \brief Destructor
-    public: virtual ~DRCBuildingPlugin();
+    public: ~DRCBuildingPlugin() override = default;
 
-    /// \brief Load the controller
-    public: void Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf);
+    // Documentation inherited
+    public: void Configure(const gz::sim::Entity &_entity,
+                const std::shared_ptr<const sdf::Element> &_sdf,
+                gz::sim::EntityComponentManager &_ecm,
+                gz::sim::EventManager &_eventMgr) override;
 
-    /// \brief Update the controller
-    private: void UpdateStates();
-
-    private: physics::WorldPtr world;
-    private: physics::ModelPtr model;
-
-    /// \brief Pointer to the update event connection
-    private: event::ConnectionPtr updateConnection;
+    // Documentation inherited
+    public: void PreUpdate(const gz::sim::UpdateInfo &_info,
+                gz::sim::EntityComponentManager &_ecm) override;
 
     /// \brief Sets DRC Building door position (rad) given door Joint name.
     ///   - zero angle means door is closed
     ///   - door hinge axis points upwards, which means
     ///     negative angle swings door counter-clockwise if view
     ///     from above.
-    public: void SetDoorState(std::string _doorName, math::Angle _angle);
+    public: void SetDoorState(double _angle);
 
-    /// \brief Returns DRC Building door position (rad) given door Joint name.
-    /// \sa To set door state, see SetDoorState.
-    public: math::Angle GetDoorState(std::string _doorName);
+    /// \brief Returns DRC Building door position (rad).
+    public: double GetDoorState() const;
 
-    private: physics::LinkPtr doorLink;
-    private: physics::JointPtr doorJoint;
-    private: physics::JointPtr handleJoint;
+    private: gz::sim::Model model{gz::sim::kNullEntity};
+    private: gz::sim::Entity doorJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity handleJoint{gz::sim::kNullEntity};
 
-    private: common::PID doorPID;
-    private: double doorState;
-    private: double doorCmd;
-    private: common::PID handlePID;
-    private: double handleState;
-    private: double handleCmd;
-    private: common::Time lastTime;
+    private: bool validConfig{false};
+
+    private: gz::math::PID doorPID;
+    private: double doorState{0.0};
+    private: double doorCmd{0.0};
+    private: gz::math::PID handlePID;
+    private: double handleState{0.0};
+    private: double handleCmd{0.0};
   };
-/// \}
 }
 #endif

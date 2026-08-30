@@ -17,119 +17,113 @@
 
 #include "drcsim_gazebo_plugins/DRCBuildingPlugin.hh"
 
-namespace gazebo
-{
-////////////////////////////////////////////////////////////////////////////////
-// Constructor
-DRCBuildingPlugin::DRCBuildingPlugin()
-{
-  this->doorCmd = 0;
-  this->handleCmd = 0;
-}
+#include <chrono>
+#include <string>
+#include <vector>
 
-////////////////////////////////////////////////////////////////////////////////
-// Destructor
-DRCBuildingPlugin::~DRCBuildingPlugin()
-{
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-}
+#include <gz/common/Console.hh>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/Joint.hh>
 
-////////////////////////////////////////////////////////////////////////////////
-// Load the controller
-void DRCBuildingPlugin::Load(physics::ModelPtr _parent,
-                                 sdf::ElementPtr _sdf)
-{
-  // Get the world name.
-  this->world = _parent->GetWorld();
-  this->model = _parent;
-  this->world->EnablePhysicsEngine(true);
+using namespace drcsim_gazebo_plugins;
 
-  this->doorLink = this->model->GetLink(_sdf->Get<std::string>("door_link"));
-  if (!this->doorLink)
+//////////////////////////////////////////////////
+void DRCBuildingPlugin::Configure(const gz::sim::Entity &_entity,
+    const std::shared_ptr<const sdf::Element> &_sdf,
+    gz::sim::EntityComponentManager &_ecm,
+    gz::sim::EventManager &/*_eventMgr*/)
+{
+  this->model = gz::sim::Model(_entity);
+  if (!this->model.Valid(_ecm))
   {
-    gzerr << "<door_link>" << _sdf->Get<std::string>("door_link")
-          << "<door_link> does not exist\n";
+    gzerr << "DRCBuildingPlugin should be attached to a model entity. "
+          << "Failed to initialize.\n";
     return;
   }
 
-  this->doorJoint = this->model->GetJoint(_sdf->Get<std::string>("door_joint"));
-  if (!this->doorJoint)
+  if (!_sdf->HasElement("door_joint"))
   {
-    gzerr << "<door_joint>" << _sdf->Get<std::string>("door_joint")
-          << "<door_joint> does not exist\n";
+    gzerr << "<door_joint> is required, but was not found.\n";
+    return;
+  }
+  std::string doorJointName = _sdf->Get<std::string>("door_joint");
+  this->doorJoint = this->model.JointByName(_ecm, doorJointName);
+  if (this->doorJoint == gz::sim::kNullEntity)
+  {
+    gzerr << "<door_joint>" << doorJointName
+          << "</door_joint> does not exist\n";
     return;
   }
 
-  this->handleJoint = this->model->GetJoint(
-    _sdf->Get<std::string>("handle_joint"));
-  if (!this->handleJoint)
+  if (!_sdf->HasElement("handle_joint"))
   {
-    gzerr << "<handle_joint>" << _sdf->Get<std::string>("handle_joint")
-          << "<handle_joint> does not exist\n";
+    gzerr << "<handle_joint> is required, but was not found.\n";
+    return;
+  }
+  std::string handleJointName = _sdf->Get<std::string>("handle_joint");
+  this->handleJoint = this->model.JointByName(_ecm, handleJointName);
+  if (this->handleJoint == gz::sim::kNullEntity)
+  {
+    gzerr << "<handle_joint>" << handleJointName
+          << "</handle_joint> does not exist\n";
     return;
   }
 
-  this->doorJoint->SetHighStop(0, 0);
-  this->doorJoint->SetLowStop(0, 0);
+  gz::sim::Joint(this->doorJoint).EnablePositionCheck(_ecm);
+  gz::sim::Joint(this->handleJoint).EnablePositionCheck(_ecm);
 
   this->doorPID.Init(200, 1, 20, 10, -10, 50, -50);
   this->handlePID.Init(80, 1, 1, 3, -3, 5, -5);
-  this->lastTime = this->world->GetSimTime();
 
-  // New Mechanism for Updating every World Cycle
-  // Listen to the update event. This event is broadcast every
-  // simulation iteration.
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-      boost::bind(&DRCBuildingPlugin::UpdateStates, this));
+  this->validConfig = true;
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// Play the trajectory, update states
-void DRCBuildingPlugin::UpdateStates()
+//////////////////////////////////////////////////
+void DRCBuildingPlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
+    gz::sim::EntityComponentManager &_ecm)
 {
-  common::Time curTime = this->world->GetSimTime();
-  this->doorState = this->doorJoint->GetAngle(0).Radian();
-  this->handleState = this->handleJoint->GetAngle(0).Radian();
+  if (_info.paused || !this->validConfig)
+    return;
 
-  double dt = (curTime - this->lastTime).Double();
-  if (dt > 0)
-  {
-    // PID (position) door
-    double doorError = this->doorState - this->doorCmd;
-    double doorCmd = this->doorPID.Update(doorError, dt);
-    this->doorJoint->SetForce(0, doorCmd);
+  std::chrono::duration<double> dt(_info.dt);
+  if (dt.count() <= 0)
+    return;
 
-    // PID (position) handle
-    double handleError = this->handleState - this->handleCmd;
-    double handleCmd = this->handlePID.Update(handleError, dt);
-    this->handleJoint->SetForce(0, handleCmd);
+  gz::sim::Joint doorJointWrapper(this->doorJoint);
+  gz::sim::Joint handleJointWrapper(this->handleJoint);
 
-    // simulate door latch/lock
-    if ((fabs(this->handleState) < 0.02) && (fabs(this->doorState)   < 0.02))
-    {
-      this->doorJoint->SetHighStop(0, 0);
-      this->doorJoint->SetLowStop(0, 0);
-#if GAZEBO_MAJOR_VERSION >= 4
-      this->doorJoint->SetPosition(0, 0);
-#else
-      this->doorJoint->SetAngle(0, 0);
-#endif
-    }
-    else
-    {
-      this->doorJoint->SetHighStop(0, 1.5708);
-      this->doorJoint->SetLowStop(0, -1.5708);
-    }
+  this->doorState = doorJointWrapper.Position(_ecm).value_or(
+      std::vector<double>{0.0})[0];
+  this->handleState = handleJointWrapper.Position(_ecm).value_or(
+      std::vector<double>{0.0})[0];
 
-    this->lastTime = curTime;
-  }
-  else if (dt < 0)
-  {
-    // has time been reset?
-    this->lastTime = curTime;
-  }
+  // PID (position) door
+  double doorError = this->doorState - this->doorCmd;
+  double doorCmdForce = this->doorPID.Update(doorError, dt);
+  doorJointWrapper.SetForce(_ecm, {doorCmdForce});
+
+  // PID (position) handle
+  double handleError = this->handleState - this->handleCmd;
+  double handleCmdForce = this->handlePID.Update(handleError, dt);
+  handleJointWrapper.SetForce(_ecm, {handleCmdForce});
 }
 
-GZ_REGISTER_MODEL_PLUGIN(DRCBuildingPlugin)
+//////////////////////////////////////////////////
+void DRCBuildingPlugin::SetDoorState(double _angle)
+{
+  this->doorCmd = _angle;
 }
+
+//////////////////////////////////////////////////
+double DRCBuildingPlugin::GetDoorState() const
+{
+  return this->doorState;
+}
+
+GZ_ADD_PLUGIN(DRCBuildingPlugin,
+              gz::sim::System,
+              DRCBuildingPlugin::ISystemConfigure,
+              DRCBuildingPlugin::ISystemPreUpdate)
+
+GZ_ADD_PLUGIN_ALIAS(DRCBuildingPlugin,
+    "drcsim_gazebo_plugins::DRCBuildingPlugin")
