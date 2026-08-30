@@ -1,4 +1,6 @@
-<package>
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>drcsim_model_resources</name>
   <version>3.1.0</version>
   <description>
@@ -6,18 +8,15 @@
   </description>
   <maintainer email="hsu@osrfoundation.org">John Hsu</maintainer>
   <license>Apache 2.0</license>
+  <url type="website">https://bitbucket.org/osrf/drcsim</url>
   <author>Open Source Robotics Foundation</author>
-  <url>https://bitbucket.org/osrf/drcsim</url>
-  <!-- depedencies -->
-  <buildtool_depend>cmake</buildtool_depend>
-  <buildtool_depend>catkin</buildtool_depend>
 
-  <build_depend>boost</build_depend>
-  <build_depend>tinyxml</build_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_depend>gazebo</build_depend>
-    <run_depend>gazebo</run_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
 
-  <!-- Empty runtime dependencies. 
-       bloom/debuild should be able to hand runtime dependencies automatically -->
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>
