@@ -15,7 +15,7 @@
  *
 */
 
-#include "drcsim_gazebo_plugins/DRCVehiclePlugin.hh"
+#include "drcsim_gazebo_plugins/DRCVehiclePlugin.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -36,7 +36,7 @@
 #include <sdf/Cylinder.hh>
 #include <sdf/Sphere.hh>
 
-using namespace drcsim_gazebo_plugins;
+using drcsim_gazebo_plugins::DRCVehiclePlugin;
 
 namespace
 {
@@ -274,8 +274,7 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   {
     this->handBrakeCmd = this->handBrakeHigh;
     gzlog << "Hand brake manually enabled\n";
-  }
-  else if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
+  } else if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
       this->GetHandBrakePercent() < (0.5 - handBrakeHysteresis) &&
       (simTimeSec - handBrakeTimeSec) > 0.5)
   {
@@ -301,8 +300,7 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
     this->SetDirectionState(REVERSE);
     this->UpdateFNRSwitchTime();
     gzlog << "FNR switch manually set to reverse\n";
-  }
-  else if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
+  } else if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
       this->GetFNRSwitchPercent() < (0.5 - fnrSwitchHysteresis) &&
       (simTimeSec - fnrSwitchTimeSec) > 0.5)
   {

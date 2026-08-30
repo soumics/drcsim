@@ -13,7 +13,7 @@ find_package(gz-common5 REQUIRED)
 
 include_directories(include)
 
-add_library(DRCVehiclePlugin SHARED src/DRCVehiclePlugin.cc)
+add_library(DRCVehiclePlugin SHARED src/DRCVehiclePlugin.cpp)
 target_link_libraries(DRCVehiclePlugin
   gz-sim8::gz-sim8
   gz-plugin2::register
@@ -26,7 +26,7 @@ install(TARGETS DRCVehiclePlugin
   RUNTIME DESTINATION bin
 )
 
-add_library(DRCBuildingPlugin SHARED src/DRCBuildingPlugin.cc)
+add_library(DRCBuildingPlugin SHARED src/DRCBuildingPlugin.cpp)
 target_link_libraries(DRCBuildingPlugin
   gz-sim8::gz-sim8
   gz-plugin2::register
@@ -46,7 +46,7 @@ ament_environment_hooks(
 
 install(DIRECTORY include/${PROJECT_NAME}/
   DESTINATION include/${PROJECT_NAME}
-  FILES_MATCHING PATTERN "*.hh"
+  FILES_MATCHING PATTERN "*.hpp"
 )
 
 if(BUILD_TESTING)

@@ -15,7 +15,7 @@
  *
 */
 
-#include "drcsim_gazebo_plugins/DRCBuildingPlugin.hh"
+#include "drcsim_gazebo_plugins/DRCBuildingPlugin.hpp"
 
 #include <chrono>
 #include <string>
@@ -25,7 +25,7 @@
 #include <gz/plugin/Register.hh>
 #include <gz/sim/Joint.hh>
 
-using namespace drcsim_gazebo_plugins;
+using drcsim_gazebo_plugins::DRCBuildingPlugin;
 
 //////////////////////////////////////////////////
 void DRCBuildingPlugin::Configure(const gz::sim::Entity &_entity,
