@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <rclcpp/serialization.hpp>
+#include <rclcpp/serialized_message.hpp>
 
 #include "handle_msgs/msg/cable_tension.hpp"
 #include "handle_msgs/msg/collision.hpp"
