@@ -1,37 +1,31 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(multisense_sl_description)
 
-find_package(catkin REQUIRED)
-
-catkin_package(
-)
-
-set(standalone_name "drcsim_gazebo_standalone_models")
+find_package(ament_cmake REQUIRED)
 
 install(DIRECTORY
   urdf meshes materials robots
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
 )
 
-install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${standalone_name}
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/share
-)
-
-# install below for gazebo to find this model through GAZEBO_MODEL_PATH.
 install(FILES
   model.config
   dummy.urdf
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
 )
 
-# In addition to the usual installation, which happens above, we'll
-# now do some special processing and installation to provide standalone
-# versions of the models that can be used without ROS (or even Gazebo).
-include(${CMAKE_CURRENT_SOURCE_DIR}/../tools/URDF_helpers.cmake)
-make_standalone_models(multisense_sl_description multisense_sl_description ${standalone_name})
-
-# Copy all the meshes and materials into standalone_models/atlas
-install(DIRECTORY
-  meshes materials
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${standalone_name}/multisense_sl_description
+# Let Gazebo Harmonic (gz-sim) find this package's models via
+# GZ_SIM_RESOURCE_PATH, same role the old GAZEBO_MODEL_PATH hook played.
+ament_environment_hooks(
+  "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
 )
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_xacro_parses test/test_xacro_parses.py)
+endif()
+
+ament_package()
