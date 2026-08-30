@@ -14,9 +14,9 @@
 
 """Run xacro on each top-level robot description and sanity-check the URDF it produces."""
 
+from pathlib import Path
 import subprocess
 import xml.etree.ElementTree as ET
-from pathlib import Path
 
 import pytest
 
@@ -51,13 +51,15 @@ def assert_well_formed_urdf(urdf_xml: str, xacro_file: Path) -> None:
         assert parent is not None and child is not None, (
             f'{xacro_file.name}: joint {joint_name} missing parent/child'
         )
-        assert parent.get('link') in link_names, (
-            f"{xacro_file.name}: joint {joint_name} parent link "
-            f"'{parent.get('link')}' not defined"
+        parent_link = parent.get('link')
+        child_link = child.get('link')
+        assert parent_link in link_names, (
+            f'{xacro_file.name}: joint {joint_name} parent link '
+            f"'{parent_link}' not defined"
         )
-        assert child.get('link') in link_names, (
-            f"{xacro_file.name}: joint {joint_name} child link "
-            f"'{child.get('link')}' not defined"
+        assert child_link in link_names, (
+            f'{xacro_file.name}: joint {joint_name} child link '
+            f"'{child_link}' not defined"
         )
 
 
