@@ -32,17 +32,14 @@
 // constructed, so the test doesn't depend on this package's environment
 // hook having been sourced (it hasn't -- this runs straight out of the
 // build tree, before install).
-namespace
+struct PluginPathSetter
 {
-  struct PluginPathSetter
-  {
-    PluginPathSetter()
+  PluginPathSetter()
   {
     setenv("GZ_SIM_SYSTEM_PLUGIN_PATH", PLUGIN_BUILD_DIR, 1);
-    }
-  };
-  PluginPathSetter g_pluginPathSetter;
-}  // namespace
+  }
+};
+static PluginPathSetter g_pluginPathSetter;
 
 TEST(DRCBuildingPluginTest, DoorHoldsNearZeroUnderDefaultCommand)
 {

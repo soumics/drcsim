@@ -40,8 +40,8 @@ namespace drcsim_gazebo_plugins
 /// the PID controller alone holds the door near zero when doorCmd is 0.
 class DRCBuildingPlugin
   : public gz::sim::System,
-    public gz::sim::ISystemConfigure,
-    public gz::sim::ISystemPreUpdate
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate
 {
 public:
   DRCBuildingPlugin() = default;

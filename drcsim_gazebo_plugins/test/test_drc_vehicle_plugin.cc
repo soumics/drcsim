@@ -33,27 +33,30 @@
 // constructed, so the test doesn't depend on this package's environment
 // hook having been sourced (it hasn't -- this runs straight out of the
 // build tree, before install).
-namespace
+struct PluginPathSetter
 {
-  struct PluginPathSetter
-  {
-    PluginPathSetter()
+  PluginPathSetter()
   {
     setenv("GZ_SIM_SYSTEM_PLUGIN_PATH", PLUGIN_BUILD_DIR, 1);
-    }
-  };
-  PluginPathSetter g_pluginPathSetter;
-
-  double JointPosition(
-    const gz::sim::EntityComponentManager & _ecm,
-    gz::sim::Entity _joint)
-  {
-    auto position = gz::sim::Joint(_joint).Position(_ecm);
-    return (position && !position->empty()) ? (*position)[0] :
-           std::nan("");
   }
+};
+static PluginPathSetter g_pluginPathSetter;
 
-}  // namespace
+static double JointPosition(
+  const gz::sim::EntityComponentManager & _ecm,
+  gz::sim::Entity _joint)
+{
+  auto position = gz::sim::Joint(_joint).Position(_ecm);
+  return (position && !position->empty()) ? (*position)[0] : std::nan("");
+}
+
+static double JointVelocity(
+  const gz::sim::EntityComponentManager & _ecm,
+  gz::sim::Entity _joint)
+{
+  auto velocity = gz::sim::Joint(_joint).Velocity(_ecm);
+  return (velocity && !velocity->empty()) ? (*velocity)[0] : std::nan("");
+}
 
 // Smoke test: with all default (zero/neutral) commands, the vehicle's
 // joints should settle near their neutral positions and never diverge --
@@ -69,7 +72,7 @@ TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
   bool sawJoints = false;
   double steerPosition = 0.0;
   double gasPosition = 0.0;
-  double flWheelPosition = 0.0;
+  double flWheelVelocity = 0.0;
 
   fixture.OnPostUpdate(
     [&](const gz::sim::UpdateInfo &,
@@ -93,7 +96,10 @@ TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
 
     steerPosition = JointPosition(_ecm, steerJoint);
     gasPosition = JointPosition(_ecm, gasJoint);
-    flWheelPosition = JointPosition(_ecm, flWheelJoint);
+    // Only Velocity() is meaningful here: the plugin never enables
+    // position sensing on the (continuously-rotating) wheel joints, only
+    // velocity -- see EnableVelocityCheck in DRCVehiclePlugin::Configure.
+    flWheelVelocity = JointVelocity(_ecm, flWheelJoint);
     sawJoints = true;
       });
 
@@ -104,7 +110,7 @@ TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
   ASSERT_TRUE(sawJoints);
   EXPECT_TRUE(std::isfinite(steerPosition));
   EXPECT_TRUE(std::isfinite(gasPosition));
-  EXPECT_TRUE(std::isfinite(flWheelPosition));
+  EXPECT_TRUE(std::isfinite(flWheelVelocity));
 
   // Hand wheel PID should hold the steering wheel near its zero command.
   EXPECT_NEAR(steerPosition, 0.0, 0.2);
@@ -112,7 +118,7 @@ TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
   EXPECT_NEAR(gasPosition, 0.0, 0.02);
   // With ~0% gas and the vehicle unconstrained (no ground contact) in
   // this minimal world, the front-left wheel shouldn't be spinning up.
-  EXPECT_LT(std::fabs(flWheelPosition), 5.0);
+  EXPECT_LT(std::fabs(flWheelVelocity), 5.0);
 }
 
 int main(int argc, char ** argv)

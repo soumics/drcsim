@@ -56,7 +56,7 @@ double FirstOrZero(const std::optional<std::vector<double>> & _values)
 {
   return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
 }
-}
+}  // namespace
 
 //////////////////////////////////////////////////
 void DRCVehiclePlugin::Configure(
@@ -279,8 +279,7 @@ void DRCVehiclePlugin::PreUpdate(
     gzlog << "Hand brake manually enabled\n";
   } else if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
     this->GetHandBrakePercent() < (0.5 - handBrakeHysteresis) &&
-    (simTimeSec - handBrakeTimeSec) > 0.5)
-  {
+    (simTimeSec - handBrakeTimeSec) > 0.5) {
     this->handBrakeCmd = this->handBrakeLow;
     gzlog << "Hand brake manually disabled\n";
   }
@@ -305,8 +304,7 @@ void DRCVehiclePlugin::PreUpdate(
     gzlog << "FNR switch manually set to reverse\n";
   } else if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
     this->GetFNRSwitchPercent() < (0.5 - fnrSwitchHysteresis) &&
-    (simTimeSec - fnrSwitchTimeSec) > 0.5)
-  {
+    (simTimeSec - fnrSwitchTimeSec) > 0.5) {
     this->SetDirectionState(FORWARD);
     this->UpdateFNRSwitchTime();
     gzlog << "FNR switch manually set to forward\n";

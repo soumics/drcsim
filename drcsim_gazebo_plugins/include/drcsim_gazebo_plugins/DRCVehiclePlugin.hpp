@@ -62,8 +62,8 @@ namespace drcsim_gazebo_plugins
 ///   no functional role.
 class DRCVehiclePlugin
   : public gz::sim::System,
-    public gz::sim::ISystemConfigure,
-    public gz::sim::ISystemPreUpdate
+  public gz::sim::ISystemConfigure,
+  public gz::sim::ISystemPreUpdate
 {
 public:
   /// \enum DirectionType
