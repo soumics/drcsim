@@ -480,7 +480,7 @@
           <ixz>0</ixz>
           <iyy>0.1</iyy>
           <iyz>0</iyz>
-          <izz>1.0</izz>
+          <izz>0.1</izz>
         </inertia>
       </inertial>
       <collision name='steering_wheel_collision'>
@@ -522,7 +522,7 @@
           <ixz>0</ixz>
           <iyy>0.1</iyy>
           <iyz>0</iyz>
-          <izz>1.0</izz>
+          <izz>0.1</izz>
         </inertia>
       </inertial>
       <collision name="hand_brake_collision">
