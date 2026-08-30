@@ -271,15 +271,23 @@ void DRCVehiclePlugin::PreUpdate(
   auto simTimeSec = std::chrono::duration<double>(this->currentSimTime).count();
   auto handBrakeTimeSec =
     std::chrono::duration<double>(this->handBrakeTime).count();
+  // The two branches below are mutually exclusive (one requires
+  // handBrakeCmd near its low limit, the other near its high limit), so
+  // this is intentionally two independent ifs rather than if/else --
+  // ament_uncrustify and ament_cpplint disagree on brace placement for a
+  // multi-line 'else if' condition, and dropping the else sidesteps that
+  // without changing behavior.
   if (this->handBrakeCmd < (this->handBrakeLow + handBrakeCmdEps) &&
     this->GetHandBrakePercent() > (0.5 + handBrakeHysteresis) &&
     (simTimeSec - handBrakeTimeSec) > 0.5)
   {
     this->handBrakeCmd = this->handBrakeHigh;
     gzlog << "Hand brake manually enabled\n";
-  } else if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
+  }
+  if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
     this->GetHandBrakePercent() < (0.5 - handBrakeHysteresis) &&
-    (simTimeSec - handBrakeTimeSec) > 0.5) {
+    (simTimeSec - handBrakeTimeSec) > 0.5)
+  {
     this->handBrakeCmd = this->handBrakeLow;
     gzlog << "Hand brake manually disabled\n";
   }
@@ -295,6 +303,8 @@ void DRCVehiclePlugin::PreUpdate(
   double fnrSwitchCmdEps = handBrakeCmdEps;
   auto fnrSwitchTimeSec =
     std::chrono::duration<double>(this->fnrSwitchTime).count();
+  // Same rationale as the hand-brake block above: mutually exclusive
+  // conditions, split into two independent ifs instead of if/else.
   if (this->fnrSwitchCmd < (this->fnrSwitchLow + fnrSwitchCmdEps) &&
     this->GetFNRSwitchPercent() > (0.5 + fnrSwitchHysteresis) &&
     (simTimeSec - fnrSwitchTimeSec) > 0.5)
@@ -302,9 +312,11 @@ void DRCVehiclePlugin::PreUpdate(
     this->SetDirectionState(REVERSE);
     this->UpdateFNRSwitchTime();
     gzlog << "FNR switch manually set to reverse\n";
-  } else if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
+  }
+  if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
     this->GetFNRSwitchPercent() < (0.5 - fnrSwitchHysteresis) &&
-    (simTimeSec - fnrSwitchTimeSec) > 0.5) {
+    (simTimeSec - fnrSwitchTimeSec) > 0.5)
+  {
     this->SetDirectionState(FORWARD);
     this->UpdateFNRSwitchTime();
     gzlog << "FNR switch manually set to forward\n";

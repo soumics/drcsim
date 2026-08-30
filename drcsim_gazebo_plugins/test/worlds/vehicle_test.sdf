@@ -20,6 +20,16 @@
         </collision>
       </link>
 
+      <!-- Anchor the chassis to the world: without this the whole
+           unconstrained model free-falls under gravity, and that
+           free-fall couples into the wheel joints as spurious spin --
+           confounding a test that's meant to check the PID/torque
+           control loop, not rigid-body dynamics. -->
+      <joint name="chassis_to_world" type="fixed">
+        <parent>world</parent>
+        <child>chassis</child>
+      </joint>
+
       <link name="gas_pedal_link">
         <pose>1 -0.3 0 0 0 0</pose>
         <inertial><mass>0.1</mass>
