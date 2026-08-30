@@ -70,7 +70,7 @@
         </geometry>
       </visual>
     </link>
-    <joint name="world" type="revolute">
+    <joint name="world_joint" type="revolute">
       <parent>world</parent>
       <child>standpipe</child>
       <axis>
@@ -80,9 +80,7 @@
           <upper>0</upper>
         </limit>
       </axis>
-      </physics>
     </joint>
 
-  </model>
   </model>
 </sdf>

@@ -46,6 +46,7 @@
           <script>
             <uri>model://vrc_valve/materials/scripts</uri>
             <uri>model://vrc_valve/materials/textures</uri>
+          <name>vrc/valve</name>
           </script>
         </material>
       </visual>
