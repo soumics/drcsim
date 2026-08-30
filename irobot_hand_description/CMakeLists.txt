@@ -1,39 +1,31 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(irobot_hand_description)
 
-# Used by launch
-set(ROS_PACKAGE_NAME irobot_hand_description)
+find_package(ament_cmake REQUIRED)
 
-find_package(catkin REQUIRED)
-
-catkin_package(
+install(DIRECTORY
+  urdf meshes robots launch
+  DESTINATION share/${PROJECT_NAME}
 )
 
-set(standalone_name "drcsim_gazebo_standalone_models")
-
-install(DIRECTORY urdf meshes robots launch
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
-
-install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/${standalone_name}
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/share
-)
-
-# install below for gazebo to find this model through GAZEBO_MODEL_PATH.
 install(FILES
   model.config
   dummy.urdf
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
+  DESTINATION share/${PROJECT_NAME}
 )
 
-# In addition to the usual installation, which happens above, we'll
-# also do some special processing and installation to provide standalone
-# versions of the models that can be used without ROS (or even Gazebo).
-include(${CMAKE_CURRENT_SOURCE_DIR}/../tools/URDF_helpers.cmake)
-make_standalone_models(irobot_hand_description irobot_hand_description ${standalone_name})
-
-# Copy all the meshes and materials into drcsim_standalone_models/atlas_description
-install(DIRECTORY
-  meshes
-  DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${standalone_name}/irobot_hand_description
+# Let Gazebo Harmonic (gz-sim) find this package's models via
+# GZ_SIM_RESOURCE_PATH, same role the old GAZEBO_MODEL_PATH hook played.
+ament_environment_hooks(
+  "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
 )
+
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(test_xacro_parses test/test_xacro_parses.py)
+endif()
+
+ament_package()
