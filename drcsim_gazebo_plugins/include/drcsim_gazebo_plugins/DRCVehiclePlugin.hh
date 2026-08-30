@@ -14,26 +14,55 @@
  * limitations under the License.
  *
 */
-#ifndef GAZEBO_DRC_VEHICLE_PLUGIN_HH
-#define GAZEBO_DRC_VEHICLE_PLUGIN_HH
+#ifndef DRCSIM_GAZEBO_PLUGINS_DRCVEHICLEPLUGIN_HH_
+#define DRCSIM_GAZEBO_PLUGINS_DRCVEHICLEPLUGIN_HH_
 
+#include <chrono>
 #include <string>
+#include <utility>
 
-#include <boost/thread.hpp>
-#include <boost/thread/mutex.hpp>
+#include <gz/math/PID.hh>
+#include <gz/sim/Entity.hh>
+#include <gz/sim/Joint.hh>
+#include <gz/sim/Model.hh>
+#include <gz/sim/System.hh>
 
-#include <gazebo/physics/physics.hh>
-#include <gazebo/transport/TransportTypes.hh>
-#include <gazebo/common/Time.hh>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/common/Events.hh>
-#include <gazebo/common/PID.hh>
-
-namespace gazebo
+namespace drcsim_gazebo_plugins
 {
-  /// \addtogroup drc_plugin
-  /// \{
-  class DRCVehiclePlugin : public ModelPlugin
+  /// \brief Simple ackermann-steered vehicle model: pedals, hand wheel,
+  /// hand brake and FNR switch are position-controlled joints; the four
+  /// drive wheels receive gas/brake torque directly. Ported from the
+  /// original Gazebo-Classic DRCVehiclePlugin (drcsim, ROS 1 era) to
+  /// gz-sim's System interface for Gazebo Harmonic.
+  ///
+  /// Design notes vs. the original:
+  /// - The original ODE-specific wheel hard-lock (SetParam stop_erp/
+  ///   stop_cfm toggled every update to rigidly freeze a wheel joint at
+  ///   low speed under heavy braking) has no equivalent in gz-sim's
+  ///   physics-engine-agnostic Joint API and has been dropped; braking is
+  ///   provided entirely by the torque term already present in the
+  ///   original code (brake torque opposing wheel angular velocity),
+  ///   which is physics-engine portable.
+  /// - The public control API (SetVehicleState, SetHandWheelState, etc.)
+  ///   is kept as ordinary C++ methods, not a transport interface: the
+  ///   only consumer in this codebase, DRCVehicleROSPlugin, subclasses
+  ///   this class and calls these methods directly (same pattern as the
+  ///   original), which gz-sim's System interface supports fine via
+  ///   normal C++ inheritance.
+  /// - Set*Limits methods (SetHandWheelLimits, SetGasPedalLimits, etc.)
+  ///   are unused by any consumer in this repository. They previously
+  ///   both re-wrote the physics engine's joint limits *and* updated this
+  ///   plugin's internally cached limits; gz-sim has no well-supported
+  ///   runtime joint-limit-mutation API, so these now only update the
+  ///   plugin's internal cached limits (used for percent-utilization
+  ///   calculations), matching what every actual caller needs.
+  /// - The FNR switch's cosmetic forward/reverse visual fade (published
+  ///   over Gazebo-Classic's internal transport) has been dropped; it had
+  ///   no functional role.
+  class DRCVehiclePlugin
+    : public gz::sim::System,
+      public gz::sim::ISystemConfigure,
+      public gz::sim::ISystemPreUpdate
   {
     /// \enum DirectionType
     /// \brief Direction selector switch type.
@@ -57,23 +86,19 @@ namespace gazebo
               ON    = 1
             };
 
-    /// \brief Constructor.
-    public: DRCVehiclePlugin();
+    public: DRCVehiclePlugin() = default;
 
-    /// \brief Destructor.
-    public: virtual ~DRCVehiclePlugin();
+    public: ~DRCVehiclePlugin() override = default;
 
-    /// \brief Load the controller.
-    public: void Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf);
+    // Documentation inherited
+    public: void Configure(const gz::sim::Entity &_entity,
+                const std::shared_ptr<const sdf::Element> &_sdf,
+                gz::sim::EntityComponentManager &_ecm,
+                gz::sim::EventManager &_eventMgr) override;
 
-    /// \brief Update the controller.
-    private: void UpdateStates();
-
-    private: physics::WorldPtr world;
-    private: physics::ModelPtr model;
-
-    /// Pointer to the update event connection.
-    private: event::ConnectionPtr updateConnection;
+    // Documentation inherited
+    public: void PreUpdate(const gz::sim::UpdateInfo &_info,
+                gz::sim::EntityComponentManager &_ecm) override;
 
     /// \brief Sets DRC Vehicle control inputs, the vehicle internal model
     ///        will decide the overall motion of the vehicle.
@@ -91,8 +116,7 @@ namespace gazebo
                                  DirectionType _direction);
 
     /// \brief Returns the state of the key switch.
-    /// \return Current key state.
-    public: KeyType GetKeyState();
+    public: KeyType GetKeyState() const;
 
     /// \brief Sets the key switch to ON, may become ON_FR if not in NEUTRAL.
     public: void SetKeyOn();
@@ -101,287 +125,264 @@ namespace gazebo
     public: void SetKeyOff();
 
     /// \brief Returns the state of the direction switch.
-    /// \return Current direction state.
-    public: DirectionType GetDirectionState();
+    public: DirectionType GetDirectionState() const;
 
     /// \brief Sets the state of the direction switch.
-    /// \param[in] _direction Desired direction state.
     public: void SetDirectionState(DirectionType _direction);
 
     /// \brief Set the steering wheel angle; this will also update the front
     ///        wheel steering angle.
-    /// \param[in] _position Steering wheel angle in radians.
     public: void SetHandWheelState(double _position);
 
-    /// \brief Sets the lower and upper limits of the steering wheel angle.
-    /// \param[in] _min Lower limit of steering wheel angle (radians).
-    /// \param[in] _max Upper limit of steering wheel angle (radians).
-    public: void SetHandWheelLimits(const math::Angle &_min,
-                                    const math::Angle &_max);
+    /// \brief Sets the plugin's cached lower/upper limits of the steering
+    ///        wheel angle (radians). Does not touch the physics joint.
+    public: void SetHandWheelLimits(double _min, double _max);
 
-    /// \brief Returns the lower and upper limits of the steering wheel angle.
-    /// \param[out] _min Lower steering wheel limit (radians).
-    /// \param[out] _max Upper steering wheel limit (radians).
-    public: void GetHandWheelLimits(math::Angle &_min, math::Angle &_max);
+    /// \brief Returns the cached lower/upper limits of the steering wheel
+    ///        angle (radians).
+    public: void GetHandWheelLimits(double &_min, double &_max) const;
 
     /// \brief Returns the steering wheel angle (rad).
-    public: double GetHandWheelState();
-
-    /// \brief Computes the front wheel angle / steering wheel angle ratio.
-    public: void UpdateHandWheelRatio();
+    public: double GetHandWheelState() const;
 
     /// \brief Returns the front wheel angle / steering wheel angle ratio.
-    public: double GetHandWheelRatio();
+    public: double GetHandWheelRatio() const;
 
-
-    // TODO: fix handbrake documentation
     /// \brief Set the hand-brake angle.
-    /// \param[in] _position Hand-brake angle in radians.
     public: void SetHandBrakeState(double _position);
 
-    /// \brief Sets the lower and upper limits of the hand brake angle.
-    /// \param[in] _min Lower limit of hand-brake angle (radians).
-    /// \param[in] _max Upper limit of hand-brake angle (radians).
-    public: void SetHandBrakeLimits(double &_min, double &_max);
+    /// \brief Sets the plugin's cached lower/upper limits of the hand
+    ///        brake angle (radians). Does not touch the physics joint.
+    public: void SetHandBrakeLimits(double _min, double _max);
 
-    /// \brief Returns the lower and upper limits of the hand-brake angle.
-    /// \param[out] _min Lower hand-brake limit (radians).
-    /// \param[out] _max Upper hand-brake limit (radians).
-    public: void GetHandBrakeLimits(double &_min, double &_max);
+    /// \brief Returns the cached lower/upper limits of the hand-brake
+    ///        angle (radians).
+    public: void GetHandBrakeLimits(double &_min, double &_max) const;
 
-    /// \brief Returns the lower and upper limits of the FNR switch angle.
-    /// \param[out] _min Lower FNR switch brake limit (radians).
-    /// \param[out] _max Upper FNR switch brake limit (radians).
-    public: void GetFNRSwitchLimits(double &_min, double &_max);
+    /// \brief Returns the lower/upper limits of the FNR switch angle
+    ///        (radians).
+    public: void GetFNRSwitchLimits(double &_min, double &_max) const;
 
     /// \brief Returns the hand-brake angle (rad).
-    public: double GetHandBrakeState();
+    public: double GetHandBrakeState() const;
 
     /// \brief Returns the percent utilization of the handbrake relative to
-    ///        joint limits.
-    public: double GetHandBrakePercent();
-
-    /// \brief Update the handBrakeTime variable with the current time.
-    public: void UpdateHandBrakeTime();
+    ///        its cached limits.
+    public: double GetHandBrakePercent() const;
 
     /// \brief Returns the percent utilization of the FNR switch relative to
-    ///        joint limits.
-    public: double GetFNRSwitchPercent();
+    ///        its cached limits.
+    public: double GetFNRSwitchPercent() const;
 
-    /// \brief Update the fnrSwitchTime variable with the current time.
+    /// \brief Record the current sim time as the last time the hand brake
+    ///        was externally commanded (used to debounce the internal
+    ///        bi-stable hand-brake toggle in PreUpdate).
+    public: void UpdateHandBrakeTime();
+
+    /// \brief Set fnrSwitchCmd from the current direction state and record
+    ///        the current sim time as the last time the FNR switch changed
+    ///        (used to debounce the internal bi-stable FNR toggle in
+    ///        PreUpdate).
     public: void UpdateFNRSwitchTime();
 
     /// \brief Specify front wheel orientation in radians (Note: this sets
-    /// the vehicle wheels as oppsed to the steering wheel angle set by
-    /// SetHandWheelState).
-    /// Zero setting results in vehicle traveling in a straight line.
-    /// Positive steering angle results in a left turn in forward motion.
-    /// Negative steering angle results in a right turn in forward motion.
-    /// Setting front wheel steering angle will also update the
-    /// handWheel steering angle.
-    /// \param[in] _position Desired angle of front steered wheels in radians.
+    /// the vehicle wheels as opposed to the steering wheel angle set by
+    /// SetHandWheelState). Zero setting results in vehicle traveling in a
+    /// straight line. Positive steering angle results in a left turn in
+    /// forward motion. Setting front wheel steering angle will also update
+    /// the handWheel steering angle.
     public: void SetSteeredWheelState(double _position);
 
-    /// \brief Sets the lower and upper limits of the steering angle (rad).
-    /// \param[in] _min Lower limit of steered wheel angle (radians).
-    /// \param[in] _max Upper limit of steered wheel angle (radians).
-    public: void SetSteeredWheelLimits(const math::Angle &_min,
-                                       const math::Angle &_max);
+    /// \brief Sets the plugin's cached lower/upper limits of the steered
+    ///        wheel angle (radians). Does not touch the physics joint.
+    public: void SetSteeredWheelLimits(double _min, double _max);
 
     /// \brief Returns the steering angle of the steered wheels (rad).
-    public: double GetSteeredWheelState();
-
-    /// \brief Returns the lower and upper limits of the steering angle
-    ///        of the steered wheels (rad).
-    /// \param[out] _min Lower limit of steered wheel angle (radians).
-    /// \param[out] _max Upper limit of steered wheel angle (radians).
-    public: void GetSteeredWheelLimits(math::Angle &_min, math::Angle &_max);
+    public: double GetSteeredWheelState() const;
 
     /// \brief Specify gas pedal position in meters.
-    /// \param[in] _position Desired gas pedal position in meters.
     public: void SetGasPedalState(double _position);
 
-    /// \brief Specify gas pedal position limits in meters.
-    /// \param[in] _min Lower limit of gas pedal position (meters).
-    /// \param[in] _max Upper limit of gas pedal position (meters).
+    /// \brief Sets the plugin's cached lower/upper limits of the gas pedal
+    ///        position (meters). Does not touch the physics joint.
     public: void SetGasPedalLimits(double _min, double _max);
 
-    /// \brief Returns gas pedal position limits in meters.
-    /// \param[out] _min Lower limit of gas pedal position (meters).
-    /// \param[out] _max Upper limit of gas pedal position (meters).
-    public: void GetGasPedalLimits(double &_min, double &_max);
+    /// \brief Returns the cached lower/upper limits of the gas pedal
+    ///        position (meters).
+    public: void GetGasPedalLimits(double &_min, double &_max) const;
 
     /// \brief Returns the gas pedal position in meters.
-    public: double GetGasPedalState();
+    public: double GetGasPedalState() const;
 
     /// \brief Returns the percent utilization of the gas pedal relative to
-    ///        joint limits.
-    public: double GetGasPedalPercent();
+    ///        its cached limits.
+    public: double GetGasPedalPercent() const;
 
     /// \brief Specify brake pedal position in meters.
-    /// \param[in] _position Desired brake pedal position in meters.
     public: void SetBrakePedalState(double _position);
 
-    /// \brief Sets brake pedal position limits in meters.
-    /// \param[in] _min Lower limit of brake pedal position (meters).
-    /// \param[in] _max Upper limit of brake pedal position (meters).
+    /// \brief Sets the plugin's cached lower/upper limits of the brake
+    ///        pedal position (meters). Does not touch the physics joint.
     public: void SetBrakePedalLimits(double _min, double _max);
 
-    /// \brief Returns brake pedal position limits in meters.
-    /// \param[out] _min Lower limit of brake pedal position (meters).
-    /// \param[out] _max Upper limit of brake pedal position (meters).
-    public: void GetBrakePedalLimits(double &_min, double &_max);
+    /// \brief Returns the cached lower/upper limits of the brake pedal
+    ///        position (meters).
+    public: void GetBrakePedalLimits(double &_min, double &_max) const;
 
     /// \brief Returns the brake pedal position in meters.
-    public: double GetBrakePedalState();
+    public: double GetBrakePedalState() const;
 
-    /// \brief Returns the percent utilization of the brake pedal relative to
-    ///        joint limits.
-    public: double GetBrakePedalPercent();
+    /// \brief Returns the percent utilization of the brake pedal relative
+    ///        to its cached limits.
+    public: double GetBrakePedalPercent() const;
 
-    /// Default plugin init call.
-    public: virtual void Init();
+    private: double GetGasTorqueMultiplier() const;
 
-    private: double GetGasTorqueMultiplier();
-    private: double get_collision_radius(physics::CollisionPtr _collision);
-    private: math::Vector3 get_collision_position(physics::LinkPtr _link,
-                                                  unsigned int _id);
+    /// \brief Recompute the steering wheel / tire angle ratio from the
+    ///        current cached hand wheel and steered wheel limits.
+    private: void UpdateHandWheelRatio();
 
-    /// \brief Transport node used for publishing visual messages.
-    private: transport::NodePtr node;
+    /// \brief Look up a joint entity on #model by SDF-configured joint
+    ///        name, throwing (via gzerr + returning kNullEntity) on
+    ///        failure. `_paramName` is the plugin's SDF parameter that
+    ///        holds the joint name.
+    private: gz::sim::Entity RequireJoint(
+                 const gz::sim::EntityComponentManager &_ecm,
+                 const std::shared_ptr<const sdf::Element> &_sdf,
+                 const std::string &_paramName) const;
 
-    /// \brief Publisher for visual messages for FNR switch.
-    private: transport::PublisherPtr visualPub;
+    /// \brief Radius of the first collision shape on a wheel's child link,
+    ///        assuming a cylinder or sphere collision shape.
+    private: double WheelRadius(const gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::Entity _wheelJoint) const;
 
-    /// \brief Message for FNR switch visual indicating forward.
-    private: msgs::Visual msgForward;
+    /// \brief World position of the first collision shape on a wheel's
+    ///        child link.
+    private: gz::math::Vector3d WheelPosition(
+                 const gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::Entity _wheelJoint) const;
 
-    /// \brief Message for FNR switch visual indicating reverse.
-    private: msgs::Visual msgReverse;
+    /// \brief Read a joint's SDF-configured (lower, upper) position limits.
+    ///        Returns (0, 0) if the joint has no JointAxis component.
+    private: std::pair<double, double> JointLimits(
+                 const gz::sim::EntityComponentManager &_ecm,
+                 gz::sim::Entity _joint) const;
 
-    private: physics::JointPtr gasPedalJoint;
-    private: physics::JointPtr brakePedalJoint;
-    private: physics::JointPtr handWheelJoint;
-    private: physics::JointPtr handBrakeJoint;
-    private: physics::JointPtr fnrSwitchJoint;
-    private: physics::JointPtr flWheelJoint;
-    private: physics::JointPtr frWheelJoint;
-    private: physics::JointPtr blWheelJoint;
-    private: physics::JointPtr brWheelJoint;
-    private: physics::JointPtr flWheelSteeringJoint;
-    private: physics::JointPtr frWheelSteeringJoint;
+    private: gz::sim::Model model{gz::sim::kNullEntity};
 
-    /// \brief Name of visual for FNR switch to indicate forward.
-    private: std::string fnrSwitchF;
+    private: gz::sim::Entity gasPedalJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity brakePedalJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity handWheelJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity handBrakeJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity fnrSwitchJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity flWheelJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity frWheelJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity blWheelJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity brWheelJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity flWheelSteeringJoint{gz::sim::kNullEntity};
+    private: gz::sim::Entity frWheelSteeringJoint{gz::sim::kNullEntity};
 
-    /// \brief Name of visual for FNR switch to indicate reverse.
-    private: std::string fnrSwitchR;
+    private: bool validConfig{false};
+
+    /// \brief Current simulation time, refreshed at the top of every
+    ///        PreUpdate; used by UpdateHandBrakeTime/UpdateFNRSwitchTime.
+    private: std::chrono::steady_clock::duration currentSimTime{0};
 
     /// \brief The gas/brake pedals and handbrake apply torque to the wheels
     ///        based on their joint position as a percentage of the total
     ///        range of travel. The constant jointDeadbandPercent adds a small
     ///        deadband between the actual joint limits and the 0% and 100%
     ///        values reported by Get[GasPedal|BrakePedal|HandBrake]Percent()
-    private: const double jointDeadbandPercent;
+    private: const double jointDeadbandPercent{0.02};
 
     // SDF parameters
-    private: double frontTorque;
-    private: double backTorque;
-    private: double frontBrakeTorque;
-    private: double backBrakeTorque;
-    private: double tireAngleRange;
-    private: double maxSpeed;
-    private: double maxSteer;
-    private: double aeroLoad;
+    private: double frontTorque{0.0};
+    private: double backTorque{2000.0};
+    private: double frontBrakeTorque{2000.0};
+    private: double backBrakeTorque{2000.0};
+    private: double maxSpeed{10.0};
+    private: double maxSteer{0.6};
 
     /// \brief Minimum braking percentage, used to approximate
     ///        rolling resistance and engine braking.
-    private: double minBrakePercent;
+    private: double minBrakePercent{0.02};
 
-    private: double steeringRatio;
-    private: double pedalForce;
-    private: double handWheelForce;
-    private: double handBrakeForce;
-    private: double fnrSwitchForce;
-    private: double steeredWheelForce;
+    private: double steeringRatio{1.0};
+    private: double pedalForce{10.0};
+    private: double handWheelForce{1.0};
+    private: double handBrakeForce{10.0};
+    private: double fnrSwitchForce{0.2};
+    private: double steeredWheelForce{5000.0};
 
-    protected: double gasPedalCmd;
-    protected: double brakePedalCmd;
-    protected: double handWheelCmd;
-    protected: double handBrakeCmd;
-    protected: double fnrSwitchCmd;
-    private: double flWheelCmd;
-    private: double frWheelCmd;
-    private: double blWheelCmd;
-    private: double brWheelCmd;
-    private: double flWheelSteeringCmd;
-    private: double frWheelSteeringCmd;
+    private: double gasPedalCmd{0.0};
+    private: double brakePedalCmd{0.0};
+    private: double handWheelCmd{0.0};
+    private: double handBrakeCmd{0.0};
+    private: double fnrSwitchCmd{0.0};
+    private: double flWheelSteeringCmd{0.0};
+    private: double frWheelSteeringCmd{0.0};
 
-    private: common::PID gasPedalPID;
-    private: common::PID brakePedalPID;
-    private: common::PID handWheelPID;
-    private: common::PID handBrakePID;
-    private: common::PID fnrSwitchPID;
-    private: common::PID flWheelSteeringPID;
-    private: common::PID frWheelSteeringPID;
+    private: gz::math::PID gasPedalPID;
+    private: gz::math::PID brakePedalPID;
+    private: gz::math::PID handWheelPID;
+    private: gz::math::PID handBrakePID;
+    private: gz::math::PID fnrSwitchPID;
+    private: gz::math::PID flWheelSteeringPID;
+    private: gz::math::PID frWheelSteeringPID;
 
-    /// \brief Time of last update, used to detect resets.
-    private: common::Time lastTime;
+    /// \brief Time since this vehicle was last put into or taken out of
+    ///        hand-brake-engaged state, used to debounce manual toggling.
+    private: std::chrono::steady_clock::duration handBrakeTime{0};
 
-    /// \brief Time of last teleoperation command for hand brake.
-    private: common::Time handBrakeTime;
-
-    /// \brief Time of last teleoperation command for FNR switch.
-    private: common::Time fnrSwitchTime;
+    /// \brief Time since the FNR switch was last toggled, used to debounce
+    ///        manual toggling.
+    private: std::chrono::steady_clock::duration fnrSwitchTime{0};
 
     /// joint information from model
-    private: double gasPedalHigh;
-    private: double gasPedalLow;
-    private: double gasPedalRange;
-    private: double brakePedalHigh;
-    private: double brakePedalLow;
-    private: double brakePedalRange;
-    private: double handWheelHigh;
-    private: double handWheelLow;
-    private: double handWheelRange;
-    private: double handBrakeHigh;
-    private: double handBrakeLow;
-    private: double handBrakeRange;
-    private: double fnrSwitchHigh;
-    private: double fnrSwitchLow;
-    private: double fnrSwitchRange;
-    private: double wheelRadius;
-    private: double flWheelRadius;
-    private: double frWheelRadius;
-    private: double blWheelRadius;
-    private: double brWheelRadius;
-    private: double wheelbaseLength;
-    private: double frontTrackWidth;
-    private: double backTrackWidth;
+    private: double gasPedalHigh{0.0};
+    private: double gasPedalLow{0.0};
+    private: double brakePedalHigh{0.0};
+    private: double brakePedalLow{0.0};
+    private: double handWheelHigh{0.0};
+    private: double handWheelLow{0.0};
+    private: double handWheelRange{1.0};
+    private: double handBrakeHigh{0.0};
+    private: double handBrakeLow{0.0};
+    private: double fnrSwitchHigh{0.0};
+    private: double fnrSwitchLow{0.0};
+    private: double flWheelSteeringHigh{0.0};
+    private: double flWheelSteeringLow{0.0};
+    private: double frWheelSteeringHigh{0.0};
+    private: double frWheelSteeringLow{0.0};
+    private: double flWheelRadius{0.1};
+    private: double frWheelRadius{0.1};
+    private: double blWheelRadius{0.1};
+    private: double brWheelRadius{0.1};
+    private: double wheelbaseLength{1.0};
+    private: double frontTrackWidth{1.0};
 
     /// state of vehicle
-    private: KeyType keyState;
-    private: DirectionType directionState;
-    private: double handWheelState;
-    private: double handBrakeState;
-    private: double fnrSwitchState;
-    private: double flSteeringState;
-    private: double frSteeringState;
-    private: double gasPedalState;
-    private: double brakePedalState;
-    private: double flWheelState;
-    private: double frWheelState;
-    private: double blWheelState;
-    private: double brWheelState;
+    private: KeyType keyState{ON};
+    private: DirectionType directionState{FORWARD};
+    private: double handWheelState{0.0};
+    private: double handBrakeState{0.0};
+    private: double fnrSwitchState{0.0};
+    private: double flSteeringState{0.0};
+    private: double frSteeringState{0.0};
+    private: double gasPedalState{0.0};
+    private: double brakePedalState{0.0};
+    private: double flWheelState{0.0};
+    private: double frWheelState{0.0};
+    private: double blWheelState{0.0};
+    private: double brWheelState{0.0};
 
-    /// PID gains
-    private: double fLwheelSteeringPgain;
-    private: double fRwheelSteeringPgain;
-    private: double fLwheelSteeringIgain;
-    private: double fRwheelSteeringIgain;
-    private: double fLwheelSteeringDgain;
-    private: double fRwheelSteeringDgain;
+    /// PID gains for the front-left/front-right steering joints
+    private: double fLwheelSteeringPgain{0.0};
+    private: double fRwheelSteeringPgain{0.0};
+    private: double fLwheelSteeringIgain{0.0};
+    private: double fRwheelSteeringIgain{0.0};
+    private: double fLwheelSteeringDgain{0.0};
+    private: double fRwheelSteeringDgain{0.0};
   };
-/// \}
 }
 #endif
