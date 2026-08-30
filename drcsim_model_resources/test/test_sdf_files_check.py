@@ -14,8 +14,8 @@
 
 """Lint-style check: every world and model.sdf file must pass `gz sdf --check`."""
 
-import subprocess
 from pathlib import Path
+import subprocess
 
 import pytest
 
