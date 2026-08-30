@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Publish the Sandia Hand's robot_description via robot_state_publisher.
+"""
+Publish the Sandia Hand's robot_description via robot_state_publisher.
 
 Note: the original ROS 1 upload.launch pointed at
 robots/sandia_hand.urdf.xacro, which does not exist (the actual file is

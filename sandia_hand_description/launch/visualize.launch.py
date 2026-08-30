@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Visualize the Sandia Hand in RViz with an interactive joint state GUI.
+"""
+Visualize the Sandia Hand in RViz with an interactive joint state GUI.
 
 See upload.launch.py for why this targets sandia_hand_left_on_box.urdf.xacro
 rather than the original (broken) robots/sandia_hand.urdf.xacro reference.

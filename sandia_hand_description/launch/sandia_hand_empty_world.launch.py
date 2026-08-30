@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Start an empty gz-sim world and spawn the Sandia Hand into it.
+"""
+Start an empty gz-sim world and spawn the Sandia Hand into it.
 
 ROS 2 equivalent of the old gazebo_worlds/empty_world_paused.launch include
 + sandia_hand.launch include, using ros_gz_sim's gz_sim.launch.py.

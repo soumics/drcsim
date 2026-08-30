@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Publish robot_description and spawn the Sandia Hand into a running gz-sim world.
+"""
+Publish robot_description and spawn the Sandia Hand into a running gz-sim world.
 
 ROS 2 equivalent of the old `gazebo/spawn_model` node: `ros_gz_sim create`
 spawns from the robot_description topic instead of a ROS 1 param.
