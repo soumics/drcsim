@@ -104,6 +104,5 @@
       <link_name>atlas::l_lleg</link_name>
       <link_name>atlas::r_lleg</link_name>
     </plugin>
-    </link>
   </model>
 </sdf>

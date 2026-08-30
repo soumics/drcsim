@@ -2061,7 +2061,7 @@
       </physics>
     </joint>
 
-    <joint name="world" type="universal">
+    <joint name="world_joint" type="universal">
       <child>nozzle</child>
       <parent>world</parent>
       <axis>

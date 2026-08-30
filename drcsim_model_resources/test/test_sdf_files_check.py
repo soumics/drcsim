@@ -29,13 +29,26 @@ MODEL_SDF_FILES = sorted((PACKAGE_DIR / 'gazebo_models').glob('*/model.sdf'))
 # gz-sim's own runtime when it starts a server -- the standalone `gz sdf`
 # CLI never sets one up, with or without GZ_SIM_RESOURCE_PATH set (that
 # was tried and confirmed not to help: identical failures either way).
-# So every <include><uri>model://...</uri></include> a world file has
-# reliably fails with "Error Code 14: ... Unable to find uri[...]" here,
-# regardless of whether the referenced model actually exists -- that's a
-# limitation of checking a file in isolation, not a defect in the file.
-# Treat *only* Error Code 14 as expected/tolerated; any other error code
-# indicates a genuine structural/schema/version problem and still fails.
+# So every <include><uri>model://...</uri></include> a file has reliably
+# fails with "Error Code 14: ... Unable to find uri[...]" here, regardless
+# of whether the referenced model actually exists -- that's a limitation
+# of checking a file in isolation, not a defect in the file.
 UNRESOLVED_URI_ERROR_CODE = 14
+
+# A model that's purely a nested-model wrapper (an <include> of an
+# external model plus a <plugin>, e.g. drc_vehicle/drc_vehicle_xp900
+# composing in polaris_ranger_ev/xp900 and attaching the vehicle control
+# plugin -- a legitimate, common SDF pattern) can't have its own links
+# counted either, once the include it depends on fails to resolve for the
+# same reason as above: the checker can't see inside an unresolved
+# include to find the links it would otherwise contribute. That surfaces
+# as secondary errors 17 (no link) and 25 (frame graph), *alongside* 14 --
+# so those two are only tolerated together with 14, never on their own
+# (a file with 17/25 and no 14 has a genuine standalone missing-link bug,
+# like block_angle_steps/block_level_steps did before they were fixed to
+# have <static>true</static>, matching their sibling block_angle_base).
+UNRESOLVED_INCLUDE_CASCADE_CODES = {17, 25}
+
 ERROR_CODE_RE = re.compile(r'Error Code (\d+):')
 
 
@@ -48,12 +61,15 @@ def run_gz_sdf_check(sdf_file: Path) -> None:
         return
 
     error_codes = {int(code) for code in ERROR_CODE_RE.findall(result.stderr)}
-    unexpected_codes = error_codes - {UNRESOLVED_URI_ERROR_CODE}
+    tolerated = {UNRESOLVED_URI_ERROR_CODE}
+    if UNRESOLVED_URI_ERROR_CODE in error_codes:
+        tolerated |= UNRESOLVED_INCLUDE_CASCADE_CODES
+    unexpected_codes = error_codes - tolerated
     assert not unexpected_codes and error_codes, (
         f'gz sdf --check failed on {sdf_file.relative_to(PACKAGE_DIR)} '
         f'with error code(s) {sorted(error_codes) or "none (unparsed)"}, '
-        f'not just the expected unresolved-uri code '
-        f'{UNRESOLVED_URI_ERROR_CODE}:\n'
+        f'not just the tolerated unresolved-include code(s) '
+        f'{sorted(tolerated)}:\n'
         f'stdout: {result.stdout}\nstderr: {result.stderr}'
     )
 

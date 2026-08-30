@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<gazebo version='1.2'>
+<sdf version="1.4">
   <model name="powerplant">
     <pose>350 65 10.2 0 0 0</pose>
 
@@ -234,4 +234,4 @@
       <handle_joint>handle_left_joint</handle_joint>
     </plugin>
   </model>
-</gazebo>
+</sdf>
