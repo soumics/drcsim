@@ -1,0 +1,2 @@
+prepend-non-duplicate;GZ_SIM_RESOURCE_PATH;share/drcsim_model_resources/gazebo_models
+prepend-non-duplicate;GZ_SIM_RESOURCE_PATH;share/drcsim_model_resources/worlds
