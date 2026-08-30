@@ -14,6 +14,7 @@
 
 """Lint-style check: every world and model.sdf file must pass `gz sdf --check`."""
 
+import os
 from pathlib import Path
 import subprocess
 
@@ -24,11 +25,25 @@ PACKAGE_DIR = Path(__file__).resolve().parent.parent
 WORLD_FILES = sorted((PACKAGE_DIR / 'worlds').glob('*.world'))
 MODEL_SDF_FILES = sorted((PACKAGE_DIR / 'gazebo_models').glob('*/model.sdf'))
 
+# `gz sdf --check` run standalone (no gz-sim server around it) never gets
+# GZ_SIM_RESOURCE_PATH wired up automatically -- that's set up by gz-sim's
+# own runtime, not by the generic sdformat CLI -- so every model:// URI
+# fails to resolve ("Tried to use callback in sdf::findFile(), but the
+# callback is empty") unless we point it at the models directory
+# ourselves, matching this package's own GZ_SIM_RESOURCE_PATH environment
+# hook (hooks/drcsim_model_resources.dsv.in).
+GZ_SDF_CHECK_ENV = dict(os.environ)
+GZ_SDF_CHECK_ENV['GZ_SIM_RESOURCE_PATH'] = os.pathsep.join(
+    filter(None, [
+        str(PACKAGE_DIR / 'gazebo_models'),
+        os.environ.get('GZ_SIM_RESOURCE_PATH', ''),
+    ]))
+
 
 def run_gz_sdf_check(sdf_file: Path) -> None:
     result = subprocess.run(
         ['gz', 'sdf', '--check', str(sdf_file)],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=GZ_SDF_CHECK_ENV,
     )
     assert result.returncode == 0, (
         f'gz sdf --check failed on {sdf_file.relative_to(PACKAGE_DIR)}:\n'

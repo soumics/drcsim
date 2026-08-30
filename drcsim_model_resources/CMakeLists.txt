@@ -61,10 +61,14 @@ if(BUILD_TESTING)
   # AtlasSimInterface_*/ shim source is OSRF's own legacy vendored code
   # (not maintained under this repo's ROS 2 style), so the C++ linters
   # need an explicit EXCLUDE rather than the blanket auto-discovery.
-  set(AMENT_LINT_EXCLUDE
-    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_1.1.1"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_2.10.2"
-    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_3.0.2"
+  # EXCLUDE needs actual file paths, not directory paths -- passing the
+  # three AtlasSimInterface_*/ directories directly was silently ignored
+  # (confirmed: files inside them still got scanned and flagged), so
+  # enumerate every file under them instead.
+  file(GLOB_RECURSE AMENT_LINT_EXCLUDE
+    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_1.1.1/*"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_2.10.2/*"
+    "${CMAKE_CURRENT_SOURCE_DIR}/AtlasSimInterface_3.0.2/*"
   )
 
   find_package(ament_cmake_copyright REQUIRED)
