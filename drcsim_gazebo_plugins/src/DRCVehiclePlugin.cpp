@@ -19,6 +19,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -44,6 +45,16 @@ namespace
   double Clamp(double _value, double _min, double _max)
   {
     return std::max(_min, std::min(_value, _max));
+  }
+
+  // std::optional::value_or() only substitutes its fallback when the
+  // optional itself is empty; if Position()/Velocity() returns a
+  // *present but empty* vector (e.g. before the physics engine has
+  // populated the component), value_or(...)[0] indexes an empty vector --
+  // undefined behavior. Guard both conditions explicitly.
+  double FirstOrZero(const std::optional<std::vector<double>> &_values)
+  {
+    return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
   }
 }
 
@@ -227,29 +238,18 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   gz::sim::Joint blWheel(this->blWheelJoint);
   gz::sim::Joint brWheel(this->brWheelJoint);
 
-  this->handWheelState = handWheel.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->handBrakeState = handBrake.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->fnrSwitchState = fnrSwitch.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->brakePedalState = brakePedal.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->gasPedalState = gasPedal.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->flSteeringState = flWheelSteering.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->frSteeringState = frWheelSteering.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
+  this->handWheelState = FirstOrZero(handWheel.Position(_ecm));
+  this->handBrakeState = FirstOrZero(handBrake.Position(_ecm));
+  this->fnrSwitchState = FirstOrZero(fnrSwitch.Position(_ecm));
+  this->brakePedalState = FirstOrZero(brakePedal.Position(_ecm));
+  this->gasPedalState = FirstOrZero(gasPedal.Position(_ecm));
+  this->flSteeringState = FirstOrZero(flWheelSteering.Position(_ecm));
+  this->frSteeringState = FirstOrZero(frWheelSteering.Position(_ecm));
 
-  this->flWheelState = flWheel.Velocity(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->frWheelState = frWheel.Velocity(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->blWheelState = blWheel.Velocity(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->brWheelState = brWheel.Velocity(_ecm).value_or(
-      std::vector<double>{0.0})[0];
+  this->flWheelState = FirstOrZero(flWheel.Velocity(_ecm));
+  this->frWheelState = FirstOrZero(frWheel.Velocity(_ecm));
+  this->blWheelState = FirstOrZero(blWheel.Velocity(_ecm));
+  this->brWheelState = FirstOrZero(brWheel.Velocity(_ecm));
 
   std::chrono::duration<double> dtDuration(dt);
 

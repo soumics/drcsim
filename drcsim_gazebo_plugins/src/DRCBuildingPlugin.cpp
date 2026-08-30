@@ -18,6 +18,7 @@
 #include "drcsim_gazebo_plugins/DRCBuildingPlugin.hpp"
 
 #include <chrono>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -26,6 +27,19 @@
 #include <gz/sim/Joint.hh>
 
 using drcsim_gazebo_plugins::DRCBuildingPlugin;
+
+namespace
+{
+// std::optional::value_or() only substitutes its fallback when the
+// optional itself is empty; if Position() returns a *present but empty*
+// vector (e.g. before the physics engine has populated the component),
+// value_or(...)[0] indexes an empty vector -- undefined behavior. Guard
+// both conditions explicitly.
+double FirstOrZero(const std::optional<std::vector<double>> &_values)
+{
+  return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
+}
+}  // namespace
 
 //////////////////////////////////////////////////
 void DRCBuildingPlugin::Configure(const gz::sim::Entity &_entity,
@@ -92,10 +106,8 @@ void DRCBuildingPlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   gz::sim::Joint doorJointWrapper(this->doorJoint);
   gz::sim::Joint handleJointWrapper(this->handleJoint);
 
-  this->doorState = doorJointWrapper.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
-  this->handleState = handleJointWrapper.Position(_ecm).value_or(
-      std::vector<double>{0.0})[0];
+  this->doorState = FirstOrZero(doorJointWrapper.Position(_ecm));
+  this->handleState = FirstOrZero(handleJointWrapper.Position(_ecm));
 
   // PID (position) door
   double doorError = this->doorState - this->doorCmd;
