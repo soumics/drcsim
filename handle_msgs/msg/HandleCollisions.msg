@@ -4,6 +4,6 @@
 # not all the sensors were included, but only the one which were addressed at the moment
 
 # Currently only used for time stamp.  
-Header header
+std_msgs/Header header
 
 Collision[] collisions

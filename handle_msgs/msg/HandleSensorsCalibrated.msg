@@ -4,7 +4,7 @@
 # not all the sensors were included, but only the one which were addressed at the moment
 
 # Currently only used for time stamp.
-Header header
+std_msgs/Header header
 
 # The tactile array for each finger.  In units of kPa.
 # [F1, F2, F3]

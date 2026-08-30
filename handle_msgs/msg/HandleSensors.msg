@@ -9,7 +9,7 @@
 
 # Currently only used for time stamp.  Time stamp set from Overo's clock.
 # Not guaranteed to be in sync with the current time.
-Header header
+std_msgs/Header header
 
 # The hall effect sensor on the finger motors.
 # 24 counts per motor revolution x 300 motor revolutions for one full spindle

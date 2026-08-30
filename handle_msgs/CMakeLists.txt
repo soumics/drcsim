@@ -7,6 +7,7 @@ endif()
 
 find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -17,7 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/HandleControl.msg"
   "msg/HandleSensors.msg"
   "msg/HandleSensorsCalibrated.msg"
-  DEPENDENCIES geometry_msgs
+  DEPENDENCIES std_msgs geometry_msgs
 )
 
 ament_export_dependencies(rosidl_default_runtime)
@@ -34,7 +35,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_handle_msgs test/test_handle_msgs.cpp)
   target_link_libraries(test_handle_msgs "${cpp_typesupport_target}")
-  ament_target_dependencies(test_handle_msgs rclcpp geometry_msgs)
+  ament_target_dependencies(test_handle_msgs rclcpp std_msgs geometry_msgs)
 endif()
 
 ament_package()
