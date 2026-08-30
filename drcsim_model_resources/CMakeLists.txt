@@ -77,11 +77,11 @@ if(BUILD_TESTING)
   find_package(ament_cmake_cppcheck REQUIRED)
   ament_cppcheck(EXCLUDE ${AMENT_LINT_EXCLUDE})
 
-  find_package(ament_cmake_cpplint REQUIRED)
-  ament_cpplint(EXCLUDE ${AMENT_LINT_EXCLUDE})
-
-  find_package(ament_cmake_uncrustify REQUIRED)
-  ament_uncrustify(EXCLUDE ${AMENT_LINT_EXCLUDE})
+  # Not running ament_cpplint/ament_uncrustify here: with the vendored
+  # AtlasSimInterface_*/ source excluded, this package has zero remaining
+  # C++ files of our own for either tool to check, and both treat "0
+  # files scanned" as a failure (confirmed: ament_uncrustify errored with
+  # "No files found" / return code 1) rather than a trivial pass.
 
   find_package(ament_cmake_lint_cmake REQUIRED)
   ament_lint_cmake()
