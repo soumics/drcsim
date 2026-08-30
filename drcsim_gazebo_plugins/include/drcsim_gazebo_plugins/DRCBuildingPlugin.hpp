@@ -43,39 +43,43 @@ class DRCBuildingPlugin
     public gz::sim::ISystemConfigure,
     public gz::sim::ISystemPreUpdate
 {
-  public: DRCBuildingPlugin() = default;
-  public: ~DRCBuildingPlugin() override = default;
+public:
+  DRCBuildingPlugin() = default;
+  ~DRCBuildingPlugin() override = default;
 
   // Documentation inherited
-  public: void Configure(const gz::sim::Entity &_entity,
-              const std::shared_ptr<const sdf::Element> &_sdf,
-              gz::sim::EntityComponentManager &_ecm,
-              gz::sim::EventManager &_eventMgr) override;
+  void Configure(
+    const gz::sim::Entity & _entity,
+    const std::shared_ptr<const sdf::Element> & _sdf,
+    gz::sim::EntityComponentManager & _ecm,
+    gz::sim::EventManager & _eventMgr) override;
 
   // Documentation inherited
-  public: void PreUpdate(const gz::sim::UpdateInfo &_info,
-              gz::sim::EntityComponentManager &_ecm) override;
+  void PreUpdate(
+    const gz::sim::UpdateInfo & _info,
+    gz::sim::EntityComponentManager & _ecm) override;
 
   /// \brief Sets DRC Building door position (rad) given door Joint name.
   ///   - zero angle means door is closed
   ///   - door hinge axis points upwards, which means
   ///     negative angle swings door counter-clockwise if view
   ///     from above.
-  public: void SetDoorState(double _angle);
+  void SetDoorState(double _angle);
   /// \brief Returns DRC Building door position (rad).
-  public: double GetDoorState() const;
+  double GetDoorState() const;
 
-  private: gz::sim::Model model{gz::sim::kNullEntity};
-  private: gz::sim::Entity doorJoint{gz::sim::kNullEntity};
-  private: gz::sim::Entity handleJoint{gz::sim::kNullEntity};
-  private: bool validConfig{false};
+private:
+  gz::sim::Model model{gz::sim::kNullEntity};
+  gz::sim::Entity doorJoint{gz::sim::kNullEntity};
+  gz::sim::Entity handleJoint{gz::sim::kNullEntity};
+  bool validConfig{false};
 
-  private: gz::math::PID doorPID;
-  private: double doorState{0.0};
-  private: double doorCmd{0.0};
-  private: gz::math::PID handlePID;
-  private: double handleState{0.0};
-  private: double handleCmd{0.0};
+  gz::math::PID doorPID;
+  double doorState{0.0};
+  double doorCmd{0.0};
+  gz::math::PID handlePID;
+  double handleState{0.0};
+  double handleCmd{0.0};
 };
 }  // namespace drcsim_gazebo_plugins
 #endif  // DRCSIM_GAZEBO_PLUGINS__DRCBUILDINGPLUGIN_HPP_

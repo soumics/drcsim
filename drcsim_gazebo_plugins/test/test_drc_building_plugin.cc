@@ -34,43 +34,42 @@
 // build tree, before install).
 namespace
 {
-struct PluginPathSetter
-{
-  PluginPathSetter()
+  struct PluginPathSetter
+  {
+    PluginPathSetter()
   {
     setenv("GZ_SIM_SYSTEM_PLUGIN_PATH", PLUGIN_BUILD_DIR, 1);
-  }
-};
-PluginPathSetter g_pluginPathSetter;
+    }
+  };
+  PluginPathSetter g_pluginPathSetter;
 }  // namespace
 
 TEST(DRCBuildingPluginTest, DoorHoldsNearZeroUnderDefaultCommand)
 {
   gz::sim::TestFixture fixture(
-      std::string(TEST_WORLD_DIR) + "/door_test.sdf");
+    std::string(TEST_WORLD_DIR) + "/door_test.sdf");
 
   double doorPosition = 0.0;
   bool sawDoorJoint = false;
 
   fixture.OnPostUpdate(
-      [&](const gz::sim::UpdateInfo &,
-          const gz::sim::EntityComponentManager &_ecm)
-      {
-        gz::sim::World world(gz::sim::worldEntity(_ecm));
-        gz::sim::Entity modelEntity =
-            world.ModelByName(_ecm, "door_test_model");
-        ASSERT_NE(modelEntity, gz::sim::kNullEntity);
+    [&](const gz::sim::UpdateInfo &,
+    const gz::sim::EntityComponentManager & _ecm)
+  {
+    gz::sim::World world(gz::sim::worldEntity(_ecm));
+    gz::sim::Entity modelEntity =
+    world.ModelByName(_ecm, "door_test_model");
+    ASSERT_NE(modelEntity, gz::sim::kNullEntity);
 
-        gz::sim::Model model(modelEntity);
-        gz::sim::Entity doorJoint = model.JointByName(_ecm, "door_joint");
-        ASSERT_NE(doorJoint, gz::sim::kNullEntity);
+    gz::sim::Model model(modelEntity);
+    gz::sim::Entity doorJoint = model.JointByName(_ecm, "door_joint");
+    ASSERT_NE(doorJoint, gz::sim::kNullEntity);
 
-        auto position = gz::sim::Joint(doorJoint).Position(_ecm);
-        if (position && !position->empty())
-        {
-          doorPosition = (*position)[0];
-          sawDoorJoint = true;
-        }
+    auto position = gz::sim::Joint(doorJoint).Position(_ecm);
+    if (position && !position->empty()) {
+      doorPosition = (*position)[0];
+      sawDoorJoint = true;
+    }
       });
 
   fixture.Finalize();

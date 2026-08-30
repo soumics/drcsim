@@ -35,22 +35,23 @@
 // build tree, before install).
 namespace
 {
-struct PluginPathSetter
-{
-  PluginPathSetter()
+  struct PluginPathSetter
+  {
+    PluginPathSetter()
   {
     setenv("GZ_SIM_SYSTEM_PLUGIN_PATH", PLUGIN_BUILD_DIR, 1);
-  }
-};
-PluginPathSetter g_pluginPathSetter;
+    }
+  };
+  PluginPathSetter g_pluginPathSetter;
 
-double JointPosition(const gz::sim::EntityComponentManager &_ecm,
+  double JointPosition(
+    const gz::sim::EntityComponentManager & _ecm,
     gz::sim::Entity _joint)
-{
-  auto position = gz::sim::Joint(_joint).Position(_ecm);
-  return (position && !position->empty()) ? (*position)[0]
-                                           : std::nan("");
-}
+  {
+    auto position = gz::sim::Joint(_joint).Position(_ecm);
+    return (position && !position->empty()) ? (*position)[0] :
+           std::nan("");
+  }
 
 }  // namespace
 
@@ -63,7 +64,7 @@ double JointPosition(const gz::sim::EntityComponentManager &_ecm,
 TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
 {
   gz::sim::TestFixture fixture(
-      std::string(TEST_WORLD_DIR) + "/vehicle_test.sdf");
+    std::string(TEST_WORLD_DIR) + "/vehicle_test.sdf");
 
   bool sawJoints = false;
   double steerPosition = 0.0;
@@ -71,29 +72,29 @@ TEST(DRCVehiclePluginTest, SettlesNearNeutralUnderDefaultCommand)
   double flWheelPosition = 0.0;
 
   fixture.OnPostUpdate(
-      [&](const gz::sim::UpdateInfo &,
-          const gz::sim::EntityComponentManager &_ecm)
-      {
-        gz::sim::World world(gz::sim::worldEntity(_ecm));
-        gz::sim::Entity modelEntity =
-            world.ModelByName(_ecm, "vehicle_test_model");
-        ASSERT_NE(modelEntity, gz::sim::kNullEntity);
-        gz::sim::Model model(modelEntity);
+    [&](const gz::sim::UpdateInfo &,
+    const gz::sim::EntityComponentManager & _ecm)
+  {
+    gz::sim::World world(gz::sim::worldEntity(_ecm));
+    gz::sim::Entity modelEntity =
+    world.ModelByName(_ecm, "vehicle_test_model");
+    ASSERT_NE(modelEntity, gz::sim::kNullEntity);
+    gz::sim::Model model(modelEntity);
 
-        gz::sim::Entity steerJoint =
-            model.JointByName(_ecm, "steering_wheel_joint");
-        gz::sim::Entity gasJoint =
-            model.JointByName(_ecm, "gas_pedal_joint");
-        gz::sim::Entity flWheelJoint =
-            model.JointByName(_ecm, "fl_wheel_joint");
-        ASSERT_NE(steerJoint, gz::sim::kNullEntity);
-        ASSERT_NE(gasJoint, gz::sim::kNullEntity);
-        ASSERT_NE(flWheelJoint, gz::sim::kNullEntity);
+    gz::sim::Entity steerJoint =
+    model.JointByName(_ecm, "steering_wheel_joint");
+    gz::sim::Entity gasJoint =
+    model.JointByName(_ecm, "gas_pedal_joint");
+    gz::sim::Entity flWheelJoint =
+    model.JointByName(_ecm, "fl_wheel_joint");
+    ASSERT_NE(steerJoint, gz::sim::kNullEntity);
+    ASSERT_NE(gasJoint, gz::sim::kNullEntity);
+    ASSERT_NE(flWheelJoint, gz::sim::kNullEntity);
 
-        steerPosition = JointPosition(_ecm, steerJoint);
-        gasPosition = JointPosition(_ecm, gasJoint);
-        flWheelPosition = JointPosition(_ecm, flWheelJoint);
-        sawJoints = true;
+    steerPosition = JointPosition(_ecm, steerJoint);
+    gasPosition = JointPosition(_ecm, gasJoint);
+    flWheelPosition = JointPosition(_ecm, flWheelJoint);
+    sawJoints = true;
       });
 
   fixture.Finalize();

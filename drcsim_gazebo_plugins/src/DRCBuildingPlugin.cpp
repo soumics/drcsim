@@ -35,49 +35,45 @@ namespace
 // vector (e.g. before the physics engine has populated the component),
 // value_or(...)[0] indexes an empty vector -- undefined behavior. Guard
 // both conditions explicitly.
-double FirstOrZero(const std::optional<std::vector<double>> &_values)
+double FirstOrZero(const std::optional<std::vector<double>> & _values)
 {
   return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
 }
 }  // namespace
 
 //////////////////////////////////////////////////
-void DRCBuildingPlugin::Configure(const gz::sim::Entity &_entity,
-    const std::shared_ptr<const sdf::Element> &_sdf,
-    gz::sim::EntityComponentManager &_ecm,
-    gz::sim::EventManager &/*_eventMgr*/)
+void DRCBuildingPlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &/*_eventMgr*/)
 {
   this->model = gz::sim::Model(_entity);
-  if (!this->model.Valid(_ecm))
-  {
+  if (!this->model.Valid(_ecm)) {
     gzerr << "DRCBuildingPlugin should be attached to a model entity. "
           << "Failed to initialize.\n";
     return;
   }
 
-  if (!_sdf->HasElement("door_joint"))
-  {
+  if (!_sdf->HasElement("door_joint")) {
     gzerr << "<door_joint> is required, but was not found.\n";
     return;
   }
   std::string doorJointName = _sdf->Get<std::string>("door_joint");
   this->doorJoint = this->model.JointByName(_ecm, doorJointName);
-  if (this->doorJoint == gz::sim::kNullEntity)
-  {
+  if (this->doorJoint == gz::sim::kNullEntity) {
     gzerr << "<door_joint>" << doorJointName
           << "</door_joint> does not exist\n";
     return;
   }
 
-  if (!_sdf->HasElement("handle_joint"))
-  {
+  if (!_sdf->HasElement("handle_joint")) {
     gzerr << "<handle_joint> is required, but was not found.\n";
     return;
   }
   std::string handleJointName = _sdf->Get<std::string>("handle_joint");
   this->handleJoint = this->model.JointByName(_ecm, handleJointName);
-  if (this->handleJoint == gz::sim::kNullEntity)
-  {
+  if (this->handleJoint == gz::sim::kNullEntity) {
     gzerr << "<handle_joint>" << handleJointName
           << "</handle_joint> does not exist\n";
     return;
@@ -93,15 +89,18 @@ void DRCBuildingPlugin::Configure(const gz::sim::Entity &_entity,
 }
 
 //////////////////////////////////////////////////
-void DRCBuildingPlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
-    gz::sim::EntityComponentManager &_ecm)
+void DRCBuildingPlugin::PreUpdate(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
 {
-  if (_info.paused || !this->validConfig)
+  if (_info.paused || !this->validConfig) {
     return;
+  }
 
   std::chrono::duration<double> dt(_info.dt);
-  if (dt.count() <= 0)
+  if (dt.count() <= 0) {
     return;
+  }
 
   gz::sim::Joint doorJointWrapper(this->doorJoint);
   gz::sim::Joint handleJointWrapper(this->handleJoint);

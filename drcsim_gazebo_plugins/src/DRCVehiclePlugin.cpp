@@ -42,31 +42,31 @@ using drcsim_gazebo_plugins::DRCVehiclePlugin;
 namespace
 {
   /// \brief Clamp helper matching the old gazebo::math::clamp(value, min, max).
-  double Clamp(double _value, double _min, double _max)
-  {
-    return std::max(_min, std::min(_value, _max));
-  }
+double Clamp(double _value, double _min, double _max)
+{
+  return std::max(_min, std::min(_value, _max));
+}
 
   // std::optional::value_or() only substitutes its fallback when the
   // optional itself is empty; if Position()/Velocity() returns a
   // *present but empty* vector (e.g. before the physics engine has
   // populated the component), value_or(...)[0] indexes an empty vector --
   // undefined behavior. Guard both conditions explicitly.
-  double FirstOrZero(const std::optional<std::vector<double>> &_values)
-  {
-    return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
-  }
+double FirstOrZero(const std::optional<std::vector<double>> & _values)
+{
+  return (_values && !_values->empty()) ? (*_values)[0] : 0.0;
+}
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
-    const std::shared_ptr<const sdf::Element> &_sdf,
-    gz::sim::EntityComponentManager &_ecm,
-    gz::sim::EventManager &/*_eventMgr*/)
+void DRCVehiclePlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &/*_eventMgr*/)
 {
   this->model = gz::sim::Model(_entity);
-  if (!this->model.Valid(_ecm))
-  {
+  if (!this->model.Valid(_ecm)) {
     gzerr << "DRCVehiclePlugin should be attached to a model entity. "
           << "Failed to initialize.\n";
     return;
@@ -82,21 +82,21 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
   this->blWheelJoint = this->RequireJoint(_ecm, _sdf, "back_left_wheel");
   this->brWheelJoint = this->RequireJoint(_ecm, _sdf, "back_right_wheel");
   this->flWheelSteeringJoint =
-      this->RequireJoint(_ecm, _sdf, "front_left_wheel_steering");
+    this->RequireJoint(_ecm, _sdf, "front_left_wheel_steering");
   this->frWheelSteeringJoint =
-      this->RequireJoint(_ecm, _sdf, "front_right_wheel_steering");
+    this->RequireJoint(_ecm, _sdf, "front_right_wheel_steering");
 
   if (this->gasPedalJoint == gz::sim::kNullEntity ||
-      this->brakePedalJoint == gz::sim::kNullEntity ||
-      this->handWheelJoint == gz::sim::kNullEntity ||
-      this->handBrakeJoint == gz::sim::kNullEntity ||
-      this->fnrSwitchJoint == gz::sim::kNullEntity ||
-      this->flWheelJoint == gz::sim::kNullEntity ||
-      this->frWheelJoint == gz::sim::kNullEntity ||
-      this->blWheelJoint == gz::sim::kNullEntity ||
-      this->brWheelJoint == gz::sim::kNullEntity ||
-      this->flWheelSteeringJoint == gz::sim::kNullEntity ||
-      this->frWheelSteeringJoint == gz::sim::kNullEntity)
+    this->brakePedalJoint == gz::sim::kNullEntity ||
+    this->handWheelJoint == gz::sim::kNullEntity ||
+    this->handBrakeJoint == gz::sim::kNullEntity ||
+    this->fnrSwitchJoint == gz::sim::kNullEntity ||
+    this->flWheelJoint == gz::sim::kNullEntity ||
+    this->frWheelJoint == gz::sim::kNullEntity ||
+    this->blWheelJoint == gz::sim::kNullEntity ||
+    this->brWheelJoint == gz::sim::kNullEntity ||
+    this->flWheelSteeringJoint == gz::sim::kNullEntity ||
+    this->frWheelSteeringJoint == gz::sim::kNullEntity)
   {
     // RequireJoint already logged the specific failure.
     return;
@@ -119,15 +119,15 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
   // Put some deadband at the end of range for gas and brake pedals,
   // hand brake and FNR switch.
   auto applyDeadband = [this, &_ecm](gz::sim::Entity _joint,
-      double &_high, double &_low)
-  {
-    auto [lower, upper] = this->JointLimits(_ecm, _joint);
-    double jointCenter = (upper + lower) / 2.0;
-    _high = jointCenter +
+    double & _high, double & _low)
+    {
+      auto [lower, upper] = this->JointLimits(_ecm, _joint);
+      double jointCenter = (upper + lower) / 2.0;
+      _high = jointCenter +
         (1 - this->jointDeadbandPercent) * (upper - jointCenter);
-    _low = jointCenter +
+      _low = jointCenter +
         (1 - this->jointDeadbandPercent) * (lower - jointCenter);
-  };
+    };
 
   applyDeadband(this->gasPedalJoint, this->gasPedalHigh, this->gasPedalLow);
   applyDeadband(this->brakePedalJoint,
@@ -141,11 +141,11 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
   // Hand wheel and steered wheel limits are not deadbanded -- they drive
   // the steering ratio, not a percent-utilization readout.
   std::tie(this->handWheelLow, this->handWheelHigh) =
-      this->JointLimits(_ecm, this->handWheelJoint);
+    this->JointLimits(_ecm, this->handWheelJoint);
   std::tie(this->flWheelSteeringLow, this->flWheelSteeringHigh) =
-      this->JointLimits(_ecm, this->flWheelSteeringJoint);
+    this->JointLimits(_ecm, this->flWheelSteeringJoint);
   std::tie(this->frWheelSteeringLow, this->frWheelSteeringHigh) =
-      this->JointLimits(_ecm, this->frWheelSteeringJoint);
+    this->JointLimits(_ecm, this->frWheelSteeringJoint);
 
   this->UpdateFNRSwitchTime();
 
@@ -153,24 +153,24 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
   this->frontTorque = _sdf->Get<double>("front_torque", 0.0).first;
   this->backTorque = _sdf->Get<double>("back_torque", 2000.0).first;
   this->frontBrakeTorque =
-      _sdf->Get<double>("front_brake_torque", 2000.0).first;
+    _sdf->Get<double>("front_brake_torque", 2000.0).first;
   this->backBrakeTorque =
-      _sdf->Get<double>("back_brake_torque", 2000.0).first;
+    _sdf->Get<double>("back_brake_torque", 2000.0).first;
   this->maxSpeed = _sdf->Get<double>("max_speed", 10.0).first;
   this->maxSteer = _sdf->Get<double>("max_steer", 0.6).first;
   this->minBrakePercent = _sdf->Get<double>("min_brake_percent", 0.02).first;
   this->fLwheelSteeringPgain =
-      _sdf->Get<double>("flwheel_steering_p_gain", 0.0).first;
+    _sdf->Get<double>("flwheel_steering_p_gain", 0.0).first;
   this->fRwheelSteeringPgain =
-      _sdf->Get<double>("frwheel_steering_p_gain", 0.0).first;
+    _sdf->Get<double>("frwheel_steering_p_gain", 0.0).first;
   this->fLwheelSteeringIgain =
-      _sdf->Get<double>("flwheel_steering_i_gain", 0.0).first;
+    _sdf->Get<double>("flwheel_steering_i_gain", 0.0).first;
   this->fRwheelSteeringIgain =
-      _sdf->Get<double>("frwheel_steering_i_gain", 0.0).first;
+    _sdf->Get<double>("frwheel_steering_i_gain", 0.0).first;
   this->fLwheelSteeringDgain =
-      _sdf->Get<double>("flwheel_steering_d_gain", 0.0).first;
+    _sdf->Get<double>("flwheel_steering_d_gain", 0.0).first;
   this->fRwheelSteeringDgain =
-      _sdf->Get<double>("frwheel_steering_d_gain", 0.0).first;
+    _sdf->Get<double>("frwheel_steering_d_gain", 0.0).first;
 
   this->UpdateHandWheelRatio();
 
@@ -214,15 +214,18 @@ void DRCVehiclePlugin::Configure(const gz::sim::Entity &_entity,
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
-    gz::sim::EntityComponentManager &_ecm)
+void DRCVehiclePlugin::PreUpdate(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
 {
-  if (_info.paused || !this->validConfig)
+  if (_info.paused || !this->validConfig) {
     return;
+  }
 
   double dt = std::chrono::duration<double>(_info.dt).count();
-  if (dt <= 0)
+  if (dt <= 0) {
     return;
+  }
 
   this->currentSimTime = _info.simTime;
 
@@ -267,16 +270,16 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   double handBrakeCmdEps = 0.01;
   auto simTimeSec = std::chrono::duration<double>(this->currentSimTime).count();
   auto handBrakeTimeSec =
-      std::chrono::duration<double>(this->handBrakeTime).count();
+    std::chrono::duration<double>(this->handBrakeTime).count();
   if (this->handBrakeCmd < (this->handBrakeLow + handBrakeCmdEps) &&
-      this->GetHandBrakePercent() > (0.5 + handBrakeHysteresis) &&
-      (simTimeSec - handBrakeTimeSec) > 0.5)
+    this->GetHandBrakePercent() > (0.5 + handBrakeHysteresis) &&
+    (simTimeSec - handBrakeTimeSec) > 0.5)
   {
     this->handBrakeCmd = this->handBrakeHigh;
     gzlog << "Hand brake manually enabled\n";
   } else if (this->handBrakeCmd > (this->handBrakeHigh - handBrakeCmdEps) &&
-      this->GetHandBrakePercent() < (0.5 - handBrakeHysteresis) &&
-      (simTimeSec - handBrakeTimeSec) > 0.5)
+    this->GetHandBrakePercent() < (0.5 - handBrakeHysteresis) &&
+    (simTimeSec - handBrakeTimeSec) > 0.5)
   {
     this->handBrakeCmd = this->handBrakeLow;
     gzlog << "Hand brake manually disabled\n";
@@ -292,17 +295,17 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   double fnrSwitchHysteresis = handBrakeHysteresis;
   double fnrSwitchCmdEps = handBrakeCmdEps;
   auto fnrSwitchTimeSec =
-      std::chrono::duration<double>(this->fnrSwitchTime).count();
+    std::chrono::duration<double>(this->fnrSwitchTime).count();
   if (this->fnrSwitchCmd < (this->fnrSwitchLow + fnrSwitchCmdEps) &&
-      this->GetFNRSwitchPercent() > (0.5 + fnrSwitchHysteresis) &&
-      (simTimeSec - fnrSwitchTimeSec) > 0.5)
+    this->GetFNRSwitchPercent() > (0.5 + fnrSwitchHysteresis) &&
+    (simTimeSec - fnrSwitchTimeSec) > 0.5)
   {
     this->SetDirectionState(REVERSE);
     this->UpdateFNRSwitchTime();
     gzlog << "FNR switch manually set to reverse\n";
   } else if (this->fnrSwitchCmd > (this->fnrSwitchHigh - fnrSwitchCmdEps) &&
-      this->GetFNRSwitchPercent() < (0.5 - fnrSwitchHysteresis) &&
-      (simTimeSec - fnrSwitchTimeSec) > 0.5)
+    this->GetFNRSwitchPercent() < (0.5 - fnrSwitchHysteresis) &&
+    (simTimeSec - fnrSwitchTimeSec) > 0.5)
   {
     this->SetDirectionState(FORWARD);
     this->UpdateFNRSwitchTime();
@@ -347,14 +350,14 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
   double gasPercent = this->GetGasPedalPercent();
   double gasMultiplier = this->GetGasTorqueMultiplier();
   double flGasTorque = 0, frGasTorque = 0, blGasTorque = 0, brGasTorque = 0;
-  if ((std::fabs(this->flWheelState * this->flWheelRadius) < this->maxSpeed)
-    && (std::fabs(this->frWheelState * this->frWheelRadius) < this->maxSpeed))
+  if ((std::fabs(this->flWheelState * this->flWheelRadius) < this->maxSpeed) &&
+    (std::fabs(this->frWheelState * this->frWheelRadius) < this->maxSpeed))
   {
     flGasTorque = gasPercent * this->frontTorque * gasMultiplier;
     frGasTorque = gasPercent * this->frontTorque * gasMultiplier;
   }
-  if ((std::fabs(this->blWheelState * this->blWheelRadius) < this->maxSpeed)
-    && (std::fabs(this->brWheelState * this->brWheelRadius) < this->maxSpeed))
+  if ((std::fabs(this->blWheelState * this->blWheelRadius) < this->maxSpeed) &&
+    (std::fabs(this->brWheelState * this->brWheelRadius) < this->maxSpeed))
   {
     blGasTorque = gasPercent * this->backTorque * gasMultiplier;
     brGasTorque = gasPercent * this->backTorque * gasMultiplier;
@@ -362,19 +365,19 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
 
   // Brake pedal, hand-brake torque.
   double brakePercent =
-      this->GetBrakePedalPercent() + this->GetHandBrakePercent();
+    this->GetBrakePedalPercent() + this->GetHandBrakePercent();
   brakePercent = Clamp(brakePercent, this->minBrakePercent, 1.0);
   // Map brake torques to individual wheels, opposing wheel spin direction.
   // Below the smoothing speed in rad/s, reduce applied brake torque.
   double smoothingSpeed = 0.5;
   double flBrakeTorque = -brakePercent * this->frontBrakeTorque *
-      Clamp(this->flWheelState / smoothingSpeed, -1.0, 1.0);
+    Clamp(this->flWheelState / smoothingSpeed, -1.0, 1.0);
   double frBrakeTorque = -brakePercent * this->frontBrakeTorque *
-      Clamp(this->frWheelState / smoothingSpeed, -1.0, 1.0);
+    Clamp(this->frWheelState / smoothingSpeed, -1.0, 1.0);
   double blBrakeTorque = -brakePercent * this->backBrakeTorque *
-      Clamp(this->blWheelState / smoothingSpeed, -1.0, 1.0);
+    Clamp(this->blWheelState / smoothingSpeed, -1.0, 1.0);
   double brBrakeTorque = -brakePercent * this->backBrakeTorque *
-      Clamp(this->brWheelState / smoothingSpeed, -1.0, 1.0);
+    Clamp(this->brWheelState / smoothingSpeed, -1.0, 1.0);
 
   flWheel.SetForce(_ecm, {flGasTorque + flBrakeTorque});
   frWheel.SetForce(_ecm, {frGasTorque + frBrakeTorque});
@@ -383,9 +386,10 @@ void DRCVehiclePlugin::PreUpdate(const gz::sim::UpdateInfo &_info,
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::SetVehicleState(double _handWheelPosition,
-    double _gasPedalPosition, double _brakePedalPosition,
-    double _handBrakePosition, KeyType _key, DirectionType _direction)
+void DRCVehiclePlugin::SetVehicleState(
+  double _handWheelPosition,
+  double _gasPedalPosition, double _brakePedalPosition,
+  double _handBrakePosition, KeyType _key, DirectionType _direction)
 {
   // This function isn't currently looking at joint limits.
   this->handWheelCmd = _handWheelPosition;
@@ -412,8 +416,9 @@ DRCVehiclePlugin::KeyType DRCVehiclePlugin::GetKeyState() const
 void DRCVehiclePlugin::SetDirectionState(DirectionType _direction)
 {
   this->directionState = _direction;
-  if (_direction == NEUTRAL && this->keyState == ON_FR)
+  if (_direction == NEUTRAL && this->keyState == ON_FR) {
     this->keyState = ON;
+  }
 }
 
 //////////////////////////////////////////////////
@@ -425,21 +430,22 @@ void DRCVehiclePlugin::SetKeyOff()
 //////////////////////////////////////////////////
 void DRCVehiclePlugin::SetKeyOn()
 {
-  if (this->directionState == NEUTRAL)
+  if (this->directionState == NEUTRAL) {
     this->keyState = ON;
-  else
+  } else {
     this->keyState = ON_FR;
+  }
 }
 
 //////////////////////////////////////////////////
 double DRCVehiclePlugin::GetGasTorqueMultiplier() const
 {
-  if (this->keyState == ON)
-  {
-    if (this->directionState == FORWARD)
+  if (this->keyState == ON) {
+    if (this->directionState == FORWARD) {
       return 1.0;
-    else if (this->directionState == REVERSE)
+    } else if (this->directionState == REVERSE) {
       return -1.0;
+    }
   }
   return 0;
 }
@@ -448,7 +454,7 @@ double DRCVehiclePlugin::GetGasTorqueMultiplier() const
 void DRCVehiclePlugin::SetHandBrakeState(double _position)
 {
   this->handBrakeCmd =
-      Clamp(_position, this->handBrakeLow, this->handBrakeHigh);
+    Clamp(_position, this->handBrakeLow, this->handBrakeHigh);
 }
 
 //////////////////////////////////////////////////
@@ -459,7 +465,7 @@ void DRCVehiclePlugin::SetHandBrakeLimits(double _min, double _max)
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::GetHandBrakeLimits(double &_min, double &_max) const
+void DRCVehiclePlugin::GetHandBrakeLimits(double & _min, double & _max) const
 {
   _max = this->handBrakeHigh;
   _min = this->handBrakeLow;
@@ -475,7 +481,7 @@ double DRCVehiclePlugin::GetHandBrakeState() const
 void DRCVehiclePlugin::SetHandWheelState(double _position)
 {
   this->handWheelCmd =
-      Clamp(_position, this->handWheelLow, this->handWheelHigh);
+    Clamp(_position, this->handWheelLow, this->handWheelHigh);
 }
 
 //////////////////////////////////////////////////
@@ -487,7 +493,7 @@ void DRCVehiclePlugin::SetHandWheelLimits(double _min, double _max)
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::GetHandWheelLimits(double &_min, double &_max) const
+void DRCVehiclePlugin::GetHandWheelLimits(double & _min, double & _max) const
 {
   _max = this->handWheelHigh;
   _min = this->handWheelLow;
@@ -546,7 +552,7 @@ double DRCVehiclePlugin::GetSteeredWheelState() const
 void DRCVehiclePlugin::SetGasPedalState(double _position)
 {
   this->gasPedalCmd =
-      Clamp(_position, this->gasPedalLow, this->gasPedalHigh);
+    Clamp(_position, this->gasPedalLow, this->gasPedalHigh);
 }
 
 //////////////////////////////////////////////////
@@ -557,7 +563,7 @@ void DRCVehiclePlugin::SetGasPedalLimits(double _min, double _max)
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::GetGasPedalLimits(double &_min, double &_max) const
+void DRCVehiclePlugin::GetGasPedalLimits(double & _min, double & _max) const
 {
   _max = this->gasPedalHigh;
   _min = this->gasPedalLow;
@@ -573,32 +579,32 @@ double DRCVehiclePlugin::GetGasPedalState() const
 double DRCVehiclePlugin::GetGasPedalPercent() const
 {
   return Clamp((this->gasPedalState - this->gasPedalLow) /
-      (this->gasPedalHigh - this->gasPedalLow), 0.0, 1.0);
+           (this->gasPedalHigh - this->gasPedalLow), 0.0, 1.0);
 }
 
 //////////////////////////////////////////////////
 double DRCVehiclePlugin::GetBrakePedalPercent() const
 {
   return Clamp((this->brakePedalState - this->brakePedalLow) /
-      (this->brakePedalHigh - this->brakePedalLow), 0.0, 1.0);
+           (this->brakePedalHigh - this->brakePedalLow), 0.0, 1.0);
 }
 
 //////////////////////////////////////////////////
 double DRCVehiclePlugin::GetHandBrakePercent() const
 {
   return Clamp((this->handBrakeState - this->handBrakeLow) /
-      (this->handBrakeHigh - this->handBrakeLow), 0.0, 1.0);
+           (this->handBrakeHigh - this->handBrakeLow), 0.0, 1.0);
 }
 
 //////////////////////////////////////////////////
 double DRCVehiclePlugin::GetFNRSwitchPercent() const
 {
   return Clamp((this->fnrSwitchState - this->fnrSwitchLow) /
-      (this->fnrSwitchHigh - this->fnrSwitchLow), 0.0, 1.0);
+           (this->fnrSwitchHigh - this->fnrSwitchLow), 0.0, 1.0);
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::GetFNRSwitchLimits(double &_min, double &_max) const
+void DRCVehiclePlugin::GetFNRSwitchLimits(double & _min, double & _max) const
 {
   _max = this->fnrSwitchHigh;
   _min = this->fnrSwitchLow;
@@ -617,8 +623,7 @@ void DRCVehiclePlugin::UpdateFNRSwitchTime()
   // publishing to Gazebo-Classic's internal transport; that was purely
   // cosmetic and has been dropped in this port.
   this->fnrSwitchTime = this->currentSimTime;
-  switch (this->directionState)
-  {
+  switch (this->directionState) {
     case FORWARD:
       this->fnrSwitchCmd = this->fnrSwitchLow;
       break;
@@ -638,7 +643,7 @@ void DRCVehiclePlugin::UpdateFNRSwitchTime()
 void DRCVehiclePlugin::SetBrakePedalState(double _position)
 {
   this->brakePedalCmd =
-      Clamp(_position, this->brakePedalLow, this->brakePedalHigh);
+    Clamp(_position, this->brakePedalLow, this->brakePedalHigh);
 }
 
 //////////////////////////////////////////////////
@@ -649,7 +654,7 @@ void DRCVehiclePlugin::SetBrakePedalLimits(double _min, double _max)
 }
 
 //////////////////////////////////////////////////
-void DRCVehiclePlugin::GetBrakePedalLimits(double &_min, double &_max) const
+void DRCVehiclePlugin::GetBrakePedalLimits(double & _min, double & _max) const
 {
   _max = this->brakePedalHigh;
   _min = this->brakePedalLow;
@@ -663,19 +668,17 @@ double DRCVehiclePlugin::GetBrakePedalState() const
 
 //////////////////////////////////////////////////
 gz::sim::Entity DRCVehiclePlugin::RequireJoint(
-    const gz::sim::EntityComponentManager &_ecm,
-    const std::shared_ptr<const sdf::Element> &_sdf,
-    const std::string &_paramName) const
+  const gz::sim::EntityComponentManager & _ecm,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  const std::string & _paramName) const
 {
-  if (!_sdf->HasElement(_paramName))
-  {
+  if (!_sdf->HasElement(_paramName)) {
     gzerr << "<" << _paramName << "> is required, but was not found.\n";
     return gz::sim::kNullEntity;
   }
   std::string jointName = _sdf->Get<std::string>(_paramName);
   gz::sim::Entity joint = this->model.JointByName(_ecm, jointName);
-  if (joint == gz::sim::kNullEntity)
-  {
+  if (joint == gz::sim::kNullEntity) {
     gzerr << "<" << _paramName << ">" << jointName
           << "</" << _paramName << "> does not exist\n";
   }
@@ -684,55 +687,63 @@ gz::sim::Entity DRCVehiclePlugin::RequireJoint(
 
 //////////////////////////////////////////////////
 std::pair<double, double> DRCVehiclePlugin::JointLimits(
-    const gz::sim::EntityComponentManager &_ecm,
-    gz::sim::Entity _joint) const
+  const gz::sim::EntityComponentManager & _ecm,
+  gz::sim::Entity _joint) const
 {
   auto axisComp = _ecm.Component<gz::sim::components::JointAxis>(_joint);
-  if (!axisComp)
+  if (!axisComp) {
     return {0.0, 0.0};
+  }
   return {axisComp->Data().Lower(), axisComp->Data().Upper()};
 }
 
 //////////////////////////////////////////////////
 double DRCVehiclePlugin::WheelRadius(
-    const gz::sim::EntityComponentManager &_ecm,
-    gz::sim::Entity _wheelJoint) const
+  const gz::sim::EntityComponentManager & _ecm,
+  gz::sim::Entity _wheelJoint) const
 {
   auto childLinkNameComp =
-      _ecm.Component<gz::sim::components::ChildLinkName>(_wheelJoint);
-  if (!childLinkNameComp)
+    _ecm.Component<gz::sim::components::ChildLinkName>(_wheelJoint);
+  if (!childLinkNameComp) {
     return 0.0;
+  }
   gz::sim::Entity link =
-      this->model.LinkByName(_ecm, childLinkNameComp->Data());
+    this->model.LinkByName(_ecm, childLinkNameComp->Data());
   auto collisions = gz::sim::Link(link).Collisions(_ecm);
-  if (collisions.empty())
+  if (collisions.empty()) {
     return 0.0;
+  }
   auto geomComp =
-      _ecm.Component<gz::sim::components::Geometry>(collisions[0]);
-  if (!geomComp)
+    _ecm.Component<gz::sim::components::Geometry>(collisions[0]);
+  if (!geomComp) {
     return 0.0;
-  const sdf::Geometry &geom = geomComp->Data();
-  if (geom.CylinderShape())
+  }
+  const sdf::Geometry & geom = geomComp->Data();
+  if (geom.CylinderShape()) {
     return geom.CylinderShape()->Radius();
-  if (geom.SphereShape())
+  }
+  if (geom.SphereShape()) {
     return geom.SphereShape()->Radius();
+  }
   return 0.0;
 }
 
 //////////////////////////////////////////////////
 gz::math::Vector3d DRCVehiclePlugin::WheelPosition(
-    const gz::sim::EntityComponentManager &_ecm,
-    gz::sim::Entity _wheelJoint) const
+  const gz::sim::EntityComponentManager & _ecm,
+  gz::sim::Entity _wheelJoint) const
 {
   auto childLinkNameComp =
-      _ecm.Component<gz::sim::components::ChildLinkName>(_wheelJoint);
-  if (!childLinkNameComp)
+    _ecm.Component<gz::sim::components::ChildLinkName>(_wheelJoint);
+  if (!childLinkNameComp) {
     return gz::math::Vector3d::Zero;
+  }
   gz::sim::Entity link =
-      this->model.LinkByName(_ecm, childLinkNameComp->Data());
+    this->model.LinkByName(_ecm, childLinkNameComp->Data());
   auto collisions = gz::sim::Link(link).Collisions(_ecm);
-  if (collisions.empty())
+  if (collisions.empty()) {
     return gz::math::Vector3d::Zero;
+  }
   return gz::sim::worldPose(collisions[0], _ecm).Pos();
 }
 
