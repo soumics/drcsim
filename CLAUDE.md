@@ -74,10 +74,13 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
    pre-existing broken path in `upload.launch`/`visualize.launch` — pointed at
    `robots/sandia_hand.urdf.xacro`, which doesn't exist — retargeted at
    `sandia_hand_left_on_box.urdf.xacro`)
-8. 🟡 `drcsim_gazebo_plugins` — **in progress, see "Current state" below.** Full
-   architectural rewrite (Gazebo Classic `ModelPlugin` → gz-sim `System`
-   `ISystemConfigure`/`ISystemPreUpdate`), not a mechanical port. Builds; tests added
-   but not yet passing (debugging in progress — see below).
+8. ✅ `drcsim_gazebo_plugins` — **done, 100% (8/8 checks: 2 gtests +
+   copyright/cppcheck/cpplint/lint_cmake/uncrustify/xmllint).** Full architectural
+   rewrite (Gazebo Classic `ModelPlugin` → gz-sim `System`
+   `ISystemConfigure`/`ISystemPreUpdate`), not a mechanical port — the hardest
+   package in this migration. See "drcsim_gazebo_plugins — design decisions and
+   lessons" below for everything learned; keep it as reference for Tier 2's
+   `drcsim_gazebo_ros_plugins` (same API family, same gotchas will recur).
 9. ⬜ `drcsim_model_resources` — **not started.** Worlds/models/SDF version upgrade,
    plus proprietary AtlasSimInterface binaries (v1.1.1/2.10.2/3.0.2) — will very likely
    not link against Jazzy's toolchain; need a decision on rebuild vs. drop vs. stub
@@ -91,7 +94,7 @@ DRCVehiclePlugin — see below), then Tier 3 `drcsim_gazebo` (launch/config/test
 150 old rostest files). `drcsim_tutorials/*` (rosbuild, proprietary SDK) — scope
 undecided, leaning toward dropping.
 
-## `drcsim_gazebo_plugins` — current state and open issue
+## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`
 (~1000 lines, pedals/wheel/handbrake/FNR + 4 drive wheels — the single largest,
@@ -139,19 +142,69 @@ i.e. Harmonic component versions) — trust these over any earlier assumption:**
   `GZ_ADD_PLUGIN_ALIAS` from `<gz/plugin/Register.hh>` — all confirmed working as
   used in the current source.
 
-**Open issue right now (mid-fix when this file was written):** ran
-`ament_uncrustify --reformat` to fix a large style-diff (brace placement,
-`Type & name` spacing) — it introduced a **syntax error**
-(`return {0.0, 0.0}` missing trailing `;` around `DRCVehiclePlugin.cpp:695`,
-inside `JointLimits()`) and **reintroduced blank lines after `public:`/`private:`
-labels** in both headers (which `cpplint` explicitly rejects) — uncrustify's and
-cpplint's default configs aren't fully mutually consistent for this repo's
-inline-label style. Next steps: read the current (reformatted) file contents fresh
-from disk, fix the missing semicolon, strip the reintroduced blank lines after
-visibility labels (without undoing uncrustify's other formatting), rebuild, retest.
-The two gtests (`test_drc_building_plugin`, `test_drc_vehicle_plugin`) had a real
-segfault (now fixed, see `FirstOrZero` above) — need to confirm they pass after
-these remaining fixes land.
+**`ament_uncrustify` vs `ament_cpplint`: they disagree with each other, repeatedly.**
+Running `ament_uncrustify --reformat` blindly is *not* safe — it fixed one style
+issue and simultaneously reintroduced others cpplint rejects, and even introduced
+a genuine syntax error once (dropped a `;` after a wrapped `return {0.0, 0.0}`).
+Patterns that came up, and how each was resolved for good (i.e. verified both
+tools pass simultaneously afterward):
+- Inline per-member `public: Foo();` labels: uncrustify rewrites these to
+  standalone `public:` labels *with a blank line after*, which cpplint rejects.
+  Fix: use conventional **grouped** visibility sections (one `public:`, one
+  `private:` per class) instead of a label per member — sidesteps the conflict
+  entirely, don't reintroduce per-member labels.
+- Anonymous `namespace { ... }` blocks: uncrustify wants their contents
+  **indented**; cpplint's "do not indent within a namespace" rejects that
+  regardless of named/anonymous. Fix: don't use an anonymous namespace for
+  file-local helpers in a single-TU `.cc`/`.cpp` — just mark them `static`
+  (internal linkage) at file scope instead.
+- A multi-line-condition `else if (...)`: cpplint wants the block's opening
+  brace attached to the end of the last condition line; uncrustify wants it on
+  its own new line — direct opposite. If the two branches are provably mutually
+  exclusive (check the actual conditions before assuming this applies), just
+  drop the `else` and use two independent `if`s — identical behavior, and there's
+  no `else` left for the tools to disagree about the bracing of.
+- **After any structural rewrite, re-verify with a fresh `colcon test` rather
+  than assuming a fix is complete** — this package went through ~5 build/test
+  round trips after the initial compile succeeded, several of them from
+  uncrustify's own reformat introducing new problems.
+
+**A real segfault, and what it taught about `Position()`/`Velocity()`:**
+`.value_or(std::vector<double>{0.0})[0]` on a `gz::sim::Joint::Position()`/
+`Velocity()` result is **undefined behavior** if the returned optional is
+*present but contains an empty vector* — `value_or()` only substitutes its
+fallback when the optional itself is `nullopt`, not when it holds an empty
+vector. gdb confirmed this: fault address squarely inside the plugin's own
+`PreUpdate` (not inside gz-sim), the shape of an inlined out-of-bounds vector
+index. Fix pattern used everywhere now: a small `FirstOrZero()` helper that
+checks `values && !values->empty()` before indexing `[0]`. **Apply this pattern
+to any future `Joint::Position()`/`Velocity()` read** — don't reintroduce the
+unsafe `.value_or(...)[0]` shortcut.
+
+**Testing a gz-sim `System` plugin:** use `gz::sim::TestFixture` (from
+`<gz/sim/TestFixture.hh>`) with a minimal hand-written SDF world under
+`test/worlds/*.sdf`. Key mechanics that worked:
+- Point `GZ_SIM_SYSTEM_PLUGIN_PATH` at the plugin's own build output directory
+  via `setenv()` in the test binary itself (a file-scope `static` struct whose
+  constructor calls `setenv`, using a `PLUGIN_BUILD_DIR` compile definition set
+  via CMake's `$<TARGET_FILE_DIR:...>` generator expression) — this makes the
+  test self-contained, not dependent on the package's environment hook having
+  been sourced (it hasn't, straight out of the build tree before install).
+- `TestFixture` only gives black-box `EntityComponentManager` access via
+  `OnPostUpdate`/etc. callbacks — there's no way to get a pointer to the loaded
+  plugin instance itself, so you can't call its public C++ API directly from a
+  test. Only default/SDF-driven behavior is testable this way.
+- **Anchor any test-world model that shouldn't be moving to `world` via a fixed
+  joint** (`<joint type="fixed"><parent>world</parent><child>...</child></joint>`).
+  Forgetting this cost a full debug cycle: an unconstrained model free-falls
+  under gravity for the whole test run, and that free-fall couples into any
+  attached joint as spurious motion, confounding a test that's meant to check
+  controller behavior, not rigid-body dynamics.
+- A joint's `Position()`/`Velocity()` will only ever be populated if something
+  called `EnablePositionCheck`/`EnableVelocityCheck` on it — check what the
+  *plugin itself* actually enables (not what seems obviously relevant) before
+  writing a test assertion that reads either one; a continuously-rotating wheel
+  joint's plugin only enables velocity, never position, for example.
 
 ## Established per-package conversion pattern (message packages)
 
