@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<gazebo version='1.2'>
+<sdf version="1.4">
   <model name='golf_cart'>
     <link name='chassis'>
       <!-- mesh width 51.1811 -->
@@ -716,4 +716,4 @@
       <aero_load>0.1</aero_load>
     </plugin>
   </model>
-</gazebo>
+</sdf>
