@@ -1,9 +1,9 @@
 # All of the sensors on the HANDLE hand.
 #
 # NOTE: In general, the order of the arrays is: [F1, F2, F3, F3 Ant., Spread].
-# Where: F1 is analogous to your right hand index finger, F2 is analogous to 
-# your right middle finger, F3 is analogous to your right thumb, F3 Ant. is 
-# the antagonistic motor for F3, and Spread is the motor which controls the 
+# Where: F1 is analogous to your right hand index finger, F2 is analogous to
+# your right middle finger, F3 is analogous to your right thumb, F3 Ant. is
+# the antagonistic motor for F3, and Spread is the motor which controls the
 # rotation of F1 and F2.
 #
 
@@ -11,64 +11,64 @@
 # Not guaranteed to be in sync with the current time.
 Header header
 
-# The hall effect sensor on the finger motors.  
+# The hall effect sensor on the finger motors.
 # 24 counts per motor revolution x 300 motor revolutions for one full spindle
-# rotation.  
+# rotation.
 # 3500 to put finger at approx. 90 degrees
 # 6000 to close finger gently
 # 7000 to close finger tightly
 #
 # [F1, F2, F3, F3 Ant.]
-int32[4] motorHallEncoder
+int32[4] motor_hall_encoder
 
 # The temperature of the finger motor windings, in Celsius.
 #
 # [F1, F2, F3, F3 Ant.]
-float32[4] motorWindingTemp
+float32[4] motor_winding_temp
 
 # The air temperature as measured inside the housing, in Celsius.
-float32 airTemp
+float32 air_temp
 
 # The motor velocity in RPM.  (Hall encoder ticks per minute)
 #
 # [F1, F2, F3, F3 Ant.]
-int32[4] motorVelocity
+int32[4] motor_velocity
 
 # The temperature of the motor housing, in Celsius.
 # Note that the housing temp for the Spread motor is not populated, so will
 # not have a logical value.
 #
 # [F1, F2, F3, F3 Ant., Spread]
-float32[5] motorHousingTemp
+float32[5] motor_housing_temp
 
 # The motor current in amps.
 #
 # [F1, F2, F3, F3 Ant., Spread]
-float32[5] motorCurrent
+float32[5] motor_current
 
 # The tactile array for each finger.  In units of ADC counts.
 # Note there are 12 proximal and 10 distal sensors.
 #
 # [F1, F2, F3]
-Finger[3] fingerTactile
+Finger[3] finger_tactile
 
 # The tactile temperature array for each finger, in Celsius.
 # Note there are 12 proximal and 10 distal sensors.
 #
 # [F1, F2, F3]
-Finger[3] fingerTactileTemp
+Finger[3] finger_tactile_temp
 
 # The tactile array for the palm.  In units of ADC counts.
-float32[48] palmTactile
+float32[48] palm_tactile
 
 # The tactile temperature array for the palm, in Celsius.
-float32[48] palmTactileTemp
+float32[48] palm_tactile_temp
 
 # The encoder on the F1 / F2 rotation. 8.533 ticks per degree.
 # 3072 ticks per 180 degree rotation. (not possible).
 # 768 ticks to rotate the fingers 90 degrees for a "T" grasp.
 # 512 ticks to rotate the fingers 60 degrees for a spherical grasp.
-int32 fingerSpread
+int32 finger_spread
 
 # The proximal joint angle.  Approx 2.84 ticks per degree.
 # 1024 ticks per full revolution. (not possible)
@@ -77,18 +77,18 @@ int32 fingerSpread
 # 445 ticks to close finger tightly
 #
 # [F1, F2, F3]
-int32[3] proximalJointAngle
+int32[3] proximal_joint_angle
 
 # The finger distal joint flexture angle
 # [F1, F2, F3]
 # Note there are 4 readings on either side of the joint.
-Finger[3] distalJointAngle
+Finger[3] distal_joint_angle
 
 # The accelerometer in the proximal link of each finger.  In G's.
 # This sensor is not populated at this time.
 #
 # [F1, F2, F3]
-geometry_msgs/Vector3[3] proximalAcceleration
+geometry_msgs/Vector3[3] proximal_acceleration
 
 # The accelerometer in the distal link of each finger.  In G's.
 # Z axis points out the back of the finger.
@@ -96,7 +96,7 @@ geometry_msgs/Vector3[3] proximalAcceleration
 # X axis points to the left when looking at the finger pad.
 #
 # [F1, F2, F3]
-geometry_msgs/Vector3[3] distalAcceleration
+geometry_msgs/Vector3[3] distal_acceleration
 
 # In this sensor message, which devices actually contributed data.
 # The order of the array is:
@@ -132,7 +132,7 @@ bool[12] responses
 #  9: Motor for Finger 3
 # 10: Motor for Finger 3 Antagonist
 # 11: Tactile Palm
-int8[12] responseHistory
+int8[12] response_history
 
 # The last received error from each motor.
 # The order of the motors in the array:
@@ -147,6 +147,6 @@ int8[12] responseHistory
 #  18 = Overo data length error
 #  20 = Overo timout waiting for response
 # 128 = Thermal Protection Delay
-# 129 = Mandatory Cool Down 
+# 129 = Mandatory Cool Down
 # 130 = Request out of range
-int16[5] motorError
+int16[5] motor_error
