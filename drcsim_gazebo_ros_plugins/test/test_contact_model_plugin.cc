@@ -41,19 +41,21 @@ struct PluginPathSetter
 };
 static PluginPathSetter g_pluginPathSetter;
 
-// uncrustify has repeatedly misparsed EntityComponentManager::Component<T>()
-// in this file as a comparison expression (wants spaces around < and >,
-// which cpplint then rejects) -- narrowing T down to a short, single
-// identifier via this alias (instead of the long scoped name
-// gz::sim::components::ContactSensorData) is what finally got both tools
-// to agree.
+// uncrustify misparses EntityComponentManager::Component<T>() as a
+// comparison expression (wants spaces around < and >, which cpplint then
+// rejects) specifically when it's the direct operand of a bare `return`
+// statement -- confirmed by elimination: neither shortening T via this
+// alias alone nor moving the call to file scope alone fixed it, only
+// assigning to a local first (matching the identical, passing call shape
+// already used throughout ContactModelPlugin.cpp) did.
 using ContactSensorDataComponent = gz::sim::components::ContactSensorData;
 
 static const ContactSensorDataComponent * GetContactSensorData(
   const gz::sim::EntityComponentManager & _ecm,
   gz::sim::Entity _collisionEntity)
 {
-  return _ecm.Component<ContactSensorDataComponent>(_collisionEntity);
+  const auto * contacts = _ecm.Component<ContactSensorDataComponent>(_collisionEntity);
+  return contacts;
 }
 
 TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
