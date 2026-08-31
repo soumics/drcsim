@@ -20,6 +20,8 @@
 #include <cstdlib>
 #include <string>
 
+#include <vector>
+
 #include <gz/sim/Model.hh>
 #include <gz/sim/Server.hh>
 #include <gz/sim/TestFixture.hh>
@@ -40,6 +42,30 @@ struct PluginPathSetter
   }
 };
 static PluginPathSetter g_pluginPathSetter;
+
+// This exact for-loop body (statement-for-statement) already passes
+// uncrustify inside ContactModelPlugin::PostUpdate() in the plugin itself.
+// It only started failing here once nested inside the OnPostUpdate lambda
+// below -- moved to an ordinary file-scope function (no lambda involved)
+// to isolate that as the trigger.
+static void CheckContacts(
+  const gz::sim::EntityComponentManager & _ecm,
+  const std::vector<gz::sim::Entity> & _collisionEntities,
+  bool & _sawContactComponent,
+  bool & _sawNonEmptyContact)
+{
+  for (const gz::sim::Entity collisionEntity : _collisionEntities) {
+    const auto * contacts =
+      _ecm.Component<gz::sim::components::ContactSensorData>(collisionEntity);
+    if (!contacts) {
+      continue;
+    }
+    _sawContactComponent = true;
+    if (!contacts->Data().contact().empty()) {
+      _sawNonEmptyContact = true;
+    }
+  }
+}
 
 TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
 {
@@ -72,17 +98,7 @@ TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
       return;
     }
 
-    for (const gz::sim::Entity collisionEntity : collisionEntities) {
-      const auto * contacts =
-        _ecm.Component<gz::sim::components::ContactSensorData>(collisionEntity);
-      if (!contacts) {
-        continue;
-      }
-      sawContactComponent = true;
-      if (!contacts->Data().contact().empty()) {
-        sawNonEmptyContact = true;
-      }
-    }
+    CheckContacts(_ecm, collisionEntities, sawContactComponent, sawNonEmptyContact);
       });
 
   fixture.Finalize();
