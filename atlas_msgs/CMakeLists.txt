@@ -9,6 +9,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/AtlasBehaviorFeedback.msg"
@@ -39,7 +40,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/ResetControls.srv"
   "srv/SetJointDamping.srv"
   "action/WalkDemo.action"
-  DEPENDENCIES std_msgs geometry_msgs
+  DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
 )
 
 ament_export_dependencies(rosidl_default_runtime)
@@ -56,7 +57,7 @@ if(BUILD_TESTING)
 
   ament_add_gtest(test_atlas_msgs test/test_atlas_msgs.cpp)
   target_link_libraries(test_atlas_msgs "${cpp_typesupport_target}")
-  ament_target_dependencies(test_atlas_msgs rclcpp std_msgs geometry_msgs)
+  ament_target_dependencies(test_atlas_msgs rclcpp std_msgs geometry_msgs builtin_interfaces)
 endif()
 
 ament_package()
