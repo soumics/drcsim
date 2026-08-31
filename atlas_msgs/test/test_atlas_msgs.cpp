@@ -368,7 +368,8 @@ TEST(AtlasMsgs, WalkDemoActionResultAndFeedbackRoundtrip)
   feedback.state.error_code = atlas_msgs::msg::AtlasSimInterfaceState::ERROR_UNSPECIFIED;
 
   const auto out_feedback = roundtrip(feedback);
-  EXPECT_EQ(out_feedback.state.error_code, atlas_msgs::msg::AtlasSimInterfaceState::ERROR_UNSPECIFIED);
+  EXPECT_EQ(out_feedback.state.error_code,
+    atlas_msgs::msg::AtlasSimInterfaceState::ERROR_UNSPECIFIED);
 }
 
 int main(int argc, char ** argv)
