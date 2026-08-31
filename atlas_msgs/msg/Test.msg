@@ -1,6 +1,6 @@
 # test Message
 # Do not use, testing only
-Header header
+std_msgs/Header header
 
 float32[] damping
 float32[] kp_position

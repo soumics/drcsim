@@ -4,63 +4,63 @@
 # UDP.
 #
 # testing everything a robot needs
-Header header
+std_msgs/Header header
 
 # Default joint indices used when publishing the
 # JointCommands joint_states topic below
 # For exmaple, if you subscribe to this message, then
 # msg.joint_states.position[atlas_msgs::AtlasStates::back_lbz] gives back
 # the position of the back_lbz.
-int32 back_lbz  = 0 # v1
-int32 back_bkz  = 0 # v3, v4
-int32 back_mby  = 1 # v1
-int32 back_bky  = 1 # v3, v4
-int32 back_ubx  = 2 # v1
-int32 back_bkx  = 2 # v3, v4
-int32 neck_ay   = 3 # v1
-int32 neck_ry   = 3 # v3, v4
-int32 l_leg_uhz = 4 # v1
-int32 l_leg_hpz = 4 # v3, v4
-int32 l_leg_mhx = 5 # v1
-int32 l_leg_hpx = 5 # v3, v4
-int32 l_leg_lhy = 6 # v1
-int32 l_leg_hpy = 6 # v3, v4
-int32 l_leg_kny = 7 # v3, v4
-int32 l_leg_uay = 8 # v1
-int32 l_leg_aky = 8 # v3, v4
-int32 l_leg_lax = 9 # v1
-int32 l_leg_akx = 9 # v3, v4
-int32 r_leg_uhz = 10 # v1
-int32 r_leg_hpz = 10 # v3, v4
-int32 r_leg_mhx = 11 # v1
-int32 r_leg_hpx = 11 # v3, v4
-int32 r_leg_lhy = 12 # v1
-int32 r_leg_hpy = 12 # v3, v4
-int32 r_leg_kny = 13 # v3, v4
-int32 r_leg_uay = 14 # v1
-int32 r_leg_aky = 14 # v3, v4
-int32 r_leg_lax = 15 # v1
-int32 r_leg_akx = 15 # v3, v4
-int32 l_arm_usy = 16 # v1
-int32 l_arm_shy = 16 # v3
-int32 l_arm_shz = 16 # v4
-int32 l_arm_shx = 17 # v3, v4
-int32 l_arm_ely = 18 # v3, v4
-int32 l_arm_elx = 19 # v3, v4
-int32 l_arm_uwy = 20 # v1
-int32 l_arm_wry = 20 # v3, v4
-int32 l_arm_mwx = 21 # v1
-int32 l_arm_wrx = 21 # v3, v4
-int32 r_arm_usy = 22 # v1
-int32 r_arm_shy = 22 # v3
-int32 r_arm_shz = 22 # v4
-int32 r_arm_shx = 23 # v3, v4
-int32 r_arm_ely = 24 # v3, v4
-int32 r_arm_elx = 25 # v3, v4
-int32 r_arm_uwy = 26 # v1
-int32 r_arm_wry = 26 # v3, v4
-int32 r_arm_mwx = 27 # v1
-int32 r_arm_wrx = 27 # v3, v4
+int32 BACK_LBZ  = 0 # v1
+int32 BACK_BKZ  = 0 # v3, v4
+int32 BACK_MBY  = 1 # v1
+int32 BACK_BKY  = 1 # v3, v4
+int32 BACK_UBX  = 2 # v1
+int32 BACK_BKX  = 2 # v3, v4
+int32 NECK_AY   = 3 # v1
+int32 NECK_RY   = 3 # v3, v4
+int32 L_LEG_UHZ = 4 # v1
+int32 L_LEG_HPZ = 4 # v3, v4
+int32 L_LEG_MHX = 5 # v1
+int32 L_LEG_HPX = 5 # v3, v4
+int32 L_LEG_LHY = 6 # v1
+int32 L_LEG_HPY = 6 # v3, v4
+int32 L_LEG_KNY = 7 # v3, v4
+int32 L_LEG_UAY = 8 # v1
+int32 L_LEG_AKY = 8 # v3, v4
+int32 L_LEG_LAX = 9 # v1
+int32 L_LEG_AKX = 9 # v3, v4
+int32 R_LEG_UHZ = 10 # v1
+int32 R_LEG_HPZ = 10 # v3, v4
+int32 R_LEG_MHX = 11 # v1
+int32 R_LEG_HPX = 11 # v3, v4
+int32 R_LEG_LHY = 12 # v1
+int32 R_LEG_HPY = 12 # v3, v4
+int32 R_LEG_KNY = 13 # v3, v4
+int32 R_LEG_UAY = 14 # v1
+int32 R_LEG_AKY = 14 # v3, v4
+int32 R_LEG_LAX = 15 # v1
+int32 R_LEG_AKX = 15 # v3, v4
+int32 L_ARM_USY = 16 # v1
+int32 L_ARM_SHY = 16 # v3
+int32 L_ARM_SHZ = 16 # v4
+int32 L_ARM_SHX = 17 # v3, v4
+int32 L_ARM_ELY = 18 # v3, v4
+int32 L_ARM_ELX = 19 # v3, v4
+int32 L_ARM_UWY = 20 # v1
+int32 L_ARM_WRY = 20 # v3, v4
+int32 L_ARM_MWX = 21 # v1
+int32 L_ARM_WRX = 21 # v3, v4
+int32 R_ARM_USY = 22 # v1
+int32 R_ARM_SHY = 22 # v3
+int32 R_ARM_SHZ = 22 # v4
+int32 R_ARM_SHX = 23 # v3, v4
+int32 R_ARM_ELY = 24 # v3, v4
+int32 R_ARM_ELX = 25 # v3, v4
+int32 R_ARM_UWY = 26 # v1
+int32 R_ARM_WRY = 26 # v3, v4
+int32 R_ARM_MWX = 27 # v1
+int32 R_ARM_WRX = 27 # v3, v4
 
 # repeating data from osrf_msgs/JointCommands as joint_states
 float32[] position
