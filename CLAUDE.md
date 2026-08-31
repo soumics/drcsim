@@ -133,8 +133,37 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
      established pattern. 100% on first real `colcon test` run after two small
      fixups (line-length + `time` type) — cheapest package so far per round trip.
 
-**Tier 1 remaining:** `atlas_description`, then Tier 2
-`drcsim_gazebo_ros_plugins` (huge — VRCPlugin, AtlasPlugin family tied to the
+2. ✅ `atlas_description` — **done, 100% (6/6 checks), merged into
+   `ros2-jazzy-harmonic`, first-try pass (no round trips needed).** 25 top-level
+   `robots/*.urdf.xacro` variants. Notes:
+   - Diffed against `vigir_atlas_common/atlas_description` per the duplicate-source
+     rule and found real pre-existing left/right mirroring bugs (not just noise):
+     `atlas_v4`/`v5_robotiq_hands.urdf.xacro` and `atlas_v4`/`v5_sandia_hands.urdf.xacro`
+     had the left-hand mount using the *same* xyz/rpy signs as the right hand
+     instead of mirrored ones — confirmed against the base (non-versioned)
+     `atlas_robotiq_hands.urdf.xacro`, which already had it right, so this was a
+     copy-paste bug isolated to the v4/v5 variants. Fixed using vigir's values.
+   - `urdf/atlas_v4_no_wry2_simple_shapes.urdf` (a raw hand-committed URDF
+     fragment `<xacro:include>`d by `robots/atlas_v4_no_wry2*.urdf.xacro`, not a
+     build artifact) had `l_clav` pointing at the **right** clavicle mesh
+     (`r_clav.dae`) plus other right-side offsets on left-side links — replaced
+     wholesale with vigir's corrected version (`atlas_v5_simple_shapes.urdf` too).
+   - Did *not* pull in vigir's extra content that's outside original drcsim scope:
+     `robots/vigir_atlas*.urdf.xacro`, `robots/hands/`, `robots/multisense/`,
+     `launch/` — those are ViGIR-specific additions (self-filter, 7dof variant),
+     not part of the package being ported.
+   - Left `<gazebo><plugin filename="libXXXPlugin.so">` blocks (SandiaHandPlugin,
+     RobotiqHandPlugin, IRobotHandPlugin, MultiSenseSLPlugin, AtlasPlugin)
+     untouched — syntactically these don't need to change for xacro/URDF
+     validity; the actual `.so` targets get renamed/rebuilt in Tier 2
+     (`drcsim_gazebo_ros_plugins`), not here.
+   - No launch/ directory added — neither original drcsim's `atlas_description`
+     nor the reference had one (vigir's `launch/` is RViz/self-filter-specific,
+     out of scope per above), unlike `robotiq_hand_description` which added one.
+
+**Tier 1 is now fully complete — both packages done, 100% passing.**
+
+Next: Tier 2 `drcsim_gazebo_ros_plugins` (huge — VRCPlugin, AtlasPlugin family tied to the
 proprietary AtlasSimInterface binaries, SandiaHandPlugin/IRobotHandPlugin/
 RobotiqHandPlugin/MultiSenseSLPlugin, DRCVehicleROSPlugin which **subclasses**
 DRCVehiclePlugin — see below), then Tier 3 `drcsim_gazebo` (launch/config/tests,
