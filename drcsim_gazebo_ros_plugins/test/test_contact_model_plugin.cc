@@ -41,23 +41,6 @@ struct PluginPathSetter
 };
 static PluginPathSetter g_pluginPathSetter;
 
-// uncrustify misparses EntityComponentManager::Component<T>() as a
-// comparison expression (wants spaces around < and >, which cpplint then
-// rejects) specifically when it's the direct operand of a bare `return`
-// statement -- confirmed by elimination: neither shortening T via this
-// alias alone nor moving the call to file scope alone fixed it, only
-// assigning to a local first (matching the identical, passing call shape
-// already used throughout ContactModelPlugin.cpp) did.
-using ContactSensorDataComponent = gz::sim::components::ContactSensorData;
-
-static const ContactSensorDataComponent * GetContactSensorData(
-  const gz::sim::EntityComponentManager & _ecm,
-  gz::sim::Entity _collisionEntity)
-{
-  const auto * contacts = _ecm.Component<ContactSensorDataComponent>(_collisionEntity);
-  return contacts;
-}
-
 TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
 {
   gz::sim::TestFixture fixture(
@@ -89,8 +72,12 @@ TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
       return;
     }
 
-    const auto * contacts = GetContactSensorData(_ecm, collisionEntities[0]);
-    if (contacts) {
+    for (const gz::sim::Entity collisionEntity : collisionEntities) {
+      const auto * contacts =
+        _ecm.Component<gz::sim::components::ContactSensorData>(collisionEntity);
+      if (!contacts) {
+        continue;
+      }
       sawContactComponent = true;
       if (!contacts->Data().contact().empty()) {
         sawNonEmptyContact = true;
