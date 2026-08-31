@@ -41,17 +41,19 @@ struct PluginPathSetter
 };
 static PluginPathSetter g_pluginPathSetter;
 
-// Factored out to file scope: uncrustify misparses this exact templated
-// EntityComponentManager::Component<T>() call as a comparison expression
-// (wants spaces around < and >, which cpplint then rejects) when it's
-// nested several braces deep inside a lambda; at file scope it parses fine.
-static const gz::sim::components::ContactSensorData * GetContactSensorData(
+// uncrustify has repeatedly misparsed EntityComponentManager::Component<T>()
+// in this file as a comparison expression (wants spaces around < and >,
+// which cpplint then rejects) -- narrowing T down to a short, single
+// identifier via this alias (instead of the long scoped name
+// gz::sim::components::ContactSensorData) is what finally got both tools
+// to agree.
+using ContactSensorDataComponent = gz::sim::components::ContactSensorData;
+
+static const ContactSensorDataComponent * GetContactSensorData(
   const gz::sim::EntityComponentManager & _ecm,
   gz::sim::Entity _collisionEntity)
 {
-  const auto * contacts =
-    _ecm.Component<gz::sim::components::ContactSensorData>(_collisionEntity);
-  return contacts;
+  return _ecm.Component<ContactSensorDataComponent>(_collisionEntity);
 }
 
 TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
