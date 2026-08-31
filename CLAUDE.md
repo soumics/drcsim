@@ -91,7 +91,7 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
 
 ## Progress (Tier 1)
 
-1. 🔶 `atlas_msgs` — converted on `port/atlas_msgs`, not yet merged/tested by user.
+1. ✅ `atlas_msgs` — **done, 100% (7/7 checks), merged into `ros2-jazzy-harmonic`.**
    23 `.msg`, 4 `.srv`, 1 `.action`. Notes:
    - 8 files needed bare `Header` → `std_msgs/Header`: `Test.msg`, `AtlasCommand.msg`,
      `AtlasState.msg`, `ControllerStatistics.msg`, `AtlasSimInterfaceState.msg`,
@@ -120,9 +120,18 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
      `catkin_package(CATKIN_DEPENDS...)`.
    - `actionlib_msgs` not needed at all in ROS 2 — native `rosidl_generate_interfaces`
      action support doesn't require it.
+   - **Another new gotcha found**: ROS 1's bare `time`/`duration` builtin types
+     don't exist in ROS 2 — `rosidl_adapter` fails with
+     `KeyError processing template 'struct.idl.em': 'time'` (a CMake-time error,
+     not even a clear message pointing at the field). `VRCScore.msg` had 4
+     `time` fields (`wall_time`, `sim_time`, ...) — replaced with
+     `builtin_interfaces/Time` and added `builtin_interfaces` as a dependency.
+     grep for `^time ` / `^duration ` in any future package's `.msg` files
+     before building, alongside the bare-`Header` check.
    - Round-trip gtest added (`test/test_atlas_msgs.cpp`) covering messages, all 4
      services, and the `WalkDemo` action's Goal/Result/Feedback, following the
-     established pattern.
+     established pattern. 100% on first real `colcon test` run after two small
+     fixups (line-length + `time` type) — cheapest package so far per round trip.
 
 **Tier 1 remaining:** `atlas_description`, then Tier 2
 `drcsim_gazebo_ros_plugins` (huge — VRCPlugin, AtlasPlugin family tied to the
@@ -351,6 +360,10 @@ turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
   `rosidl_default_generators`/`rosidl_default_runtime`.
 - ROS 1's bare `Header header` → must be fully qualified `std_msgs/Header header`
   (ROS 2 dropped the shorthand) — add `std_msgs` as an explicit dependency.
+- ROS 1's bare `time`/`duration` builtin types don't exist in ROS 2 — grep for
+  `^time ` / `^duration ` and replace with `builtin_interfaces/Time` /
+  `builtin_interfaces/Duration` (+ dependency). Fails at CMake time with an
+  opaque `KeyError: 'time'`, not a clear per-field error.
 - ROS 2 message/field names must be lower snake_case (no camelCase) — rename and
   flag any downstream C++ consumers that used the old field names (e.g.
   `IRobotHandPlugin.cpp` in `drcsim_gazebo_ros_plugins`, Tier 2, still uses old
