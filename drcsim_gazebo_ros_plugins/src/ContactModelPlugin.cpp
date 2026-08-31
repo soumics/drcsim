@@ -16,10 +16,10 @@
 */
 #include "drcsim_gazebo_ros_plugins/ContactModelPlugin.hpp"
 
+#include <gz/msgs/contacts.pb.h>
+
 #include <string>
 #include <vector>
-
-#include <gz/msgs/contacts.pb.h>
 
 #include <gz/common/Console.hh>
 #include <gz/plugin/Register.hh>

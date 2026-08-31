@@ -49,7 +49,9 @@ static const gz::sim::components::ContactSensorData * GetContactSensorData(
   const gz::sim::EntityComponentManager & _ecm,
   gz::sim::Entity _collisionEntity)
 {
-  return _ecm.Component<gz::sim::components::ContactSensorData>(_collisionEntity);
+  const auto * contacts =
+    _ecm.Component<gz::sim::components::ContactSensorData>(_collisionEntity);
+  return contacts;
 }
 
 TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
