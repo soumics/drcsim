@@ -72,9 +72,9 @@ TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
       return;
     }
 
+    gz::sim::Entity collisionEntity = collisionEntities[0];
     const auto * contacts =
-    _ecm.Component<gz::sim::components::ContactSensorData>(
-      collisionEntities[0]);
+      _ecm.Component<gz::sim::components::ContactSensorData>(collisionEntity);
     if (contacts) {
       sawContactComponent = true;
       if (!contacts->Data().contact().empty()) {

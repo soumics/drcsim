@@ -39,8 +39,40 @@ install(DIRECTORY include/${PROJECT_NAME}/
 )
 
 if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
-  ament_lint_auto_find_test_dependencies()
+  # Not using ament_lint_auto_find_test_dependencies() here: this package
+  # is being ported one plugin per branch (see CLAUDE.md), so most of
+  # include/ and src/ is still the original ROS1/Gazebo-Classic source,
+  # not yet touched. Exclude everything except what's actually been
+  # ported from the C++ linters -- each subsequent plugin's branch should
+  # remove its own newly-ported files from this list as it lands.
+  file(GLOB_RECURSE AMENT_LINT_ALL_SOURCE
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/*"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/*"
+  )
+  set(AMENT_LINT_PORTED
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/ContactModelPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/ContactModelPlugin.cpp"
+  )
+  set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
+  list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
+
+  find_package(ament_cmake_copyright REQUIRED)
+  ament_copyright(EXCLUDE ${AMENT_LINT_EXCLUDE})
+
+  find_package(ament_cmake_cppcheck REQUIRED)
+  ament_cppcheck(EXCLUDE ${AMENT_LINT_EXCLUDE})
+
+  find_package(ament_cmake_cpplint REQUIRED)
+  ament_cpplint(EXCLUDE ${AMENT_LINT_EXCLUDE})
+
+  find_package(ament_cmake_uncrustify REQUIRED)
+  ament_uncrustify(EXCLUDE ${AMENT_LINT_EXCLUDE})
+
+  find_package(ament_cmake_lint_cmake REQUIRED)
+  ament_lint_cmake()
+
+  find_package(ament_cmake_xmllint REQUIRED)
+  ament_xmllint()
 
   find_package(ament_cmake_gtest REQUIRED)
 
