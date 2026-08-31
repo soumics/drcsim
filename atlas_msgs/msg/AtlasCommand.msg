@@ -16,7 +16,7 @@
 #
 #  Where effort_bdi comes from AtlasSimInterface Dynamics Behavior Library.
 #
-Header header
+std_msgs/Header header
 
 float64[] position
 float64[] velocity

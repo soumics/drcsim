@@ -2,7 +2,7 @@
 # 0x0 - Gripper reset.
 # 0x1 - Gripper activation.
 
-uint8 gACT
+uint8 g_act
 
 # gMOD : Operation mode status, echo of the rMOD bits (grasping mode requested).
 # 0x00 - Basic mode.
@@ -10,13 +10,13 @@ uint8 gACT
 # 0x02 - Wide mode.
 # 0x03 - Scissor mode.
 
-uint8 gMOD
+uint8 g_mod
 
 # gGTO : Action status. echo of the rGTO bit (go to bit).
 # 0x0 - Stopped (or performing activation / grasping mode change / automatic release)
 # 0x1 - Go to Position Request
 
-uint8 gGTO
+uint8 g_gto
 
 # gIMC : Gripper status, returns the current status of the Gripper.
 # 0x00 - Gripper is in reset (or automatic release) state. See Fault status if Gripper is activated.
@@ -24,7 +24,7 @@ uint8 gGTO
 # 0x02 - Mode change is in progress.
 # 0x03 - Activation and mode change are completed.
 
-uint8 gIMC
+uint8 g_imc
 
 # gSTA : Motion status, returns the current motion of the Gripper fingers.
 # 0x00 - Gripper is in motion towards requested position (only meaningful if gGTO = 1)
@@ -32,7 +32,7 @@ uint8 gIMC
 # 0x02 - Gripper is stopped. All fingers stopped before requested position
 # 0x03 - Gripper is stopped. All fingers reached requested position
 
-uint8 gSTA
+uint8 g_sta
 
 # gDTA : Finger A object detection status returns information on possible object contact from finger A.
 # 0x00 - Finger A is in motion (only meaningful if gGTO = 1).
@@ -40,7 +40,7 @@ uint8 gSTA
 # 0x02 - Finger A has stopped due to a contact while closing.
 # 0x03 - Finger A is at requested position.
 
-uint8 gDTA
+uint8 g_dta
 
 # gDTB : Finger B object detection status returns information on possible object contact from finger B.
 # 0x00 - Finger B is in motion (only meaningful if gGTO = 1).
@@ -48,7 +48,7 @@ uint8 gDTA
 # 0x02 - Finger B has stopped due to a contact while closing.
 # 0x03 - Finger B is at requested position.
 
-uint8 gDTB
+uint8 g_dtb
 
 # gDTC : Finger C object detection status returns information on possible object contact from finger A.
 # 0x00 - Finger C is in motion (only meaningful if gGTO = 1).
@@ -56,7 +56,7 @@ uint8 gDTB
 # 0x02 - Finger C has stopped due to a contact while closing.
 # 0x03 - Finger C is at requested position.
 
-uint8 gDTC
+uint8 g_dtc
 
 # gDTS : Scissor object detection status returns information on possible object contact from scissor.
 # 0x00 - Scissor is in motion (only meaningful if gGTO = 1).
@@ -64,7 +64,7 @@ uint8 gDTC
 # 0x02 - Scissor has stopped due to a contact while closing.
 # 0x03 - Scissor is at requested position.
 
-uint8 gDTS
+uint8 g_dts
 
 # gFLT : Fault status returns general error messages useful for troubleshooting.
 #   0x00 - No fault (fault LED off)
@@ -81,7 +81,7 @@ uint8 gDTS
 #     0x0E - Changing mode fault, interferences detected on Scissor (for more than 20 sec).
 #     0x0F - Automatic release completed. Reset and activation is required.
 
-uint8 gFLT
+uint8 g_flt
 
 
 # gPRA : Echo of the requested position of the Gripper (rPRA),
@@ -91,64 +91,64 @@ uint8 gFLT
 #   individual control mode, gPRA is the echo of finger A,
 #   otherwise it is the general position requested to all fingers.
 
-uint8 gPRA
+uint8 g_pra
 
 # gPOA : Returns the actual position of the Gripper finger A,
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPOA
+uint8 g_poa
 
 # gCUA : Returns a value that represents the finger A instantaneous current consumption from 0x00 to 0xFF.
 
-uint8 gCUA
+uint8 g_cua
 
 # gPRB : Echo of the requested position of finger B (rPRB),
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPRB
+uint8 g_prb
 
 # gPOB : Returns the actual position of the Gripper finger B,
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPOB
+uint8 g_pob
 
 # gCUB : Returns a value that represents the finger B instantaneous current consumption from 0x00 to 0xFF.
 
-uint8 gCUB
+uint8 g_cub
 
 # gPRC : Echo of the requested position of finger C (rPRC),
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPRC
+uint8 g_prc
 
 # gPOC : Returns the actual position of the Gripper finger C,
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPOC
+uint8 g_poc
 
 # gCUC : Returns a value that represents the finger C instantaneous current consumption from 0x00 to 0xFF.
 
-uint8 gCUC
+uint8 g_cuc
 
 # gPRS : Echo of the requested position of scissor (rPRS),
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPRS
+uint8 g_prs
 
 # gPOS : Returns the actual position of the Gripper scissor,
 #   0x00 is minimum position (full opening) and
 #   0xFF is maximum position (full closing).
 
-uint8 gPOS
+uint8 g_pos
 
 # gCUS : Returns a value that represents the scissor instantaneous current consumption from 0x00 to 0xFF.
 #   0x00 is ...
 #   0xFF is ...
 
-uint8 gCUS
+uint8 g_cus

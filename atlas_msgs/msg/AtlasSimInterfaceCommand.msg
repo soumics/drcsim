@@ -4,7 +4,7 @@
 # With the exception of addition of k_effort to provide user a way to switch
 # to/from PID servo control in AtlasPlugin.cpp on a per joint basis.
 
-Header header
+std_msgs/Header header
 
 # permissible values for behavior
 # Updated to match the values in AtlasRobotInterface/AtlasInterfaceTypes.h.

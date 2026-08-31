@@ -1,6 +1,6 @@
 # Goal
 # For Setting MultiStep Walking Commands
-Header header
+std_msgs/Header header
 
 # permissible values for behavior
 int32 STAND             =  0 # stand

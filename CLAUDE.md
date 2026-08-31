@@ -89,7 +89,42 @@ All of these are converted, merged into `ros2-jazzy-harmonic`, and passing
 
 **Tier 0 is now fully complete — all 9 packages done, 100% passing.**
 
-**Tier 1+ (not started):** `atlas_msgs`, `atlas_description`, then Tier 2
+## Progress (Tier 1)
+
+1. 🔶 `atlas_msgs` — converted on `port/atlas_msgs`, not yet merged/tested by user.
+   23 `.msg`, 4 `.srv`, 1 `.action`. Notes:
+   - 8 files needed bare `Header` → `std_msgs/Header`: `Test.msg`, `AtlasCommand.msg`,
+     `AtlasState.msg`, `ControllerStatistics.msg`, `AtlasSimInterfaceState.msg`,
+     `WalkDemo.action`, `AtlasSimInterfaceCommand.msg`, `ForceTorqueSensors.msg`.
+   - **New gotcha found**: ROS 2 constant names must be **UPPER_CASE**
+     (`is_valid_constant_name` in `rosidl_adapter/parser.py` enforces
+     `^[A-Z]([A-Z0-9_]?[A-Z0-9]+)*$`) — this is a hard parse error, not a lint
+     warning. `AtlasState.msg` had ~50 lowercase joint-index constants
+     (`back_lbz = 0`, `l_leg_hpy = 6`, etc., accessed in ROS1 as
+     `atlas_msgs::AtlasStates::back_lbz`) — uppercased them all
+     (`BACK_LBZ`, `L_LEG_HPY`, ...) preserving the same values/comments. Check any
+     future package for this same pattern before assuming "no camelCase" means "safe".
+   - `SModelRobotInput.msg`/`SModelRobotOutput.msg` (Robotiq S-Model raw driver
+     registers) had field names with embedded uppercase (`gACT`, `rPRA`, ...) —
+     these are **fields**, not constants, so the opposite rule bit: ROS 2 field
+     names must be lower_snake_case. Renamed `gACT`→`g_act`, `rPRA`→`r_pra`, etc.
+     (lowercased, `_` inserted after the leading `g`/`r`). Flag for Tier 2: if
+     `RobotiqHandPlugin`/a driver node reads these by the old register names,
+     it needs updating to match.
+   - Dropped `sensor_msgs`, `trajectory_msgs`, `actionlib_msgs`, `osrf_msgs`,
+     `sandia_hand_msgs`, `control_msgs` as dependencies — grepped every `.msg`/
+     `.srv`/`.action` field type and none of them are actually referenced; only
+     `std_msgs` (Header) and `geometry_msgs` (Pose/Wrench/Vector3/Quaternion) are
+     real dependencies. This also resolves the pre-existing catkin inconsistency
+     where `control_msgs` was a build dep but missing from
+     `catkin_package(CATKIN_DEPENDS...)`.
+   - `actionlib_msgs` not needed at all in ROS 2 — native `rosidl_generate_interfaces`
+     action support doesn't require it.
+   - Round-trip gtest added (`test/test_atlas_msgs.cpp`) covering messages, all 4
+     services, and the `WalkDemo` action's Goal/Result/Feedback, following the
+     established pattern.
+
+**Tier 1 remaining:** `atlas_description`, then Tier 2
 `drcsim_gazebo_ros_plugins` (huge — VRCPlugin, AtlasPlugin family tied to the
 proprietary AtlasSimInterface binaries, SandiaHandPlugin/IRobotHandPlugin/
 RobotiqHandPlugin/MultiSenseSLPlugin, DRCVehicleROSPlugin which **subclasses**
@@ -320,6 +355,11 @@ turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
   flag any downstream C++ consumers that used the old field names (e.g.
   `IRobotHandPlugin.cpp` in `drcsim_gazebo_ros_plugins`, Tier 2, still uses old
   `handle_msgs` camelCase field names — needs updating when that package's ported).
+- ROS 2 **constant** names (a `TYPE NAME = value` line, as opposed to a plain
+  field) must be **UPPER_CASE** — this is a hard rosidl parse error, the mirror
+  image of the field-name rule above. grep every `.msg`/`.srv`/`.action` for
+  `= <number>` lines and check both cases: lowercase constants need
+  uppercasing, uppercase-containing *fields* (no `=`) need lowercasing.
 - Add a gtest that constructs, serializes, and round-trips each message/service
   type via `rclcpp::Serialization<T>` — needs both
   `<rclcpp/serialization.hpp>` **and** `<rclcpp/serialized_message.hpp>` (the first

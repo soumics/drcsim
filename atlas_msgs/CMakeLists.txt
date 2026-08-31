@@ -1,86 +1,63 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(atlas_msgs)
 
-if ($ENV{ROS_DISTRO} STREQUAL "fuerte")
-  # VERY IMPORTANT: For Fuerte, tell CMake not to strip off the RPATH from libs and executables during installation.
-  # This is needed to resolve dependencies on ROS libraries that live in various places deep in /opt/ros/fuerte/stacks.
-  # Starting with Groovy, we can allow CMake to strip RPATH (its default behavior) because we use only catkinized
-  # packages from ROS.  Those packages' libraries are installed to /opt/ros/<distro>/lib, which we can assume will
-  # be in LD_LIBRARY_PATH at run-time.
-  set (CMAKE_INSTALL_RPATH_USE_LINK_PATH 1)
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
 endif()
 
-find_package(catkin REQUIRED COMPONENTS
-  std_msgs
-  sensor_msgs
-  geometry_msgs
-  trajectory_msgs
-  actionlib_msgs
-  osrf_msgs
-  sandia_hand_msgs
-  control_msgs
-  message_generation
-  )
+find_package(ament_cmake REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(builtin_interfaces REQUIRED)
 
-add_message_files(
-  DIRECTORY msg
-  FILES
-  AtlasBehaviorFeedback.msg
-  AtlasBehaviorManipulateFeedback.msg
-  AtlasBehaviorManipulateParams.msg
-  AtlasBehaviorPelvisServoParams.msg
-  AtlasBehaviorStandFeedback.msg
-  AtlasBehaviorStandParams.msg
-  AtlasBehaviorStepData.msg
-  AtlasBehaviorStepFeedback.msg
-  AtlasBehaviorStepParams.msg
-  AtlasBehaviorWalkFeedback.msg
-  AtlasBehaviorWalkParams.msg
-  AtlasCommand.msg
-  AtlasPositionData.msg
-  AtlasSimInterfaceCommand.msg
-  AtlasSimInterfaceState.msg
-  AtlasState.msg
-  ControllerStatistics.msg
-  ForceTorqueSensors.msg
-  SModelRobotInput.msg
-  SModelRobotOutput.msg
-  SynchronizationStatistics.msg
-  Test.msg
-  VRCScore.msg
-  )
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/AtlasBehaviorFeedback.msg"
+  "msg/AtlasBehaviorManipulateFeedback.msg"
+  "msg/AtlasBehaviorManipulateParams.msg"
+  "msg/AtlasBehaviorPelvisServoParams.msg"
+  "msg/AtlasBehaviorStandFeedback.msg"
+  "msg/AtlasBehaviorStandParams.msg"
+  "msg/AtlasBehaviorStepData.msg"
+  "msg/AtlasBehaviorStepFeedback.msg"
+  "msg/AtlasBehaviorStepParams.msg"
+  "msg/AtlasBehaviorWalkFeedback.msg"
+  "msg/AtlasBehaviorWalkParams.msg"
+  "msg/AtlasCommand.msg"
+  "msg/AtlasPositionData.msg"
+  "msg/AtlasSimInterfaceCommand.msg"
+  "msg/AtlasSimInterfaceState.msg"
+  "msg/AtlasState.msg"
+  "msg/ControllerStatistics.msg"
+  "msg/ForceTorqueSensors.msg"
+  "msg/SModelRobotInput.msg"
+  "msg/SModelRobotOutput.msg"
+  "msg/SynchronizationStatistics.msg"
+  "msg/Test.msg"
+  "msg/VRCScore.msg"
+  "srv/AtlasFilters.srv"
+  "srv/GetJointDamping.srv"
+  "srv/ResetControls.srv"
+  "srv/SetJointDamping.srv"
+  "action/WalkDemo.action"
+  DEPENDENCIES std_msgs geometry_msgs builtin_interfaces
+)
 
-add_service_files(DIRECTORY srv FILES
-  AtlasFilters.srv
-  GetJointDamping.srv
-  ResetControls.srv
-  SetJointDamping.srv
-  )
+ament_export_dependencies(rosidl_default_runtime)
 
-add_action_files(DIRECTORY action FILES
-  WalkDemo.action
- )
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
 
-generate_messages(DEPENDENCIES
-  std_msgs
-  sensor_msgs
-  geometry_msgs
-  trajectory_msgs
-  actionlib_msgs
-  osrf_msgs
-  sandia_hand_msgs
-  control_msgs
-  )
+  find_package(ament_cmake_gtest REQUIRED)
+  find_package(rclcpp REQUIRED)
 
-catkin_package(
-  CATKIN_DEPENDS
-  message_runtime
-  std_msgs
-  sensor_msgs
-  geometry_msgs
-  trajectory_msgs
-  actionlib_msgs
-  osrf_msgs
-  sandia_hand_msgs
-  message_generation
-  )
+  rosidl_get_typesupport_target(cpp_typesupport_target
+    "${PROJECT_NAME}" "rosidl_typesupport_cpp")
+
+  ament_add_gtest(test_atlas_msgs test/test_atlas_msgs.cpp)
+  target_link_libraries(test_atlas_msgs "${cpp_typesupport_target}")
+  ament_target_dependencies(test_atlas_msgs rclcpp std_msgs geometry_msgs builtin_interfaces)
+endif()
+
+ament_package()
