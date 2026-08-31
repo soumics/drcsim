@@ -44,11 +44,24 @@ struct PluginPathSetter
 static PluginPathSetter g_pluginPathSetter;
 
 // This exact for-loop body (statement-for-statement) already passes
-// uncrustify inside ContactModelPlugin::PostUpdate() in the plugin itself.
-// It only started failing here once nested inside the OnPostUpdate lambda
-// below -- moved to an ordinary file-scope function (no lambda involved)
-// to isolate that as the trigger.
-static void CheckContacts(
+// uncrustify inside ContactModelPlugin::PostUpdate() -- an out-of-line
+// ClassName::Method() member function definition. A free function with
+// the identical body still failed here, even on an unrelated
+// std::vector<gz::sim::Entity> parameter declaration, which means
+// uncrustify wasn't recognizing the free function's signature as a
+// declaration at all. Using a ClassName::Method() definition, matching
+// the plugin's own passing shape exactly, to test that as the trigger.
+class ContactChecker
+{
+public:
+  static void Check(
+    const gz::sim::EntityComponentManager & _ecm,
+    const std::vector<gz::sim::Entity> & _collisionEntities,
+    bool & _sawContactComponent,
+    bool & _sawNonEmptyContact);
+};
+
+void ContactChecker::Check(
   const gz::sim::EntityComponentManager & _ecm,
   const std::vector<gz::sim::Entity> & _collisionEntities,
   bool & _sawContactComponent,
@@ -98,7 +111,7 @@ TEST(ContactModelPluginTest, DetectsContactOnConfiguredCollision)
       return;
     }
 
-    CheckContacts(_ecm, collisionEntities, sawContactComponent, sawNonEmptyContact);
+    ContactChecker::Check(_ecm, collisionEntities, sawContactComponent, sawNonEmptyContact);
       });
 
   fixture.Finalize();
