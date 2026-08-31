@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
-<package>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>drcsim_gazebo_ros_plugins</name>
   <version>3.1.0</version>
   <description>The drcsim_gazebo_ros_plugins package</description>
@@ -7,48 +8,18 @@
   <license>Apache 2.0</license>
   <url type="website">http://gazebosim.org/wiki/DRC</url>
 
-  <buildtool_depend>catkin</buildtool_depend>
+  <buildtool_depend>ament_cmake</buildtool_depend>
 
-  <build_depend>drcsim_model_resources</build_depend>
-  <build_depend>drcsim_gazebo_plugins</build_depend>
-  <build_depend>osrf_msgs</build_depend>
-  <build_depend>sandia_hand_msgs</build_depend>
+  <depend>gz-sim8</depend>
+  <depend>gz-plugin2</depend>
+  <depend>gz-transport13</depend>
+  <depend>gz-msgs10</depend>
+  <depend>gz-common5</depend>
 
-  <build_depend>roscpp</build_depend>
-  <build_depend>std_msgs</build_depend>
-  <build_depend>sensor_msgs</build_depend>
-  <build_depend>geometry_msgs</build_depend>
-  <build_depend>trajectory_msgs</build_depend>
-  <build_depend>control_msgs</build_depend>
-  <build_depend>atlas_msgs</build_depend>
-  <build_depend>handle_msgs</build_depend>
-  <build_depend>image_transport</build_depend>
-  <build_depend>tf</build_depend>
-  <build_depend>actionlib</build_depend>
-  <build_depend>gazebo_plugins</build_depend>
-  <build_depend>gazebo_ros</build_depend>
-  <build_depend>gazebo_msgs</build_depend>
-  <build_depend>angles</build_depend>
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
 
-  <run_depend>drcsim_model_resources</run_depend>
-  <run_depend>drcsim_gazebo_plugins</run_depend>
-  <run_depend>osrf_msgs</run_depend>
-  <run_depend>sandia_hand_msgs</run_depend>
-  <run_depend>actionlib</run_depend>
-
-  <run_depend>roscpp</run_depend>
-  <run_depend>std_msgs</run_depend>
-  <run_depend>sensor_msgs</run_depend>
-  <run_depend>geometry_msgs</run_depend>
-  <run_depend>trajectory_msgs</run_depend>
-  <run_depend>control_msgs</run_depend>
-  <run_depend>atlas_msgs</run_depend>
-  <run_depend>handle_msgs</run_depend>
-  <run_depend>image_transport</run_depend>
-  <run_depend>tf</run_depend>
-  <run_depend>actionlib</run_depend>
-  <run_depend>gazebo_plugins</run_depend>
-  <run_depend>gazebo_ros</run_depend>
-  <run_depend>gazebo_msgs</run_depend>
-
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>

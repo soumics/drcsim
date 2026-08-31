@@ -14,188 +14,151 @@
  * limitations under the License.
  *
 */
+#include "drcsim_gazebo_ros_plugins/ContactModelPlugin.hpp"
 
-#include <gazebo/physics/ContactManager.hh>
-#include <gazebo/transport/transport.hh>
-#include "drcsim_gazebo_ros_plugins/ContactModelPlugin.h"
+#include <string>
+#include <vector>
 
-using namespace gazebo;
-GZ_REGISTER_MODEL_PLUGIN(ContactModelPlugin)
+#include <gz/common/Console.hh>
+#include <gz/msgs/contacts.pb.h>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/components/Collision.hh>
+#include <gz/sim/components/ContactSensorData.hh>
+#include <gz/sim/components/Link.hh>
+#include <gz/sim/components/Name.hh>
+#include <gz/transport/TopicUtils.hh>
 
-/////////////////////////////////////////////////
-ContactModelPlugin::ContactModelPlugin() : ModelPlugin()
+using drcsim_gazebo_ros_plugins::ContactModelPlugin;
+
+//////////////////////////////////////////////////
+void ContactModelPlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &)
 {
-}
-
-/////////////////////////////////////////////////
-ContactModelPlugin::~ContactModelPlugin()
-{
-  this->contactSub.reset();
-  this->contactsPub.reset();
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-  this->collisions.clear();
-}
-
-/////////////////////////////////////////////////
-void ContactModelPlugin::Load(physics::ModelPtr _model, sdf::ElementPtr _sdf)
-{
-  this->model = _model;
-  this->world = _model->GetWorld();
-  this->sdf = _sdf;
-
-  std::string collisionName;
-  std::string collisionScopedName;
-
-  if (_sdf->HasElement("contact"))
-  {
-    sdf::ElementPtr collisionElem =
-        _sdf->GetElement("contact")->GetElement("collision");
-    // Get all the collision elements
-    while (collisionElem)
-    {
-      // get collision name
-      collisionName = collisionElem->Get<std::string>();
-      this->collisions.insert(_model->GetName() + "::" + collisionName);
-      collisionElem = collisionElem->GetNextElement("collision");
-    }
+  this->model = gz::sim::Model(_entity);
+  if (!this->model.Valid(_ecm)) {
+    gzerr << "ContactModelPlugin should be attached to a model entity. "
+          << "Failed to initialize." << std::endl;
+    return;
   }
+  this->sdfConfig = _sdf;
 }
 
 //////////////////////////////////////////////////
-void ContactModelPlugin::Init()
+void ContactModelPlugin::Load(gz::sim::EntityComponentManager & _ecm)
 {
-  this->node.reset(new transport::Node());
-  this->node->Init(this->world->GetName());
-
-  // Create a publisher for the contact information.
-  if (this->sdf->HasElement("contact") &&
-      this->sdf->GetElement("contact")->HasElement("topic") &&
-      this->sdf->GetElement("contact")->Get<std::string>("topic")
-      != "__default_topic__")
-  {
-    // This will create a topic based on the name specified in SDF.
-    this->contactsPub = this->node->Advertise<msgs::Contacts>(
-        this->sdf->GetElement("contact")->Get<std::string>("topic"));
-  }
-  else
-  {
-    // This will create a topic based on the name of the parent and the
-    // name of the sensor.
-    static int contactNum = 0;
-    std::string topicName = "~/";
-    topicName += this->model->GetName() + "/contact_" +
-        boost::lexical_cast<std::string>(contactNum++);
-    boost::replace_all(topicName, "::", "/");
-    this->filterTopicName = this->model->GetName() + "_tactile_" +
-        boost::lexical_cast<std::string>(contactNum) + "_filter";
-    boost::replace_all(this->filterTopicName, "::", "/");
-    this->contactsPub = this->node->Advertise<msgs::Contacts>(topicName);
-  }
-
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-      boost::bind(&ContactModelPlugin::OnUpdate, this));
-}
-
-//////////////////////////////////////////////////
-void ContactModelPlugin::OnUpdate()
-{
-  // only subscribe when needed
-  if (this->contactsPub && this->contactsPub->HasConnections())
-  {
-    if (!this->contactSub)
-    {
-      if (!this->collisions.empty())
-      {
-        // request the contact manager to publish messages to a custom topic for
-        // this sensor
-        physics::ContactManager *mgr =
-            this->world->GetPhysicsEngine()->GetContactManager();
-        std::vector<std::string> collisionNames;
-        std::copy(this->collisions.begin(), this->collisions.end(),
-            std::back_inserter(collisionNames));
-        std::string topic = mgr->CreateFilter(this->filterTopicName,
-            collisionNames);
-        this->contactSub = this->node->Subscribe(topic,
-            &ContactModelPlugin::OnContacts, this);
-      }
-    }
-  }
-  else
-  {
+  if (!this->sdfConfig->HasElement("contact")) {
     return;
   }
+  auto contactElem = this->sdfConfig->FindElement("contact");
 
-  boost::mutex::scoped_lock lock(this->mutex);
-  boost::unordered_set<std::string>::iterator collIter;
-  std::string collision1;
-
-  // Don't do anything if there is no new data to process.
-  if (this->incomingContacts.empty())
-    return;
-
-  // Clear the outgoing contact message.
-  this->contactsMsg.clear_contact();
-
-  // Iterate over all the contact messages
-  for (ContactMsgs_L::iterator iter = this->incomingContacts.begin();
-      iter != this->incomingContacts.end(); ++iter)
+  for (auto collisionElem = contactElem->FindElement("collision");
+    collisionElem;
+    collisionElem = collisionElem->GetNextElement("collision"))
   {
-    // Iterate over all the contacts in the message
-    for (int i = 0; i < (*iter)->contact_size(); ++i)
-    {
-      collision1 = (*iter)->contact(i).collision1();
+    this->collisionNames.push_back(collisionElem->Get<std::string>());
+  }
 
-      // Try to find the first collision's name
-      collIter = this->collisions.find(collision1);
+  std::string topicName;
+  if (contactElem->HasElement("topic")) {
+    topicName = contactElem->Get<std::string>("topic");
+  } else {
+    topicName = "/model/" + this->model.Name(_ecm) + "/contacts";
+  }
+  topicName = gz::transport::TopicUtils::AsValidTopic(topicName);
+  if (topicName.empty()) {
+    gzerr << "ContactModelPlugin: invalid topic name, plugin disabled."
+          << std::endl;
+    return;
+  }
+  this->contactsPub = this->node.Advertise<gz::msgs::Contacts>(topicName);
 
-      // If unable to find the first collision's name, try the second
-      if (collIter == this->collisions.end())
-      {
-        collision1 = (*iter)->contact(i).collision2();
-        collIter = this->collisions.find(collision1);
-      }
+  auto linkEntities =
+    _ecm.ChildrenByComponents(this->model.Entity(), gz::sim::components::Link());
+  for (const gz::sim::Entity linkEntity : linkEntities) {
+    const std::string & linkName =
+      _ecm.Component<gz::sim::components::Name>(linkEntity)->Data();
 
-      // If this model is monitoring one of the collision's in the
-      // contact, then add the contact to our outgoing message.
-      if (collIter != this->collisions.end())
-      {
-        int count = (*iter)->contact(i).position_size();
+    auto collisionEntities = _ecm.ChildrenByComponents(
+      linkEntity, gz::sim::components::Collision());
+    for (const gz::sim::Entity collisionEntity : collisionEntities) {
+      const std::string & collisionName =
+        _ecm.Component<gz::sim::components::Name>(collisionEntity)->Data();
+      const std::string scopedName = linkName + "::" + collisionName;
 
-        // Check to see if the contact arrays all have the same size.
-        if (count != (*iter)->contact(i).normal_size() ||
-            count != (*iter)->contact(i).wrench_size() ||
-            count != (*iter)->contact(i).depth_size())
-        {
-          gzerr << "Contact message has invalid array sizes\n";
-          continue;
+      bool wanted = false;
+      for (const std::string & name : this->collisionNames) {
+        if (name == scopedName) {
+          wanted = true;
+          break;
         }
-        // Copy the contact message.
-        msgs::Contact *contactMsg = this->contactsMsg.add_contact();
-        contactMsg->CopyFrom((*iter)->contact(i));
       }
+      if (!wanted) {
+        continue;
+      }
+
+      if (!_ecm.EntityHasComponentType(
+          collisionEntity, gz::sim::components::ContactSensorData::typeId))
+      {
+        _ecm.CreateComponent(
+          collisionEntity, gz::sim::components::ContactSensorData());
+      }
+      this->collisionEntities.push_back(collisionEntity);
     }
   }
 
-  // Clear the incoming contact list.
-  this->incomingContacts.clear();
-
-  // Generate an outgoing message only if someone is listening.
-  if (this->contactsPub && this->contactsPub->HasConnections())
-  {
-    msgs::Set(this->contactsMsg.mutable_time(), this->world->GetSimTime());
-    this->contactsPub->Publish(this->contactsMsg);
+  this->validConfig = !this->collisionEntities.empty();
+  if (!this->validConfig) {
+    gzerr << "ContactModelPlugin: none of the configured <collision> names "
+          << "matched a collision on model [" << this->model.Name(_ecm)
+          << "]." << std::endl;
   }
 }
 
 //////////////////////////////////////////////////
-void ContactModelPlugin::OnContacts(ConstContactsPtr &_msg)
+void ContactModelPlugin::PreUpdate(
+  const gz::sim::UpdateInfo &,
+  gz::sim::EntityComponentManager & _ecm)
 {
-  boost::mutex::scoped_lock lock(this->mutex);
-
-  // Store the contacts message for processing
-  this->incomingContacts.push_back(_msg);
-
-  // Prevent the incomingContacts list to grow indefinitely.
-  if (this->incomingContacts.size() > 100)
-    this->incomingContacts.pop_front();
+  if (!this->initialized && this->sdfConfig) {
+    // Deferred from Configure(): a model's child link/collision entities
+    // are not guaranteed to exist yet when Configure() runs.
+    this->Load(_ecm);
+    this->initialized = true;
+  }
 }
+
+//////////////////////////////////////////////////
+void ContactModelPlugin::PostUpdate(
+  const gz::sim::UpdateInfo & _info,
+  const gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->validConfig || _info.paused) {
+    return;
+  }
+
+  gz::msgs::Contacts contactsMsg;
+  for (const gz::sim::Entity collisionEntity : this->collisionEntities) {
+    const auto * contacts =
+      _ecm.Component<gz::sim::components::ContactSensorData>(collisionEntity);
+    if (!contacts) {
+      continue;
+    }
+    for (const auto & contact : contacts->Data().contact()) {
+      contactsMsg.add_contact()->CopyFrom(contact);
+    }
+  }
+
+  this->contactsPub.Publish(contactsMsg);
+}
+
+GZ_ADD_PLUGIN(ContactModelPlugin,
+              gz::sim::System,
+              ContactModelPlugin::ISystemConfigure,
+              ContactModelPlugin::ISystemPreUpdate,
+              ContactModelPlugin::ISystemPostUpdate)
+
+GZ_ADD_PLUGIN_ALIAS(ContactModelPlugin,
+    "drcsim_gazebo_ros_plugins::ContactModelPlugin")
