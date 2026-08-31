@@ -19,8 +19,9 @@
 #include <string>
 #include <vector>
 
-#include <gz/common/Console.hh>
 #include <gz/msgs/contacts.pb.h>
+
+#include <gz/common/Console.hh>
 #include <gz/plugin/Register.hh>
 #include <gz/sim/components/Collision.hh>
 #include <gz/sim/components/ContactSensorData.hh>

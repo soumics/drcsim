@@ -17,6 +17,7 @@
 #ifndef DRCSIM_GAZEBO_ROS_PLUGINS__CONTACTMODELPLUGIN_HPP_
 #define DRCSIM_GAZEBO_ROS_PLUGINS__CONTACTMODELPLUGIN_HPP_
 
+#include <memory>
 #include <string>
 #include <vector>
 
