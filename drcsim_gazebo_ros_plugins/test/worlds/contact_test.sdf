@@ -1,0 +1,55 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="contact_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="ground">
+      <static>true</static>
+      <link name="ground_link">
+        <collision name="ground_collision">
+          <geometry>
+            <box><size>2 2 0.2</size></box>
+          </geometry>
+        </collision>
+        <visual name="ground_visual">
+          <geometry>
+            <box><size>2 2 0.2</size></box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+
+    <model name="contact_test_model">
+      <pose>0 0 0.14 0 0 0</pose>
+      <static>false</static>
+      <link name="box_link">
+        <inertial>
+          <mass>1</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+        <collision name="box_collision">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+        </collision>
+        <visual name="box_visual">
+          <geometry>
+            <box><size>0.2 0.2 0.2</size></box>
+          </geometry>
+        </visual>
+      </link>
+
+      <plugin filename="ContactModelPlugin"
+              name="drcsim_gazebo_ros_plugins::ContactModelPlugin">
+        <contact>
+          <collision>box_link::box_collision</collision>
+          <topic>/contact_test/contacts</topic>
+        </contact>
+      </plugin>
+    </model>
+  </world>
+</sdf>
