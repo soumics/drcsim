@@ -1,0 +1,254 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="sandia_hand_full_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="sandia_hand_full_test_model">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="l_hand">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+        <!-- Falls into the plugin's "mid palm" (default) tactile bucket:
+             its name contains "palm" but none of "_1"/"_3"/"_4"/"_5", and
+             it overlaps the static "obstacle" box below from the very
+             first step, matching contact_test.sdf's pattern for a
+             guaranteed immediate contact. -->
+        <collision name="palm_mid_collision">
+          <pose>0 0 -0.05 0 0 0</pose>
+          <geometry>
+            <box><size>0.06 0.06 0.06</size></box>
+          </geometry>
+        </collision>
+        <visual name="palm_visual">
+          <pose>0 0 -0.05 0 0 0</pose>
+          <geometry>
+            <box><size>0.06 0.06 0.06</size></box>
+          </geometry>
+        </visual>
+      </link>
+
+      <joint name="anchor" type="fixed">
+        <parent>world</parent>
+        <child>l_hand</child>
+      </joint>
+
+      <!-- Finger 0: joints left_f0_j0/j1/j2 -->
+      <link name="l_f0_link0">
+        <pose>0.05 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f0_j0" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_f0_link0</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f0_link1">
+        <pose>0.09 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f0_j1" type="revolute">
+        <parent>l_f0_link0</parent>
+        <child>l_f0_link1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f0_link2">
+        <pose>0.13 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f0_j2" type="revolute">
+        <parent>l_f0_link1</parent>
+        <child>l_f0_link2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+
+      <!-- Finger 1: joints left_f1_j0/j1/j2 -->
+      <link name="l_f1_link0">
+        <pose>0 0.05 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f1_j0" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_f1_link0</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f1_link1">
+        <pose>0 0.09 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f1_j1" type="revolute">
+        <parent>l_f1_link0</parent>
+        <child>l_f1_link1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f1_link2">
+        <pose>0 0.13 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f1_j2" type="revolute">
+        <parent>l_f1_link1</parent>
+        <child>l_f1_link2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+
+      <!-- Finger 2: joints left_f2_j0/j1/j2 -->
+      <link name="l_f2_link0">
+        <pose>-0.05 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f2_j0" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_f2_link0</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f2_link1">
+        <pose>-0.09 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f2_j1" type="revolute">
+        <parent>l_f2_link0</parent>
+        <child>l_f2_link1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f2_link2">
+        <pose>-0.13 0 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f2_j2" type="revolute">
+        <parent>l_f2_link1</parent>
+        <child>l_f2_link2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+
+      <!-- Finger 3: joints left_f3_j0/j1/j2 -->
+      <link name="l_f3_link0">
+        <pose>0 -0.05 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f3_j0" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_f3_link0</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f3_link1">
+        <pose>0 -0.09 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f3_j1" type="revolute">
+        <parent>l_f3_link0</parent>
+        <child>l_f3_link1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="l_f3_link2">
+        <pose>0 -0.13 0 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_f3_j2" type="revolute">
+        <parent>l_f3_link1</parent>
+        <child>l_f3_link2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+
+      <plugin filename="SandiaHandPlugin"
+              name="drcsim_gazebo_ros_plugins::SandiaHandPlugin">
+        <side>left</side>
+      </plugin>
+    </model>
+
+    <model name="obstacle">
+      <static>true</static>
+      <pose>0 0 0.92 0 0 0</pose>
+      <link name="obstacle_link">
+        <collision name="obstacle_collision">
+          <geometry>
+            <box><size>1 1 0.1</size></box>
+          </geometry>
+        </collision>
+        <visual name="obstacle_visual">
+          <geometry>
+            <box><size>1 1 0.1</size></box>
+          </geometry>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
