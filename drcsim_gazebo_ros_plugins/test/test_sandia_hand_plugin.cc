@@ -54,7 +54,8 @@ TEST(SandiaHandPluginTest, StandsUpRosInterfaceInStumpsMode)
   // real time for ROS graph discovery to complete.
   fixture.Server()->Run(true /*blocking*/, 200 /*iterations*/, false /*paused*/);
 
-  auto testNode = std::make_shared<rclcpp::Node>("test_observer");
+  rclcpp::Node::SharedPtr testNode =
+    std::make_shared<rclcpp::Node>("test_observer");
 
   bool sawJointStatesPublisher = false;
   bool sawImuPublisher = false;
@@ -79,7 +80,8 @@ TEST(SandiaHandPluginTest, StandsUpRosInterfaceInStumpsMode)
   EXPECT_TRUE(sawImuPublisher);
   EXPECT_TRUE(sawTactilePublisher);
 
-  auto dampingClient = testNode->create_client<atlas_msgs::srv::SetJointDamping>(
+  rclcpp::Client<atlas_msgs::srv::SetJointDamping>::SharedPtr dampingClient =
+    testNode->create_client<atlas_msgs::srv::SetJointDamping>(
     "/sandia_hands/l_hand/set_joint_damping");
   EXPECT_TRUE(dampingClient->wait_for_service(std::chrono::seconds(2)));
 }

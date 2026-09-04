@@ -682,53 +682,53 @@ void SandiaHandPlugin::FillTactileData(
             }
             break;
           case 3:
-          {
-            // Sensors on bottom palm: 23 24; 25 26; 27 28; 29 30; 31 32
-            const int baseIndex = 22;
-            if (pos.Z() > 0) {
-              vPosInCol = std::clamp(
-                (pos.Y() + this->palmColLength[info.palmIdx] / 2.0) /
+            {
+              // Sensors on bottom palm: 23 24; 25 26; 27 28; 29 30; 31 32
+              const int baseIndex = 22;
+              if (pos.Z() > 0) {
+                vPosInCol = std::clamp(
+                  (pos.Y() + this->palmColLength[info.palmIdx] / 2.0) /
                 this->palmColLength[info.palmIdx], 0.0, 1.0);
-              hPosInCol = std::clamp(
-                (pos.X() + this->palmColWidth[info.palmIdx] / 2.0) /
+                hPosInCol = std::clamp(
+                  (pos.X() + this->palmColWidth[info.palmIdx] / 2.0) /
                 this->palmColWidth[info.palmIdx], 0.0, 1.0);
 
-              ai = this->palmVerSize[info.palmIdx] -
-                std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
-              aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
-              ai = std::max(ai, 0);
-              aj = std::max(aj, 0);
-              aIndex = baseIndex + ai * this->palmHorSize[info.palmIdx] + aj;
-              _tactileMsg.palm[aIndex] = tactileOutput;
+                ai = this->palmVerSize[info.palmIdx] -
+                  std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
+                aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
+                ai = std::max(ai, 0);
+                aj = std::max(aj, 0);
+                aIndex = baseIndex + ai * this->palmHorSize[info.palmIdx] + aj;
+                _tactileMsg.palm[aIndex] = tactileOutput;
+              }
+              break;
             }
-            break;
-          }
           default:
-          {
+            {
             // Sensors on mid palm (default): 14 15 16 17; 18 19 20 21 22
-            const int baseIndex = 13;
-            vPosInCol = std::clamp(
+              const int baseIndex = 13;
+              vPosInCol = std::clamp(
               pos.Y() / this->palmColLength[4], 0.0, 1.0);
-            hPosInCol = std::clamp(
-              (pos.Z() + this->palmColWidth[4] / 2.0) /
+              hPosInCol = std::clamp(
+                (pos.Z() + this->palmColWidth[4] / 2.0) /
               this->palmColWidth[4], 0.0, 1.0);
 
-            ai = this->palmVerSize[4] -
-              std::ceil(vPosInCol * this->palmVerSize[4]) - 1;
-            aj = std::ceil(hPosInCol * this->palmHorSize[4]) - 1;
-            ai = std::max(ai, 0);
-            aj = std::max(aj, 0);
-            if (ai == 0) {
-              // Four sensors on the first row, five on the second, so
-              // adjust aj for sensors 16 and 17.
-              aj = (aj > 2) ? aj - 1 : aj;
-              aIndex = baseIndex + aj;
-            } else {
-              aIndex = baseIndex + ai * (this->palmHorSize[4] - 1) + aj;
+              ai = this->palmVerSize[4] -
+                std::ceil(vPosInCol * this->palmVerSize[4]) - 1;
+              aj = std::ceil(hPosInCol * this->palmHorSize[4]) - 1;
+              ai = std::max(ai, 0);
+              aj = std::max(aj, 0);
+              if (ai == 0) {
+                // Four sensors on the first row, five on the second, so
+                // adjust aj for sensors 16 and 17.
+                aj = (aj > 2) ? aj - 1 : aj;
+                aIndex = baseIndex + aj;
+              } else {
+                aIndex = baseIndex + ai * (this->palmHorSize[4] - 1) + aj;
+              }
+              _tactileMsg.palm[aIndex] = tactileOutput;
+              break;
             }
-            _tactileMsg.palm[aIndex] = tactileOutput;
-            break;
-          }
         }
       } else if (info.fingerIdx != -1 && info.fingerColIdx != -1 && pos.Y() > 0) {
         // Finger, and the contact is on the inside of the hand (palm side).

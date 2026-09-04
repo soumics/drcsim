@@ -17,6 +17,8 @@
 #ifndef DRCSIM_GAZEBO_ROS_PLUGINS__SANDIAHANDPLUGIN_HPP_
 #define DRCSIM_GAZEBO_ROS_PLUGINS__SANDIAHANDPLUGIN_HPP_
 
+#include <gz/msgs/contacts.pb.h>
+
 #include <chrono>
 #include <memory>
 #include <mutex>
@@ -26,7 +28,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include <gz/msgs/contacts.pb.h>
 #include <gz/sim/Entity.hh>
 #include <gz/sim/Model.hh>
 #include <gz/sim/System.hh>
