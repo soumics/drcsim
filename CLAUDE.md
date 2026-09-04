@@ -209,13 +209,30 @@ not happen automatically.
      and hasn't been revisited, but a `.cc`→`.cpp` rename would probably
      let it use `Component<T>()` directly if ever revisited.
 
-2. ✅ `SandiaHandPlugin` — **done, 100% (8/8 checks), merged into
+2. ✅ `SandiaHandPlugin` — **done, 100% (9/9 checks), merged into
    `ros2-jazzy-harmonic`.** The first ROS-coupled plugin in this package
    (`ContactModelPlugin` had none despite the package name): 12-joint PID
    position/velocity control from `osrf_msgs/JointCommands`,
    `sensor_msgs/JointState` feedback, an IMU feed, a
    `SetJointDamping`/`GetJointDamping` service pair, and a tactile sensor
-   array synthesized from contact data. Notes:
+   array synthesized from contact data. Test coverage: a stumps-mode test
+   (no hand joints present, just checks the ROS interface stands up) plus
+   a full 12-joint test (`test_sandia_hand_plugin_joints.cpp`, a real
+   4-finger hand model) that publishes a `JointCommands` message and
+   confirms the joint actually moved, and confirms a tactile value
+   changes from default when a dynamic object rests under gravity on a
+   world-anchored palm collision. That second test's world went through
+   one real bug fix: a fixed-joint-anchored link touching a `<static>`
+   object produces **exactly zero** contact force (nothing for the
+   solver to resist), and the plugin's own force→tactile-value scaling
+   formula maps zero force to precisely `minTactileOut` — indistinguishable
+   from "no contact" at all. Fixed by making the touching object dynamic
+   and gravity-loaded instead of static, so there's a real, sustained
+   normal force to report. **If a future contact-based test's assertion
+   passes-when-it-shouldn't or fails-when-contact-looks-real, check
+   whether both colliding bodies are actually free to generate a
+   nonzero constraint force before assuming the detection logic is
+   broken.** Notes:
    - **Established the ROS-integration pattern every remaining ROS-coupled
      Tier 2 plugin should reuse**: each plugin owns its own `rclcpp::Node`,
      spun on a dedicated thread via a `SingleThreadedExecutor`. Calls
