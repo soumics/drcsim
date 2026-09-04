@@ -119,7 +119,7 @@ if(BUILD_TESTING)
   add_dependencies(test_contact_model_plugin ContactModelPlugin)
 
   ament_add_gtest(test_sandia_hand_plugin
-    test/test_sandia_hand_plugin.cc)
+    test/test_sandia_hand_plugin.cpp)
   target_link_libraries(test_sandia_hand_plugin
     gz-sim8::gz-sim8
   )
