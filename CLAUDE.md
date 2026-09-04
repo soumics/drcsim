@@ -201,47 +201,90 @@ not happen automatically.
      ...<topic>...</topic></contact>` — confirmed against real usage in
      `sandia_hand_description/urdf/sandia_hand.gazebo.xacro`.
    - ROS 1's bare `time`-family lesson doesn't apply here (no ROS messages),
-     but a **new, expensive lesson** did: see "The `ament_uncrustify`
-     `Component<T>()` saga" below before writing any test that calls
-     `EntityComponentManager::Component<T>()`.
+     but a **new, expensive lesson** did — see "`.cc` vs `.cpp`: the real
+     cause of the `ament_uncrustify` template-call saga" below. At the time
+     this package was ported the root cause wasn't known yet, so its test
+     works around the symptom (`EntityHasComponentType` instead of
+     `Component<T>()`) rather than the cause; that workaround is harmless
+     and hasn't been revisited, but a `.cc`→`.cpp` rename would probably
+     let it use `Component<T>()` directly if ever revisited.
 
-**Remaining Tier 2 plugins** (each its own `port/<name>` branch): SandiaHandPlugin,
-IRobotHandPlugin (needs the `handle_msgs` camelCase→snake_case field fix noted
-in Tier 0), RobotiqHandPlugin, MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin,
+2. ✅ `SandiaHandPlugin` — **done, 100% (8/8 checks), merged into
+   `ros2-jazzy-harmonic`.** The first ROS-coupled plugin in this package
+   (`ContactModelPlugin` had none despite the package name): 12-joint PID
+   position/velocity control from `osrf_msgs/JointCommands`,
+   `sensor_msgs/JointState` feedback, an IMU feed, a
+   `SetJointDamping`/`GetJointDamping` service pair, and a tactile sensor
+   array synthesized from contact data. Notes:
+   - **Established the ROS-integration pattern every remaining ROS-coupled
+     Tier 2 plugin should reuse**: each plugin owns its own `rclcpp::Node`,
+     spun on a dedicated thread via a `SingleThreadedExecutor`. Calls
+     `rclcpp::init()` only if `rclcpp::ok()` is false, and **never** calls
+     `rclcpp::shutdown()` from its destructor — multiple such plugins
+     (RobotiqHandPlugin, IRobotHandPlugin, MultiSenseSLPlugin, VRCPlugin,
+     AtlasPlugin, DRCVehicleROSPlugin, all still to come) share one process
+     and one global rclcpp context; only cancel/join this instance's own
+     executor thread and reset its own node/pub/sub/service handles.
+   - No `gazebo::sensors::ImuSensor` equivalent readable off the ECS in
+     gz-sim (IMU sensor output is transport-only, and needs the
+     `gz-sim-imu-system` world plugin loaded). Reads the IMU link's raw
+     physics state directly instead: `Link::WorldPose`/
+     `WorldAngularVelocity`/`WorldLinearAcceleration` (the latter two need
+     `EnableVelocityChecks`/`EnableAccelerationChecks` called once first),
+     world-frame vectors rotated into the link's own frame via
+     `pose.Rot().RotateVectorReverse(worldVec)`. Trades away the
+     SDF-configured sensor noise model for a much simpler implementation.
+   - No runtime joint-damping mutation API in gz-sim (same gap as
+     `DRCVehiclePlugin`'s already-dropped `Set*Limits`) — the damping
+     service now only updates a cached, clamped value; request/response
+     contract unchanged.
+   - No default per-model aggregate contact topic in gz-sim — reused
+     `ContactModelPlugin`'s force-create-`ContactSensorData` technique on
+     this hand's own finger/palm collisions, matching contacts back to
+     them by `gz::msgs::Entity` id (`contact.collision1().id()`, a raw
+     `uint64` equal to the `gz::sim::Entity` value) instead of the
+     original's collision-name substring matching — exact instead of
+     fuzzy, and a good default technique for any future plugin needing
+     "which of my own collisions is this contact about".
+   - PID gains: originally pulled per-joint `p`/`i`/`d`/`i_clamp` off the
+     ROS param server (populated by a launch file this migration hasn't
+     reached yet). Declared as ROS 2 parameters instead
+     (`gains.f<N>_j<M>.{p,i,d,i_clamp}`, default `0.0`) — settable the
+     same way once a launch file exists to provide them.
+
+**Remaining Tier 2 plugins** (each its own `port/<name>` branch): IRobotHandPlugin
+(needs the `handle_msgs` camelCase→snake_case field fix noted in Tier 0),
+RobotiqHandPlugin, MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin,
 AtlasPlugin/V3/V4/V5 (biggest/riskiest — ties into the AtlasSimInterface shim
 libs from `drcsim_model_resources`), DRCVehicleROSPlugin (**subclasses**
-`DRCVehiclePlugin` — see below), ContactModelPlugin ✅, then the 8 CLI
-executables + `actionlib_server` + `gz_model_teleport` + `test_ros_plugin`.
+`DRCVehiclePlugin` — see below), ContactModelPlugin ✅, SandiaHandPlugin ✅,
+then the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
+`test_ros_plugin`.
 
-### The `ament_uncrustify` `Component<T>()` saga — read before touching this again
+### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
-`EntityComponentManager::Component<T>()` (and no other templated call found so
-far) triggers a genuine, unexplained `ament_uncrustify` bug in
-`test_contact_model_plugin.cc`: uncrustify misparses `Component<T>(...)` as a
-comparison expression and wants spaces around `<`/`>`, which `cpplint` then
-rejects — a real disagreement between the two tools, not a mistake in the code.
-**Nine restructuring attempts, all failed, each isolating one variable:**
-return vs. assign-then-use, file-scope free function vs. lambda vs. an
-out-of-line `ClassName::Method()` definition (matching
-`ContactModelPlugin::PostUpdate()`'s own passing shape exactly), a `for` loop
-copied statement-for-statement from the passing plugin code, a long vs. short
-type-alias name, one-line vs. two-line call — **every single one still
-failed**, including a plain `std::vector<gz::sim::Entity>` **parameter
-declaration** with no relation to `Component<T>()` at all. Meanwhile the
-identical `_ecm.Component<gz::sim::components::ContactSensorData>(...)` call
-passes with zero divergence inside `ContactModelPlugin.cpp` itself. **The
-actual cause was never found.**
-**Resolution: stop fighting it.** Don't call `EntityComponentManager::
-Component<T>()` in a test file at all if a non-template alternative proves the
-same thing. `EntityHasComponentType(entity, ComponentT::typeId)` takes no
-template argument and was enough to prove `ContactModelPlugin` correctly
-identified and tagged the configured collision — the test now uses that
-instead of also reading back the resulting contact list's content. If a future
-test genuinely needs typed component *data* (not just presence), expect this
-same wall and don't burn more than one or two attempts on it — go straight to
-a non-template route or accept the weaker assertion.
-
-## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
+**If a test file (or any file) needs an explicit template call like
+`std::make_shared<T>(...)`, `create_client<T>(...)`, or
+`EntityComponentManager::Component<T>(...)`, name it `.cpp`, not `.cc`.**
+This was a multi-package, multi-day mystery — `ament_uncrustify` kept
+misparsing these calls as comparison expressions (wanting spaces around `<`
+and `>`, which `cpplint` then rejects) no matter how the surrounding code was
+restructured: return-vs-assign, free function vs. lambda vs. out-of-line
+`ClassName::Method()`, long vs. short type names, one-line vs. multi-line,
+even a plain `std::vector<T>` parameter declaration with no relation to any
+of the above. **Every failing instance, across both `ContactModelPlugin` and
+`SandiaHandPlugin`'s test files, was in a `.cc` file. Every passing instance
+was in a `.cpp` file** — including the identical call, verbatim, in both:
+`test_sandia_hand_plugin.cc` failed on `std::make_shared<rclcpp::Node>(...)`
+in every restructuring tried; renaming the file to
+`test_sandia_hand_plugin.cpp` with **no other change** fixed it immediately.
+`ament_uncrustify`'s language/config detection apparently treats `.cc`
+differently from `.cpp` in this toolchain, in a way that breaks template
+disambiguation specifically. `test_contact_model_plugin.cc` never got this
+fix applied (its workaround — avoiding `Component<T>()` via
+`EntityHasComponentType` instead — already shipped and merged, and is
+harmless as-is), but any *new* `.cc` file that needs an explicit template
+call should just be a `.cpp` file from the start.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
@@ -530,3 +573,8 @@ turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
   `#endif  // PKGNAME__FILENAME_HPP_` / `}  // namespace pkgname` comment, no blank
   line after inline `public:`/`private:` labels, `using foo::Bar;` instead of
   `using namespace foo;`, and `} else if (` on one line (not `}\nelse if (`).
+- **Name any `.cc`/`.cpp` file that uses an explicit template call
+  (`std::make_shared<T>()`, `create_client<T>()`, `Component<T>()`, ...)
+  `.cpp`, never `.cc`** — `ament_uncrustify` misparses these as comparison
+  expressions in `.cc` files specifically (see the Tier 2 section's
+  "`.cc` vs `.cpp`" writeup for the multi-day version of this one-liner).
