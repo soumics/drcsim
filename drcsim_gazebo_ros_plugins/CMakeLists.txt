@@ -129,6 +129,23 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_sandia_hand_plugin SandiaHandPlugin)
+
+  ament_add_gtest(test_sandia_hand_plugin_joints
+    test/test_sandia_hand_plugin_joints.cpp)
+  target_link_libraries(test_sandia_hand_plugin_joints
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_sandia_hand_plugin_joints
+    rclcpp
+    osrf_msgs
+    sandia_hand_msgs
+    sensor_msgs
+  )
+  target_compile_definitions(test_sandia_hand_plugin_joints PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:SandiaHandPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_sandia_hand_plugin_joints SandiaHandPlugin)
 endif()
 
 ament_package()
