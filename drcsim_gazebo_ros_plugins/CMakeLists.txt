@@ -12,6 +12,12 @@ find_package(gz-transport13 REQUIRED)
 find_package(gz-msgs10 REQUIRED)
 find_package(gz-common5 REQUIRED)
 
+find_package(rclcpp REQUIRED)
+find_package(atlas_msgs REQUIRED)
+find_package(osrf_msgs REQUIRED)
+find_package(sandia_hand_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+
 include_directories(include)
 
 add_library(ContactModelPlugin SHARED src/ContactModelPlugin.cpp)
@@ -23,6 +29,27 @@ target_link_libraries(ContactModelPlugin
   gz-common5::gz-common5
 )
 install(TARGETS ContactModelPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+add_library(SandiaHandPlugin SHARED src/SandiaHandPlugin.cpp)
+target_link_libraries(SandiaHandPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+)
+ament_target_dependencies(SandiaHandPlugin
+  rclcpp
+  atlas_msgs
+  osrf_msgs
+  sandia_hand_msgs
+  sensor_msgs
+)
+install(TARGETS SandiaHandPlugin
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -52,6 +79,8 @@ if(BUILD_TESTING)
   set(AMENT_LINT_PORTED
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/ContactModelPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ContactModelPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/SandiaHandPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/SandiaHandPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -88,6 +117,18 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_contact_model_plugin ContactModelPlugin)
+
+  ament_add_gtest(test_sandia_hand_plugin
+    test/test_sandia_hand_plugin.cc)
+  target_link_libraries(test_sandia_hand_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_sandia_hand_plugin rclcpp atlas_msgs)
+  target_compile_definitions(test_sandia_hand_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:SandiaHandPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_sandia_hand_plugin SandiaHandPlugin)
 endif()
 
 ament_package()

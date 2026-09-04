@@ -14,232 +14,175 @@
  * limitations under the License.
  *
 */
+#include "drcsim_gazebo_ros_plugins/SandiaHandPlugin.hpp"
+
+#include <gz/msgs/contacts.pb.h>
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
-#include <sensor_msgs/Imu.h>
-#include <sandia_hand_msgs/RawTactile.h>
 
-#include <gazebo/transport/Node.hh>
+#include <gz/common/Console.hh>
+#include <gz/math/Pose3.hh>
+#include <gz/math/Vector3.hh>
+#include <gz/msgs/Utility.hh>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/Joint.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/Util.hh>
+#include <gz/sim/components/Collision.hh>
+#include <gz/sim/components/ContactSensorData.hh>
+#include <gz/sim/components/Link.hh>
+#include <gz/sim/components/Name.hh>
 
-#include "drcsim_gazebo_ros_plugins/GazeboCompat.hh"
-#include "drcsim_gazebo_ros_plugins/SandiaHandPlugin.h"
+using drcsim_gazebo_ros_plugins::SandiaHandPlugin;
 
-using std::string;
-
-namespace gazebo
-{
-GZ_REGISTER_MODEL_PLUGIN(SandiaHandPlugin)
-
-////////////////////////////////////////////////////////////////////////////////
-// Constructor
+//////////////////////////////////////////////////
 SandiaHandPlugin::SandiaHandPlugin()
 {
-  this->hasStumps = false;
-  this->tactileConnectCount = 0;
-  this->pmq = new PubMultiQueue();
-  this->rosNode = NULL;
+  this->jointDampingMin.assign(kNumJoints, 1.0);
+  this->jointDampingMax.assign(kNumJoints, 30.0);
+  this->jointDampingCurrent.assign(kNumJoints, 1.0);
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Destructor
+//////////////////////////////////////////////////
 SandiaHandPlugin::~SandiaHandPlugin()
 {
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-  delete this->pmq;
-  this->rosNode->shutdown();
-  this->rosQueue.clear();
-  this->rosQueue.disable();
-  this->callbackQueeuThread.join();
-  delete this->rosNode;
+  if (this->executor) {
+    this->executor->cancel();
+  }
+  if (this->rosSpinThread.joinable()) {
+    this->rosSpinThread.join();
+  }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Load the controller
-void SandiaHandPlugin::Load(physics::ModelPtr _parent,
-                                 sdf::ElementPtr _sdf)
+//////////////////////////////////////////////////
+void SandiaHandPlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &)
 {
-  this->model = _parent;
+  this->model = gz::sim::Model(_entity);
+  if (!this->model.Valid(_ecm)) {
+    gzerr << "SandiaHandPlugin should be attached to a model entity. "
+          << "Failed to initialize." << std::endl;
+    return;
+  }
+  this->sdfConfig = _sdf;
+}
 
-  // Get the world name.
-  this->world = this->model->GetWorld();
-  this->sdf = _sdf;
-  this->lastControllerUpdateTime = this->world->GetSimTime();
+//////////////////////////////////////////////////
+void SandiaHandPlugin::PreUpdate(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->initialized && this->sdfConfig) {
+    // Deferred from Configure(): a model's child link/collision/joint
+    // entities are not guaranteed to exist yet when Configure() runs.
+    this->Load(_ecm);
+    this->initialized = true;
+  }
 
-  // determine which hand (left/right)
-  if(!this->sdf->HasElement("side") ||
-     !this->sdf->GetElement("side")->GetValue()->Get(this->side) ||
-     ((this->side != "left") && (this->side != "right")))
-    {
-      gzerr << "Failed to determine which hand we're controlling; "
-        "aborting plugin load." << std::endl;
-      return;
-    }
+  if (this->validConfig) {
+    this->UpdateStates(_info, _ecm);
+  }
+}
 
-  gzlog << "SandiaHandPlugin loading for " << this->side << " hand." <<
-    std::endl;
+//////////////////////////////////////////////////
+void SandiaHandPlugin::Load(gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->sdfConfig->HasElement("side")) {
+    gzerr << "Failed to determine which hand we're controlling; "
+          << "aborting plugin load." << std::endl;
+    return;
+  }
+  this->side = this->sdfConfig->Get<std::string>("side");
+  if (this->side != "left" && this->side != "right") {
+    gzerr << "Failed to determine which hand we're controlling; "
+          << "aborting plugin load." << std::endl;
+    return;
+  }
 
-  // initialize imu
-  this->ImuLinkName = this->side[0] + std::string("_hand");
-  this->lastImuTime = this->world->GetSimTime();
+  gzmsg << "SandiaHandPlugin loading for " << this->side << " hand."
+        << std::endl;
 
-  // get joints
-  this->jointNames.push_back(this->side+"_f0_j0");
-  this->jointNames.push_back(this->side+"_f0_j1");
-  this->jointNames.push_back(this->side+"_f0_j2");
-  this->jointNames.push_back(this->side+"_f1_j0");
-  this->jointNames.push_back(this->side+"_f1_j1");
-  this->jointNames.push_back(this->side+"_f1_j2");
-  this->jointNames.push_back(this->side+"_f2_j0");
-  this->jointNames.push_back(this->side+"_f2_j1");
-  this->jointNames.push_back(this->side+"_f2_j2");
-  this->jointNames.push_back(this->side+"_f3_j0");
-  this->jointNames.push_back(this->side+"_f3_j1");
-  this->jointNames.push_back(this->side+"_f3_j2");
+  this->imuLinkName = this->side.substr(0, 1) + "_hand";
 
-  this->joints.resize(this->jointNames.size());
-
-  // Get hand joints
-  {
-    unsigned int jointCount = 0;
-    for (unsigned int i = 0; i < this->joints.size(); ++i)
-    {
-      this->joints[i] = this->model->GetJoint(this->jointNames[i]);
-      if (this->joints[i])
-        ++jointCount;
-    }
-    if (jointCount == 0)
-    {
-      this->hasStumps = true;
-      ROS_INFO("No sandia hand joints found, load as stumps");
-    }
-    else if (jointCount != this->joints.size())
-    {
-      ROS_ERROR("Error loading sandia hand joints, plugin not loaded");
-      return;
+  this->jointNames.clear();
+  for (unsigned int f = 0; f < 4; ++f) {
+    for (unsigned int j = 0; j < 3; ++j) {
+      this->jointNames.push_back(
+        this->side + "_f" + std::to_string(f) + "_j" + std::to_string(j));
     }
   }
 
-  {
-    // kp_velocity bounds Nms/rad
-    this->jointDampingMax.push_back(30.0);  // f0_j0
-    this->jointDampingMax.push_back(30.0);  // f0_j1
-    this->jointDampingMax.push_back(30.0);  // f0_j2
-    this->jointDampingMax.push_back(30.0);  // f1_j0
-    this->jointDampingMax.push_back(30.0);  // f1_j1
-    this->jointDampingMax.push_back(30.0);  // f1_j2
-    this->jointDampingMax.push_back(30.0);  // f2_j0
-    this->jointDampingMax.push_back(30.0);  // f2_j1
-    this->jointDampingMax.push_back(30.0);  // f2_j2
-    this->jointDampingMax.push_back(30.0);  // f3_j0
-    this->jointDampingMax.push_back(30.0);  // f3_j1
-    this->jointDampingMax.push_back(30.0);  // f3_j2
-
-    this->jointDampingMin.push_back(1.0);  // f0_j0
-    this->jointDampingMin.push_back(1.0);  // f0_j1
-    this->jointDampingMin.push_back(1.0);  // f0_j2
-    this->jointDampingMin.push_back(1.0);  // f1_j0
-    this->jointDampingMin.push_back(1.0);  // f1_j1
-    this->jointDampingMin.push_back(1.0);  // f1_j2
-    this->jointDampingMin.push_back(1.0);  // f2_j0
-    this->jointDampingMin.push_back(1.0);  // f2_j1
-    this->jointDampingMin.push_back(1.0);  // f2_j2
-    this->jointDampingMin.push_back(1.0);  // f3_j0
-    this->jointDampingMin.push_back(1.0);  // f3_j1
-    this->jointDampingMin.push_back(1.0);  // f3_j2
+  this->jointEntities.resize(this->jointNames.size(), gz::sim::kNullEntity);
+  unsigned int jointCount = 0;
+  for (unsigned int i = 0; i < this->jointNames.size(); ++i) {
+    this->jointEntities[i] = this->model.JointByName(_ecm, this->jointNames[i]);
+    if (this->jointEntities[i] != gz::sim::kNullEntity) {
+      gz::sim::Joint(this->jointEntities[i]).EnablePositionCheck(_ecm);
+      gz::sim::Joint(this->jointEntities[i]).EnableVelocityCheck(_ecm);
+      ++jointCount;
+    }
+  }
+  if (jointCount == 0) {
+    this->hasStumps = true;
+    gzmsg << "No sandia hand joints found, loading as stumps" << std::endl;
+  } else if (jointCount != this->jointEntities.size()) {
+    gzerr << "Error loading sandia hand joints, plugin not loaded"
+          << std::endl;
+    return;
   }
 
-  this->errorTerms.resize(this->joints.size());
+  this->errorTerms.resize(this->jointNames.size());
+  this->jointStates.name = this->jointNames;
+  this->jointStates.position.assign(this->jointNames.size(), 0.0);
+  this->jointStates.velocity.assign(this->jointNames.size(), 0.0);
+  this->jointStates.effort.assign(this->jointNames.size(), 0.0);
 
-  this->jointStates.name.resize(this->joints.size());
-  this->jointStates.position.resize(this->joints.size());
-  this->jointStates.velocity.resize(this->joints.size());
-  this->jointStates.effort.resize(this->joints.size());
+  this->jointCommands.name = this->jointNames;
+  this->jointCommands.position.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.velocity.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.effort.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.kp_position.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.ki_position.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.kd_position.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.kp_velocity.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.i_effort_min.assign(this->jointNames.size(), 0.0);
+  this->jointCommands.i_effort_max.assign(this->jointNames.size(), 0.0);
 
-  for (unsigned int i = 0; i < this->joints.size(); ++i)
-  {
-    this->jointStates.name[i] = this->jointNames[i];
-    this->jointStates.position[i] = 0;
-    this->jointStates.velocity[i] = 0;
-    this->jointStates.effort[i] = 0;
+  // Get IMU link and enable the velocity/acceleration checks its world-frame
+  // state readout needs (see the class-level design note on IMU handling).
+  this->imuLinkEntity = this->model.LinkByName(_ecm, this->imuLinkName);
+  if (this->imuLinkEntity == gz::sim::kNullEntity) {
+    gzerr << this->imuLinkName << " not found" << std::endl;
+  } else {
+    gz::sim::Link imuLink(this->imuLinkEntity);
+    imuLink.EnableVelocityChecks(_ecm);
+    imuLink.EnableAccelerationChecks(_ecm);
   }
 
-  this->jointCommands.name.resize(this->joints.size());
-  this->jointCommands.position.resize(this->joints.size());
-  this->jointCommands.velocity.resize(this->joints.size());
-  this->jointCommands.effort.resize(this->joints.size());
-  this->jointCommands.kp_position.resize(this->joints.size());
-  this->jointCommands.ki_position.resize(this->joints.size());
-  this->jointCommands.kd_position.resize(this->joints.size());
-  this->jointCommands.kp_velocity.resize(this->joints.size());
-  this->jointCommands.i_effort_min.resize(this->joints.size());
-  this->jointCommands.i_effort_max.resize(this->joints.size());
-
-  for (unsigned i = 0; i < this->joints.size(); ++i)
-  {
-    this->errorTerms[i].q_p = 0;
-    this->errorTerms[i].d_q_p_dt = 0;
-    this->errorTerms[i].q_i = 0;
-    this->errorTerms[i].qd_p = 0;
-    if (!this->hasStumps)
-      this->jointCommands.name[i] = this->joints[i]->GetScopedName();
-    else
-      this->jointCommands.name[i] = this->jointNames[i];
-    this->jointCommands.position[i] = 0;
-    this->jointCommands.velocity[i] = 0;
-    this->jointCommands.effort[i] = 0;
-    this->jointCommands.kp_position[i] = 0;
-    this->jointCommands.ki_position[i] = 0;
-    this->jointCommands.kd_position[i] = 0;
-    this->jointCommands.kp_velocity[i] = 0;
-    this->jointCommands.i_effort_min[i] = 0;
-    this->jointCommands.i_effort_max[i] = 0;
-  }
-
-  // Get imu link
-  this->ImuLink = this->model->GetLink(this->ImuLinkName);
-  if (!this->ImuLink)
-    gzerr << this->ImuLinkName << " not found\n";
-
-  GAZEBO_DRCSIM_USING_DYNAMIC_POINTER_CAST;
-
-  // Get imu sensors
-  this->ImuSensor = dynamic_pointer_cast<sensors::ImuSensor>
-       (sensors::SensorManager::Instance()->GetSensor(
-        this->world->GetName() + "::" + this->ImuLink->GetScopedName()
-         + "::imu_sensor"));
-  if (!this->ImuSensor)
-    gzerr << "imu_sensor not found\n" << "\n";
-
-  // Tactile data
-  this->tactileFingerArraySize = 18;
-  this->tactilePalmArraySize = 32;
-
-  // Approximate output range of the tactile sensor
-  // determined by experimenting with the actual physical hand
+  // Tactile sensor output range, approximated from the physical hand.
   this->maxTactileOut = 33500;
   this->minTactileOut = 26500;
+  this->tactileFingerArraySize = 18;
+  this->tactilePalmArraySize = 32;
+  this->tactile.f0.assign(this->tactileFingerArraySize, this->minTactileOut);
+  this->tactile.f1.assign(this->tactileFingerArraySize, this->minTactileOut);
+  this->tactile.f2.assign(this->tactileFingerArraySize, this->minTactileOut);
+  this->tactile.f3.assign(this->tactileFingerArraySize, this->minTactileOut);
+  this->tactile.palm.assign(this->tactilePalmArraySize, this->minTactileOut);
 
-  this->tactile.f0.resize(this->tactileFingerArraySize);
-  this->tactile.f1.resize(this->tactileFingerArraySize);
-  this->tactile.f2.resize(this->tactileFingerArraySize);
-  this->tactile.f3.resize(this->tactileFingerArraySize);
-  this->tactile.palm.resize(this->tactilePalmArraySize);
-  for (int i = 0; i < this->tactileFingerArraySize; ++i)
-  {
-    this->tactile.f0[i] = this->minTactileOut;
-    this->tactile.f1[i] = this->minTactileOut;
-    this->tactile.f2[i] = this->minTactileOut;
-    this->tactile.f3[i] = this->minTactileOut;
-  }
-  for (int i = 0; i < this->tactilePalmArraySize; ++i)
-  {
-    this->tactile.palm[i] = this->minTactileOut;
-  }
-
-  if (!hasStumps)
-  {
-    // Sandia hand tactile dimensions taken from spec and adapted to fit on our
-    // sandia hand model
+  if (!this->hasStumps) {
+    // Sandia hand tactile dimensions taken from spec and adapted to fit on
+    // our sandia hand model.
     this->palmColWidth[0] = 0.01495;
     this->palmColLength[0] = 0.02341;
     this->palmColWidth[1] = 0.01495;
@@ -272,40 +215,163 @@ void SandiaHandPlugin::Load(physics::ModelPtr _parent,
     this->fingerHorSize[1] = 3;
     this->fingerVerSize[1] = 4;
 
-    this->node.reset(new transport::Node());
-    this->node->Init(this->world->GetName());
+    // Force-create ContactSensorData on this hand's own finger/palm
+    // collisions (same technique as ContactModelPlugin) and precompute
+    // each one's tactile-array bucket, keyed by entity id -- contacts are
+    // matched back to these by gz::msgs::Entity id, not name matching.
+    auto linkEntities = _ecm.ChildrenByComponents(
+      this->model.Entity(), gz::sim::components::Link());
+    for (const gz::sim::Entity linkEntity : linkEntities) {
+      auto collisionEntities = _ecm.ChildrenByComponents(
+        linkEntity, gz::sim::components::Collision());
+      for (const gz::sim::Entity collisionEntity : collisionEntities) {
+        const std::string & collisionName =
+          _ecm.Component<gz::sim::components::Name>(collisionEntity)->Data();
 
-    std::string modelName = this->model->GetName();
-    this->contactSub =
-        this->node->Subscribe("~/" + modelName + "/contact",
-        &SandiaHandPlugin::OnContacts, this);
+        bool isPalm = collisionName.find("palm") != std::string::npos;
+        bool isFinger = collisionName.find(this->side + "_f") !=
+          std::string::npos;
+        if (!isPalm && !isFinger) {
+          continue;
+        }
+
+        TactileCollisionInfo info;
+        info.isPalm = isPalm;
+        if (isPalm) {
+          if (collisionName.find("_3") != std::string::npos) {
+            info.palmIdx = 0;
+          } else if (collisionName.find("_4") != std::string::npos) {
+            info.palmIdx = 1;
+          } else if (collisionName.find("_5") != std::string::npos) {
+            info.palmIdx = 2;
+          } else if (collisionName.find("_1") != std::string::npos) {
+            info.palmIdx = 3;
+          } else {
+            info.palmIdx = 4;
+          }
+        } else {
+          if (collisionName.find("f0") != std::string::npos) {
+            info.fingerIdx = 0;
+          } else if (collisionName.find("f1") != std::string::npos) {
+            info.fingerIdx = 1;
+          } else if (collisionName.find("f2") != std::string::npos) {
+            info.fingerIdx = 2;
+          } else if (collisionName.find("f3") != std::string::npos) {
+            info.fingerIdx = 3;
+          }
+
+          if (collisionName.find("_1") != std::string::npos) {
+            info.fingerColIdx = 0;
+          } else if (collisionName.find("_2") != std::string::npos) {
+            info.fingerColIdx = 1;
+          }
+        }
+
+        if (!_ecm.EntityHasComponentType(
+            collisionEntity, gz::sim::components::ContactSensorData::typeId))
+        {
+          _ecm.CreateComponent(
+            collisionEntity, gz::sim::components::ContactSensorData());
+        }
+        this->tactileCollisions[collisionEntity] = info;
+      }
+    }
   }
 
-  // \todo: add ros topic / service to reset imu (imuReferencePose, etc.)
+  // ROS integration: multiple ROS-coupled plugins share one process and one
+  // global rclcpp context -- only initialize it if nothing has already,
+  // and never tear it down from this instance's destructor.
+  if (!rclcpp::ok()) {
+    rclcpp::init(0, nullptr);
+  }
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "sandia_hand_plugin", "/sandia_hands/" + this->imuLinkName);
 
-  // ros callback queue for processing subscription
-  this->deferredLoadThread = boost::thread(
-    boost::bind(&SandiaHandPlugin::DeferredLoad, this));
+  const int numFingers = 4;
+  const int numFingerJoints = 3;
+  for (int finger = 0; finger < numFingers; ++finger) {
+    for (int joint = 0; joint < numFingerJoints; ++joint) {
+      const std::string prefix =
+        "gains.f" + std::to_string(finger) + "_j" + std::to_string(joint) + ".";
+      const double p = this->rosNode->declare_parameter(prefix + "p", 0.0);
+      const double i = this->rosNode->declare_parameter(prefix + "i", 0.0);
+      const double d = this->rosNode->declare_parameter(prefix + "d", 0.0);
+      const double iClamp =
+        this->rosNode->declare_parameter(prefix + "i_clamp", 0.0);
+      const int jointIdx = finger * numFingerJoints + joint;
+      this->jointCommands.kp_position[jointIdx] = p;
+      this->jointCommands.ki_position[jointIdx] = i;
+      this->jointCommands.kd_position[jointIdx] = d;
+      this->jointCommands.i_effort_min[jointIdx] = -iClamp;
+      this->jointCommands.i_effort_max[jointIdx] = iClamp;
+    }
+  }
+
+  this->pubJointStates =
+    this->rosNode->create_publisher<sensor_msgs::msg::JointState>(
+    "joint_states", 10);
+  this->pubImu = this->rosNode->create_publisher<sensor_msgs::msg::Imu>(
+    "imu", 10);
+  this->pubTactile =
+    this->rosNode->create_publisher<sandia_hand_msgs::msg::RawTactile>(
+    "tactile_raw", 10);
+
+  this->subJointCommands =
+    this->rosNode->create_subscription<osrf_msgs::msg::JointCommands>(
+    "joint_commands", 100,
+    std::bind(&SandiaHandPlugin::SetJointCommands, this, std::placeholders::_1));
+
+  this->setJointDampingService =
+    this->rosNode->create_service<atlas_msgs::srv::SetJointDamping>(
+    "set_joint_damping",
+    std::bind(
+      &SandiaHandPlugin::SetJointDamping, this,
+      std::placeholders::_1, std::placeholders::_2));
+  this->getJointDampingService =
+    this->rosNode->create_service<atlas_msgs::srv::GetJointDamping>(
+    "get_joint_damping",
+    std::bind(
+      &SandiaHandPlugin::GetJointDamping, this,
+      std::placeholders::_1, std::placeholders::_2));
+
+  this->executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  this->executor->add_node(this->rosNode);
+  this->rosSpinThread = std::thread(
+    [this]()
+    {
+      this->executor->spin();
+    });
+
+  this->validConfig = true;
 }
 
-// helper function to save some typing
-void SandiaHandPlugin::CopyVectorIfValid(const std::vector<double> &from,
-                                         std::vector<double> &to)
+//////////////////////////////////////////////////
+double SandiaHandPlugin::FirstOrZero(
+  const std::optional<std::vector<double>> & _values)
 {
-  if (!from.size() || from.size() != to.size())
+  if (_values && !_values->empty()) {
+    return (*_values)[0];
+  }
+  return 0.0;
+}
+
+//////////////////////////////////////////////////
+void SandiaHandPlugin::CopyVectorIfValid(
+  const std::vector<double> & _from, std::vector<double> & _to)
+{
+  if (_from.empty() || _from.size() != _to.size()) {
     return;
-  for (size_t i = 0; i < from.size(); i++)
-    to[i] = from[i];
+  }
+  _to = _from;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Set Joint Commands
+//////////////////////////////////////////////////
 void SandiaHandPlugin::SetJointCommands(
-  const osrf_msgs::JointCommands::ConstPtr &_msg)
+  const osrf_msgs::msg::JointCommands::SharedPtr _msg)
 {
-  boost::mutex::scoped_lock lock(this->mutex);
-  // this implementation does not check the ordering of the joints. they must
-  // agree with the structure initialized above!
+  std::lock_guard<std::mutex> lock(this->commandMutex);
+  // This implementation does not check the ordering of the joints. They
+  // must agree with the structure initialized in Load().
   CopyVectorIfValid(_msg->position, this->jointCommands.position);
   CopyVectorIfValid(_msg->velocity, this->jointCommands.velocity);
   CopyVectorIfValid(_msg->effort, this->jointCommands.effort);
@@ -317,713 +383,397 @@ void SandiaHandPlugin::SetJointCommands(
   CopyVectorIfValid(_msg->i_effort_max, this->jointCommands.i_effort_max);
 }
 
-
-////////////////////////////////////////////////////////////////////////////////
-// Load the controller
-void SandiaHandPlugin::DeferredLoad()
+//////////////////////////////////////////////////
+void SandiaHandPlugin::SetJointDamping(
+  const std::shared_ptr<atlas_msgs::srv::SetJointDamping::Request> _req,
+  std::shared_ptr<atlas_msgs::srv::SetJointDamping::Response> _res)
 {
-  // initialize ros
-  if (!ros::isInitialized())
+  _res->success = true;
+  std::string statusMessage;
   {
-    gzerr << "Not loading plugin since ROS hasn't been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
+    std::lock_guard<std::mutex> lock(this->commandMutex);
+    for (unsigned int i = 0; i < this->jointNames.size(); ++i) {
+      const double requested = _req->damping_coefficients[i];
+      const double clamped = std::clamp(
+        requested, this->jointDampingMin[i], this->jointDampingMax[i]);
+      // gz-sim has no well-supported runtime joint-damping mutation API
+      // (same situation as DRCVehiclePlugin's dropped Set*Limits) -- only
+      // the cached value is updated, not physics.
+      this->jointDampingCurrent[i] = clamped;
+      if (std::abs(clamped - requested) > 1e-9) {
+        statusMessage += "requested joint damping for joint [" +
+          this->jointNames[i] + "] of [" + std::to_string(requested) +
+          "] is truncated to [" + std::to_string(clamped) + "].\n";
+        _res->success = false;
+      }
+    }
+  }
+  if (!statusMessage.empty()) {
+    RCLCPP_WARN(this->rosNode->get_logger(), "%s", statusMessage.c_str());
+  }
+  _res->status_message = statusMessage;
+}
+
+//////////////////////////////////////////////////
+void SandiaHandPlugin::GetJointDamping(
+  const std::shared_ptr<atlas_msgs::srv::GetJointDamping::Request>,
+  std::shared_ptr<atlas_msgs::srv::GetJointDamping::Response> _res)
+{
+  _res->success = true;
+  _res->status_message = "success";
+  std::lock_guard<std::mutex> lock(this->commandMutex);
+  for (unsigned int i = 0; i < this->jointNames.size(); ++i) {
+    _res->damping_coefficients[i] = this->jointDampingCurrent[i];
+    _res->damping_coefficients_max[i] = this->jointDampingMax[i];
+    _res->damping_coefficients_min[i] = this->jointDampingMin[i];
+  }
+}
+
+//////////////////////////////////////////////////
+void SandiaHandPlugin::UpdateStates(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
+{
+  if (_info.simTime <= this->lastControllerUpdateTime) {
     return;
   }
 
-  // ros stuff
-  this->rosNode = new ros::NodeHandle("");
+  // IMU: read the link's raw physics state and rotate world-frame vectors
+  // into the link's own frame (see the class-level design note).
+  if (this->imuLinkEntity != gz::sim::kNullEntity) {
+    gz::sim::Link imuLink(this->imuLinkEntity);
+    auto worldPose = imuLink.WorldPose(_ecm);
+    auto angularVel = imuLink.WorldAngularVelocity(_ecm);
+    auto linearAcc = imuLink.WorldLinearAcceleration(_ecm);
+    if (worldPose && angularVel && linearAcc) {
+      const gz::math::Vector3d bodyAngularVel =
+        worldPose->Rot().RotateVectorReverse(*angularVel);
+      const gz::math::Vector3d bodyLinearAcc =
+        worldPose->Rot().RotateVectorReverse(*linearAcc);
 
-  // publish multi queue
-  this->pmq->startServiceThread();
+      sensor_msgs::msg::Imu imuMsg;
+      imuMsg.header.frame_id = this->imuLinkName;
+      imuMsg.header.stamp = rclcpp::Time(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+          _info.simTime).count());
 
-  // pull down controller parameters; they should be on the param server by now
-  const int NUM_FINGERS = 4, NUM_FINGER_JOINTS = 3;
-  for (int finger = 0; finger < NUM_FINGERS; finger++)
-  {
-    for (int joint = 0; joint < NUM_FINGER_JOINTS; joint++)
-    {
-      char joint_ns[200] = "";
-      snprintf(joint_ns, sizeof(joint_ns), "sandia_hands/gains/%s_f%d_j%d/",
-               this->side.c_str(), finger, joint);
-      // this is so ugly
-      double p_val = 0, i_val = 0, d_val = 0, i_clamp_val = 0;
-      string p_str = string(joint_ns)+"p";
-      string i_str = string(joint_ns)+"i";
-      string d_str = string(joint_ns)+"d";
-      string i_clamp_str = string(joint_ns)+"i_clamp";
-      if (!this->rosNode->getParam(p_str, p_val) ||
-          !this->rosNode->getParam(i_str, i_val) ||
-          !this->rosNode->getParam(d_str, d_val) ||
-          !this->rosNode->getParam(i_clamp_str, i_clamp_val))
-      {
-        ROS_ERROR("couldn't find a param for %s", joint_ns);
+      imuMsg.angular_velocity.x = bodyAngularVel.X();
+      imuMsg.angular_velocity.y = bodyAngularVel.Y();
+      imuMsg.angular_velocity.z = bodyAngularVel.Z();
+
+      imuMsg.linear_acceleration.x = bodyLinearAcc.X();
+      imuMsg.linear_acceleration.y = bodyLinearAcc.Y();
+      imuMsg.linear_acceleration.z = bodyLinearAcc.Z();
+
+      imuMsg.orientation.x = worldPose->Rot().X();
+      imuMsg.orientation.y = worldPose->Rot().Y();
+      imuMsg.orientation.z = worldPose->Rot().Z();
+      imuMsg.orientation.w = worldPose->Rot().W();
+
+      this->pubImu->publish(imuMsg);
+    }
+  }
+
+  const auto stamp = rclcpp::Time(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(_info.simTime).count());
+
+  if (!this->hasStumps) {
+    for (unsigned int i = 0; i < this->jointEntities.size(); ++i) {
+      gz::sim::Joint joint(this->jointEntities[i]);
+      this->jointStates.position[i] = FirstOrZero(joint.Position(_ecm));
+      this->jointStates.velocity[i] = FirstOrZero(joint.Velocity(_ecm));
+    }
+  }
+  this->jointStates.header.stamp = stamp;
+
+  const double dt = std::chrono::duration<double>(
+    _info.simTime - this->lastControllerUpdateTime).count();
+
+  if (!this->hasStumps) {
+    std::lock_guard<std::mutex> lock(this->commandMutex);
+    for (unsigned int i = 0; i < this->jointEntities.size(); ++i) {
+      const double position = this->jointStates.position[i];
+      const double velocity = this->jointStates.velocity[i];
+
+      const double qP = this->jointCommands.position[i] - position;
+      if (dt > 0.0) {
+        this->errorTerms[i].positionErrorDerivative =
+          (qP - this->errorTerms[i].positionError) / dt;
+      }
+      this->errorTerms[i].positionError = qP;
+      this->errorTerms[i].velocityError =
+        this->jointCommands.velocity[i] - velocity;
+      this->errorTerms[i].positionErrorIntegral = std::clamp(
+        this->errorTerms[i].positionErrorIntegral + dt * qP,
+        this->jointCommands.i_effort_min[i],
+        this->jointCommands.i_effort_max[i]);
+
+      const double force =
+        this->jointCommands.kp_position[i] * this->errorTerms[i].positionError +
+        this->jointCommands.kp_velocity[i] * this->errorTerms[i].velocityError +
+        this->jointCommands.ki_position[i] *
+        this->errorTerms[i].positionErrorIntegral +
+        this->jointCommands.kd_position[i] *
+        this->errorTerms[i].positionErrorDerivative +
+        this->jointCommands.effort[i];
+
+      this->jointStates.effort[i] = force;
+      gz::sim::Joint(this->jointEntities[i]).SetForce(_ecm, {force});
+    }
+  }
+  this->pubJointStates->publish(this->jointStates);
+
+  // Tactile data: only do the (nontrivial) contact-processing work if
+  // someone is actually listening.
+  if (this->pubTactile->get_subscription_count() > 0 && !this->hasStumps) {
+    this->tactile.f0.assign(this->tactileFingerArraySize, this->minTactileOut);
+    this->tactile.f1.assign(this->tactileFingerArraySize, this->minTactileOut);
+    this->tactile.f2.assign(this->tactileFingerArraySize, this->minTactileOut);
+    this->tactile.f3.assign(this->tactileFingerArraySize, this->minTactileOut);
+    this->tactile.palm.assign(this->tactilePalmArraySize, this->minTactileOut);
+
+    std::vector<gz::msgs::Contact> contacts;
+    for (const auto & entry : this->tactileCollisions) {
+      const auto * contactData =
+        _ecm.Component<gz::sim::components::ContactSensorData>(entry.first);
+      if (!contactData) {
         continue;
       }
-      int joint_idx = finger * NUM_FINGER_JOINTS + joint;
-      this->jointCommands.kp_position[joint_idx]  =  p_val;
-      this->jointCommands.ki_position[joint_idx]  =  i_val;
-      this->jointCommands.kd_position[joint_idx]  =  d_val;
-      this->jointCommands.i_effort_min[joint_idx] = -i_clamp_val;
-      this->jointCommands.i_effort_max[joint_idx] =  i_clamp_val;
-    }
-  }
-
-  // ROS Controller API
-
-  // ros publication / subscription
-  /// brief broadcasts the robot states
-  std::string topic_base = std::string("sandia_hands/") + this->side[0];
-  this->pubJointStatesQueue = this->pmq->addPub<sensor_msgs::JointState>();
-  this->pubJointStates = this->rosNode->advertise<sensor_msgs::JointState>(
-    topic_base+std::string("_hand/joint_states"), 10);
-
-  // ros topic subscriptions
-  ros::SubscribeOptions jointCommandsSo =
-    ros::SubscribeOptions::create<osrf_msgs::JointCommands>(
-    topic_base+std::string("_hand/joint_commands"), 100,
-    boost::bind(&SandiaHandPlugin::SetJointCommands, this, _1),
-    ros::VoidPtr(), &this->rosQueue);
-  this->subJointCommands = this->rosNode->subscribe(jointCommandsSo);
-
-  // publish imu data
-  this->pubImuQueue = this->pmq->addPub<sensor_msgs::Imu>();
-  this->pubImu = this->rosNode->advertise<sensor_msgs::Imu>(
-    topic_base+std::string("_hand/imu"), 10);
-
-  // publish contact data
-  this->pubTactileQueue = this->pmq->addPub<sandia_hand_msgs::RawTactile>();
-  this->pubTactile =
-    this->rosNode->advertise<sandia_hand_msgs::RawTactile>(
-    topic_base+std::string("_hand/tactile_raw"), 10,
-    boost::bind(&SandiaHandPlugin::TactileConnect, this),
-    boost::bind(&SandiaHandPlugin::TactileDisconnect, this));
-
-  // initialize status pub time
-  this->lastStatusTime = this->world->GetSimTime().Double();
-  this->updateRate = 1.0;
-
-  // ros callback queue for processing subscription
-  this->callbackQueeuThread = boost::thread(
-    boost::bind(&SandiaHandPlugin::RosQueueThread, this));
-
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-     boost::bind(&SandiaHandPlugin::UpdateStates, this));
-
-  // Offer teams ability to change damping coef. between preset bounds
-  ros::AdvertiseServiceOptions setJointDampingAso =
-    ros::AdvertiseServiceOptions::create<atlas_msgs::SetJointDamping>(
-      topic_base+std::string("_hand/set_joint_damping"), boost::bind(
-        &SandiaHandPlugin::SetJointDamping, this, _1, _2),
-        ros::VoidPtr(), &this->rosQueue);
-  this->setJointDampingService = this->rosNode->advertiseService(
-    setJointDampingAso);
-
-  // Offer teams ability to get damping coef.
-  ros::AdvertiseServiceOptions getJointDampingAso =
-    ros::AdvertiseServiceOptions::create<atlas_msgs::GetJointDamping>(
-      topic_base+std::string("_hand/get_joint_damping"), boost::bind(
-        &SandiaHandPlugin::GetJointDamping, this, _1, _2),
-        ros::VoidPtr(), &this->rosQueue);
-  this->getJointDampingService = this->rosNode->advertiseService(
-    getJointDampingAso);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-bool SandiaHandPlugin::SetJointDamping(
-  atlas_msgs::SetJointDamping::Request &_req,
-  atlas_msgs::SetJointDamping::Response &_res)
-{
-  _res.success = true;
-  std::stringstream statusStream;
-  {
-    boost::mutex::scoped_lock lock(this->mutex);
-
-    for (unsigned int i = 0; i < this->joints.size(); ++i)
-    {
-      double d = math::clamp(_req.damping_coefficients[i],
-       this->jointDampingMin[i], this->jointDampingMax[i]);
-      this->joints[i]->SetDamping(0, d);
-      if (!math::equal(d, _req.damping_coefficients[i]))
-      {
-        statusStream << "requested joint damping for joint ["
-                     << this->jointNames[i] << "] of ["
-                     << _req.damping_coefficients[i] << "] is "
-                     << "truncated to [" << d << "].\n";
-        _res.success = false;
+      for (const auto & contact : contactData->Data().contact()) {
+        contacts.push_back(contact);
       }
     }
-  }
-  ROS_WARN("%s", statusStream.str().c_str());
-  _res.status_message = statusStream.str();
 
-  return _res.success;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-bool SandiaHandPlugin::GetJointDamping(
-  atlas_msgs::GetJointDamping::Request &_req,
-  atlas_msgs::GetJointDamping::Response &_res)
-{
-  _res.success = true;
-  _res.status_message = "success";
-
-  {
-    boost::mutex::scoped_lock lock(this->mutex);
-
-    for (unsigned int i = 0; i < this->joints.size(); ++i)
-    {
-      _res.damping_coefficients[i] = this->joints[i]->GetDamping(0);
-      _res.damping_coefficients_max[i] = this->jointDampingMax[i];
-      _res.damping_coefficients_min[i] = this->jointDampingMin[i];
-    }
+    this->tactile.header.stamp = stamp;
+    this->FillTactileData(_ecm, contacts, this->tactile);
+    this->pubTactile->publish(this->tactile);
   }
 
-  return _res.success;
-}
-
-void SandiaHandPlugin::UpdateStates()
-{
-  common::Time curTime = this->world->GetSimTime();
-  /// @todo:  robot internals
-  /// self diagnostics, damages, etc.
-
-  if (curTime > this->lastControllerUpdateTime)
-  {
-    // get imu data from imu link
-    if (curTime > this->lastImuTime)
-    {
-      if (this->ImuSensor)
-      {
-# if GAZEBO_MAJOR_VERSION >= 7
-        math::Vector3 angularVel = this->ImuSensor->AngularVelocity();
-        math::Vector3 linearAcc = this->ImuSensor->LinearAcceleration();
-        math::Quaternion orientation = this->ImuSensor->Orientation();
-# else
-        math::Vector3 angularVel = this->ImuSensor->GetAngularVelocity();
-        math::Vector3 linearAcc = this->ImuSensor->GetLinearAcceleration();
-        math::Quaternion orientation = this->ImuSensor->GetOrientation();
-# endif
-
-        sensor_msgs::Imu ImuMsg;
-        ImuMsg.header.frame_id = this->ImuLinkName;
-        ImuMsg.header.stamp = ros::Time(curTime.sec, curTime.nsec);
-
-        ImuMsg.angular_velocity.x = angularVel.x;
-        ImuMsg.angular_velocity.y = angularVel.y;
-        ImuMsg.angular_velocity.z = angularVel.z;
-
-        ImuMsg.linear_acceleration.x = linearAcc.x;
-        ImuMsg.linear_acceleration.y = linearAcc.y;
-        ImuMsg.linear_acceleration.z = linearAcc.z;
-
-        ImuMsg.orientation.x = orientation.x;
-        ImuMsg.orientation.y = orientation.y;
-        ImuMsg.orientation.z = orientation.z;
-        ImuMsg.orientation.w = orientation.w;
-
-        this->pubImuQueue->push(ImuMsg, this->pubImu);
-      }
-
-      // update time
-      this->lastImuTime = curTime.Double();
-    }
-
-    // populate FromRobot from robot
-    this->jointStates.header.stamp = ros::Time(curTime.sec, curTime.nsec);
-    if (!this->hasStumps)
-    {
-      for (unsigned int i = 0; i < this->joints.size(); ++i)
-      {
-        this->jointStates.position[i] =
-          this->joints[i]->GetAngle(0).Radian();
-        this->jointStates.velocity[i] = this->joints[i]->GetVelocity(0);
-        // better to use GetForceTorque dot joint axis
-        this->jointStates.effort[i] = this->joints[i]->GetForce(0u);
-      }
-    }
-    this->pubJointStatesQueue->push(this->jointStates,
-      this->pubJointStates);
-
-    double dt = (curTime - this->lastControllerUpdateTime).Double();
-
-    /// update pid with feedforward force
-    double position;
-    double velocity;
-    for (unsigned int i = 0; i < this->joints.size(); ++i)
-    {
-      position = this->jointStates.position[i];
-      velocity = this->jointStates.velocity[i];
-
-      double force;
-      {
-        boost::mutex::scoped_lock lock(this->mutex);
-        double q_p =
-           this->jointCommands.position[i] - position;
-
-        if (!math::equal(dt, 0.0))
-          this->errorTerms[i].d_q_p_dt = (q_p - this->errorTerms[i].q_p) / dt;
-
-        this->errorTerms[i].q_p = q_p;
-
-        this->errorTerms[i].qd_p =
-           this->jointCommands.velocity[i] - velocity;
-
-        this->errorTerms[i].q_i = math::clamp(
-          this->errorTerms[i].q_i + dt * this->errorTerms[i].q_p,
-          static_cast<double>(this->jointCommands.i_effort_min[i]),
-          static_cast<double>(this->jointCommands.i_effort_max[i]));
-
-        // use gain params to compute force cmd
-        force = this->jointCommands.kp_position[i] *
-                this->errorTerms[i].q_p +
-                this->jointCommands.kp_velocity[i] *
-                this->errorTerms[i].qd_p +
-                this->jointCommands.ki_position[i] *
-                this->errorTerms[i].q_i +
-                this->jointCommands.kd_position[i] *
-                this->errorTerms[i].d_q_p_dt +
-                this->jointCommands.effort[i];
-      }
-
-      if (!this->hasStumps)
-        this->joints[i]->SetForce(0, force);
-    }
-
-    // publish tactile data
-    if (this->tactileConnectCount > 0)
-    {
-      if (!this->hasStumps)
-      {
-        // first clear all previous tactile data
-        for (int i = 0; i < this->tactileFingerArraySize; ++i)
-        {
-          this->tactile.f0[i] = this->minTactileOut;
-          this->tactile.f1[i] = this->minTactileOut;
-          this->tactile.f2[i] = this->minTactileOut;
-          this->tactile.f3[i] = this->minTactileOut;
-        }
-
-        for (int i = 0; i < this->tactilePalmArraySize; ++i)
-          this->tactile.palm[i] = this->minTactileOut;
-
-        {
-          boost::mutex::scoped_lock lock(this->contactMutex);
-          this->tactile.header.stamp = ros::Time(curTime.sec, curTime.nsec);
-          this->FillTactileData(this->incomingContacts, &this->tactile);
-          this->incomingContacts.clear();
-        }
-      }
-      this->pubTactileQueue->push(this->tactile,
-          this->pubTactile);
-    }
-    else if (!this->hasStumps)
-    {
-      boost::mutex::scoped_lock lock(this->contactMutex);
-      this->incomingContacts.clear();
-    }
-    this->lastControllerUpdateTime = curTime;
-  }
-}
-
-void SandiaHandPlugin::RosQueueThread()
-{
-  static const double timeout = 0.01;
-
-  while (this->rosNode->ok())
-  {
-    this->rosQueue.callAvailable(ros::WallDuration(timeout));
-  }
+  this->lastControllerUpdateTime = _info.simTime;
 }
 
 //////////////////////////////////////////////////
-void SandiaHandPlugin::OnContacts(ConstContactsPtr &_msg)
+void SandiaHandPlugin::FillTactileData(
+  const gz::sim::EntityComponentManager & _ecm,
+  const std::vector<gz::msgs::Contact> & _contacts,
+  sandia_hand_msgs::msg::RawTactile & _tactileMsg)
 {
-  boost::mutex::scoped_lock lock(this->contactMutex);
+  // The method of generating tactile sensor output is specific to the
+  // current sandia hand collisions. This is because the collisions do not
+  // really match the actual sandia hand so it was not possible to directly
+  // use the position of the sensors from the spec sheet. The best we could
+  // do is approximate the locations of tactile sensors on these collisions.
+  // Idea: divide each collision into smaller regions, identify the region
+  // the contact point lies in, and set the corresponding (closest) tactile
+  // sensor's output value.
+  for (const gz::msgs::Contact & contact : _contacts) {
+    const auto entry1 = this->tactileCollisions.find(
+      static_cast<gz::sim::Entity>(contact.collision1().id()));
+    const auto entry2 = this->tactileCollisions.find(
+      static_cast<gz::sim::Entity>(contact.collision2().id()));
 
-  // Store the contacts message for processing in UpdateImpl
-  this->incomingContacts.push_back(_msg);
+    gz::sim::Entity collisionEntity{gz::sim::kNullEntity};
+    TactileCollisionInfo info;
+    bool isBody1 = true;
+    if (entry1 != this->tactileCollisions.end()) {
+      collisionEntity = entry1->first;
+      info = entry1->second;
+      isBody1 = true;
+    } else if (entry2 != this->tactileCollisions.end()) {
+      collisionEntity = entry2->first;
+      info = entry2->second;
+      isBody1 = false;
+    } else {
+      continue;
+    }
 
-  // Prevent the incomingContacts list to grow indefinitely.
-  if (this->incomingContacts.size() > 50)
-    this->incomingContacts.pop_front();
-}
+    const gz::math::Pose3d colWorldPose =
+      gz::sim::worldPose(collisionEntity, _ecm);
 
-//////////////////////////////////////////////////
-void SandiaHandPlugin::FillTactileData(ContactMsgs_L _incomingContacts,
-    sandia_hand_msgs::RawTactile *_tactileMsg)
-{
-  // The method of generating tactile sensor output is specific
-  // to the current sandia hand collisions. This is because the collisions
-  // do not really match the actual sandia hand so it was not possible to
-  // directly use the position of the sensors from the spec sheet. The best
-  // we could do is approximate the locations of tactile sensors
-  // on these collision. Idea as follows:
-  // Divide each collision into smaller regions,
-  // Identify the region which the contact point lies,
-  // Set the corresponding (closest) tactile sensor's output value.
+    for (int j = 0; j < contact.position_size(); ++j) {
+      gz::math::Vector3d pos = gz::msgs::Convert(contact.position(j));
+      gz::math::Vector3d force = isBody1 ?
+        gz::msgs::Convert(contact.wrench(j).body_1_wrench().force()) :
+        gz::msgs::Convert(contact.wrench(j).body_2_wrench().force());
 
-  // Don't do anything if there is no new data to process.
-  if (!_incomingContacts.empty())
-  {
-    std::vector<std::string>::iterator collIter;
-    std::string collision1;
+      // Scaling formula taken from Gazebo Classic's ContactVisual class.
+      const int tactileOutput = static_cast<int>(
+        (2.0 * (this->maxTactileOut - this->minTactileOut)) /
+        (1 + std::exp(-force.SquaredLength() / 100)) -
+        (this->maxTactileOut - 2 * this->minTactileOut));
 
-    // Iterate over all the contact messages
-    for (ContactMsgs_L::iterator iter = _incomingContacts.begin();
-        iter != _incomingContacts.end(); ++iter)
-    {
-      // Iterate over all the contacts in the message
-      for (int i = 0; i < (*iter)->contact_size(); ++i)
-      {
-        bool isPalm = false;
-        bool isBody1 = true;
-        // Get the collision pointer from name in contact msg
-        collision1 = (*iter)->contact(i).collision1();
+      // Transform into the collision's own frame.
+      pos = colWorldPose.Rot().RotateVectorReverse(pos - colWorldPose.Pos());
 
-        if (collision1.find(this->side + "_f") ==  std::string::npos
-            && collision1.find("palm") ==  std::string::npos)
-        {
-          collision1 = (*iter)->contact(i).collision2();
-          isBody1 = false;
-        }
+      double vPosInCol = 0.0;
+      double hPosInCol = 0.0;
+      int ai = 0;
+      int aj = 0;
+      int aIndex = -1;
 
-        physics::Collision *col = NULL;
-        if (!this->contactCollisions.count(collision1))
-        {
-          GAZEBO_DRCSIM_USING_DYNAMIC_POINTER_CAST;
+      if (info.isPalm) {
+        switch (info.palmIdx) {
+          case 0:
+            // Index finger palm sensors: 3; 8 9; 13
+            if (pos.Z() > 0) {
+              vPosInCol = std::clamp(
+                pos.X() / this->palmColLength[info.palmIdx], 0.0, 1.0);
+              hPosInCol = std::clamp(
+                (-pos.Y() + this->palmColWidth[info.palmIdx] / 2.0) /
+                this->palmColWidth[0], 0.0, 1.0);
 
-          col = dynamic_pointer_cast<physics::Collision>(
-              this->world->GetEntity(collision1)).get();
-          this->contactCollisions[collision1] = col;
-        }
-        else
-        {
-          col = this->contactCollisions[collision1];
-        }
-
-        GZ_ASSERT(col, "Contact collision is Null!");
-
-        // check if it's a palm or a finger
-        if (collision1.find("palm") !=  std::string::npos)
-          isPalm = true;
-
-        // get finger index if not palm
-        int fingerIdx = -1;
-        int fingerColIdx = -1;
-        int palmIdx = -1;
-
-        if (isPalm)
-        {
-          // index finder palm
-          if (collision1.find("_3") !=  std::string::npos)
-            palmIdx = 0;
-          // middle finder palm
-          else if (collision1.find("_4") !=  std::string::npos)
-            palmIdx = 1;
-          // pinky palm
-          else if (collision1.find("_5") !=  std::string::npos)
-            palmIdx = 2;
-          // bottom palm
-          else if (collision1.find("_1") !=  std::string::npos)
-            palmIdx = 3;
-          // mid palm
-          else
-            palmIdx = 4;
-        }
-        else
-        {
-          // index finder
-          if (collision1.find("f0") !=  std::string::npos)
-            fingerIdx = 0;
-          // middle finder
-          else if (collision1.find("f1") !=  std::string::npos)
-            fingerIdx = 1;
-          // pinky
-          else if (collision1.find("f2") !=  std::string::npos)
-            fingerIdx = 2;
-          // thumb
-          else if (collision1.find("f3") !=  std::string::npos)
-            fingerIdx = 3;
-
-          // lower collision of the finger
-          if (collision1.find("_1") !=  std::string::npos)
-            fingerColIdx = 0;
-          // upper collision of the finger
-          else if (collision1.find("_2") !=  std::string::npos)
-            fingerColIdx = 1;
-        }
-
-        math::Vector3 pos;
-        math::Vector3 force;
-        int tactileOuput = 0;
-        // Iterate all contact positions
-        for (int j = 0; j < (*iter)->contact(i).position_size(); ++j)
-        {
-# if GAZEBO_MAJOR_VERSION >= 7
-          pos = msgs::ConvertIgn((*iter)->contact(i).position(j));
-# else
-          pos = msgs::Convert((*iter)->contact(i).position(j));
-# endif
-          if (isBody1)
-          {
-# if GAZEBO_MAJOR_VERSION >= 7
-            force = msgs::ConvertIgn((*iter)->contact(i).wrench(j).
-                body_1_wrench().force());
-# else
-            force = msgs::Convert((*iter)->contact(i).wrench(j).
-                body_1_wrench().force());
-# endif
-          }
-          else
-          {
-# if GAZEBO_MAJOR_VERSION >= 7
-            force = msgs::ConvertIgn((*iter)->contact(i).wrench(j).
-                body_2_wrench().force());
-# else
-            force = msgs::Convert((*iter)->contact(i).wrench(j).
-                body_2_wrench().force());
-# endif
-          }
-
-          // Scaling formula taken from Gazebo's ContactVisual class
-          tactileOuput = (2.0 * (this->maxTactileOut - this->minTactileOut))
-              / (1 + exp(-force.GetSquaredLength() / 100)) -
-              (this->maxTactileOut - 2*this->minTactileOut);
-
-          // transfrom into collision frame
-          math::Pose colPose = col->GetInitialRelativePose() +
-              col->GetLink()->GetWorldPose();
-          pos = colPose.rot.GetInverse() * (pos - colPose.pos);
-
-          double vPosInCol = 0;
-          double hPosInCol = 0;
-          // column
-          int ai = 0;
-          // row
-          int aj = 0;
-          // tactile sensor index
-          int aIndex = -1;
-
-          // if palm
-          if (isPalm)
-          {
-            switch (palmIdx)
-            {
-              case 0:
-              {
-                // Index finger palm sensors: 3; 8 9; 13
-                // (numbers correspond to taxel sensor number in spec)
-                if (pos.z > 0)
-                {
-                  vPosInCol =
-                      math::clamp(pos.x / this->palmColLength[palmIdx],
-                      0.0, 1.0);
-                  hPosInCol =
-                      math::clamp((-pos.y + this->palmColWidth[palmIdx]/2.0)
-                      / this->palmColWidth[0], 0.0, 1.0);
-
-                  ai = this->palmVerSize[palmIdx] -
-                      std::ceil(vPosInCol * this->palmVerSize[palmIdx]) - 1;
-                  aj = std::ceil(hPosInCol * this->palmHorSize[palmIdx]) - 1;
-                  ai = std::max(ai, 0);
-                  aj = std::max(aj, 0);
-                  aIndex = 2;
-                  if (ai == 1)
-                  {
-                    if (aj == 0)
-                      aIndex =7;
-                    else
-                      aIndex = 8;
-                  }
-                  else if (ai == 2)
-                    aIndex = 12;
-                  _tactileMsg->palm[aIndex] = tactileOuput;
-                }
-                break;
+              ai = this->palmVerSize[info.palmIdx] -
+                std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
+              aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
+              ai = std::max(ai, 0);
+              aj = std::max(aj, 0);
+              aIndex = 2;
+              if (ai == 1) {
+                aIndex = (aj == 0) ? 7 : 8;
+              } else if (ai == 2) {
+                aIndex = 12;
               }
-              case 1:
-              {
-                // Middle finger palm sensors: 2; 6 7; 11 12
-                // (numbers correspond to taxel sensor number in spec)
-                if (pos.z > 0)
-                {
-                  // distance apart = w 14.95, h 11.70
-                  vPosInCol =
-                      math::clamp(pos.x / this->palmColLength[palmIdx],
-                      0.0, 1.0);
-                  hPosInCol =
-                    math::clamp((-pos.y + this->palmColWidth[palmIdx]/2.0)
-                    / this->palmColWidth[palmIdx], 0.0, 1.0);
-                  ai = this->palmVerSize[palmIdx] -
-                      std::ceil(vPosInCol * this->palmVerSize[palmIdx]) - 1;
-                  aj = std::ceil(hPosInCol * this->palmHorSize[palmIdx]) - 1;
-                  ai = std::max(ai, 0);
-                  aj = std::max(aj, 0);
-                  aIndex = 1;
-                  if (ai == 1)
-                  {
-                    if (aj == 0)
-                      aIndex =5;
-                    else
-                      aIndex = 6;
-                  }
-                  else if (ai == 2)
-                  {
-                    if (aj == 0)
-                      aIndex =10;
-                    else
-                      aIndex = 11;
-                  }
-                  _tactileMsg->palm[aIndex] = tactileOuput;
-                }
-                break;
-              }
-              case 2:
-              {
-                // Pinky palm sensors: 1; 4 5; 10
-                // (numbers correspond to taxel sensor number in spec)
-                if (pos.z > 0)
-                {
-                  vPosInCol =
-                      math::clamp(pos.x / this->palmColLength[palmIdx],
-                      0.0, 1.0);
-                  hPosInCol =
-                    math::clamp((-pos.y + this->palmColWidth[palmIdx]/2.0) /
-                    this->palmColWidth[palmIdx], 0.0, 1.0);
-
-                  ai = this->palmVerSize[palmIdx] -
-                      std::ceil(vPosInCol * this->palmVerSize[palmIdx]) - 1;
-                  aj = std::ceil(hPosInCol * this->palmHorSize[palmIdx]) - 1;
-                  ai = std::max(ai, 0);
-                  aj = std::max(aj, 0);
-                  aIndex = 0;
-                  if (ai == 1)
-                  {
-                    if (aj == 0)
-                      aIndex =3;
-                    else
-                      aIndex = 4;
-                  }
-                  else if (ai == 2)
-                    aIndex = 9;
-                  _tactileMsg->palm[aIndex] = tactileOuput;
-                }
-                break;
-              }
-              case 3:
-              {
-                // Sensors on bottom palm: 23 24; 25 26; 27 28; 29 30; 31 32
-                // (numbers correspond to taxel sensor number in spec)
-                int baseIndex = 22;
-                if (pos.z > 0)
-                {
-                  vPosInCol =
-                      math::clamp((pos.y + this->palmColLength[palmIdx]/2.0) /
-                      this->palmColLength[palmIdx], 0.0, 1.0);
-                  hPosInCol =
-                      math::clamp((pos.x + this->palmColWidth[palmIdx]/2.0) /
-                      this->palmColWidth[palmIdx], 0.0, 1.0);
-
-                  ai = this->palmVerSize[palmIdx] -
-                      std::ceil(vPosInCol * this->palmVerSize[palmIdx]) - 1;
-                  aj = std::ceil(hPosInCol * this->palmHorSize[palmIdx]) - 1;
-                  ai = std::max(ai, 0);
-                  aj = std::max(aj, 0);
-                  aIndex = baseIndex + ai * this->palmHorSize[palmIdx] + aj;
-                  _tactileMsg->palm[aIndex] = tactileOuput;
-                }
-                break;
-              }
-              default:
-              {
-                // Sensors on mid palm (default): 14 15 16 17; 18 19 20 21 22
-                // (numbers correspond to taxel sensor number in spec)
-                vPosInCol =
-                    math::clamp(pos.y / this->palmColLength[palmIdx], 0.0, 1.0);
-                hPosInCol =
-                    math::clamp((pos.z + this->palmColWidth[palmIdx]/2.0) /
-                    this->palmColWidth[palmIdx], 0.0, 1.0);
-
-                ai = this->palmVerSize[palmIdx] -
-                    std::ceil(vPosInCol * this->palmVerSize[palmIdx]) - 1;
-                aj = std::ceil(hPosInCol * this->palmHorSize[palmIdx]) - 1;
-                ai = std::max(ai, 0);
-                aj = std::max(aj, 0);
-                aIndex = 20;
-                int baseIndex = 13;
-                if (ai == 0)
-                {
-                  // four sensors on first row, and five on the second
-                  // so adjust aj for sensors 16 and 17
-                  aj = (aj > 2) ? aj - 1 : aj;
-                  aIndex = baseIndex + aj;
-                }
-                else
-                  aIndex = baseIndex + ai * (this->palmHorSize[4]-1) + aj;
-
-                _tactileMsg->palm[aIndex] = tactileOuput;
-                break;
-              }
+              _tactileMsg.palm[aIndex] = tactileOutput;
             }
-          }
-          // if finger: make sure finger index is valid and
-          // contact is on the inside of the hand (palm side)
-          else if (fingerIdx != -1 && pos.y > 0)
-          {
-            // compute finger tactile array index
-            vPosInCol = math::clamp((pos.z +
-                this->fingerColLength[fingerColIdx]/2)
-                / fingerColLength[fingerColIdx], 0.0, 1.0);
-            hPosInCol = math::clamp((-pos.x +
-                this->fingerColWidth[fingerColIdx]/2)
-                / fingerColWidth[fingerColIdx], 0.0, 1.0);
+            break;
+          case 1:
+            // Middle finger palm sensors: 2; 6 7; 11 12
+            if (pos.Z() > 0) {
+              vPosInCol = std::clamp(
+                pos.X() / this->palmColLength[info.palmIdx], 0.0, 1.0);
+              hPosInCol = std::clamp(
+                (-pos.Y() + this->palmColWidth[info.palmIdx] / 2.0) /
+                this->palmColWidth[info.palmIdx], 0.0, 1.0);
+              ai = this->palmVerSize[info.palmIdx] -
+                std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
+              aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
+              ai = std::max(ai, 0);
+              aj = std::max(aj, 0);
+              aIndex = 1;
+              if (ai == 1) {
+                aIndex = (aj == 0) ? 5 : 6;
+              } else if (ai == 2) {
+                aIndex = (aj == 0) ? 10 : 11;
+              }
+              _tactileMsg.palm[aIndex] = tactileOutput;
+            }
+            break;
+          case 2:
+            // Pinky palm sensors: 1; 4 5; 10
+            if (pos.Z() > 0) {
+              vPosInCol = std::clamp(
+                pos.X() / this->palmColLength[info.palmIdx], 0.0, 1.0);
+              hPosInCol = std::clamp(
+                (-pos.Y() + this->palmColWidth[info.palmIdx] / 2.0) /
+                this->palmColWidth[info.palmIdx], 0.0, 1.0);
 
-            ai = this->fingerVerSize[fingerColIdx] -
-                std::ceil(vPosInCol * this->fingerVerSize[fingerColIdx]) - 1;
-            aj = std::ceil(hPosInCol * this->fingerHorSize[fingerColIdx]) - 1;
+              ai = this->palmVerSize[info.palmIdx] -
+                std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
+              aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
+              ai = std::max(ai, 0);
+              aj = std::max(aj, 0);
+              aIndex = 0;
+              if (ai == 1) {
+                aIndex = (aj == 0) ? 3 : 4;
+              } else if (ai == 2) {
+                aIndex = 9;
+              }
+              _tactileMsg.palm[aIndex] = tactileOutput;
+            }
+            break;
+          case 3:
+          {
+            // Sensors on bottom palm: 23 24; 25 26; 27 28; 29 30; 31 32
+            const int baseIndex = 22;
+            if (pos.Z() > 0) {
+              vPosInCol = std::clamp(
+                (pos.Y() + this->palmColLength[info.palmIdx] / 2.0) /
+                this->palmColLength[info.palmIdx], 0.0, 1.0);
+              hPosInCol = std::clamp(
+                (pos.X() + this->palmColWidth[info.palmIdx] / 2.0) /
+                this->palmColWidth[info.palmIdx], 0.0, 1.0);
+
+              ai = this->palmVerSize[info.palmIdx] -
+                std::ceil(vPosInCol * this->palmVerSize[info.palmIdx]) - 1;
+              aj = std::ceil(hPosInCol * this->palmHorSize[info.palmIdx]) - 1;
+              ai = std::max(ai, 0);
+              aj = std::max(aj, 0);
+              aIndex = baseIndex + ai * this->palmHorSize[info.palmIdx] + aj;
+              _tactileMsg.palm[aIndex] = tactileOutput;
+            }
+            break;
+          }
+          default:
+          {
+            // Sensors on mid palm (default): 14 15 16 17; 18 19 20 21 22
+            const int baseIndex = 13;
+            vPosInCol = std::clamp(
+              pos.Y() / this->palmColLength[4], 0.0, 1.0);
+            hPosInCol = std::clamp(
+              (pos.Z() + this->palmColWidth[4] / 2.0) /
+              this->palmColWidth[4], 0.0, 1.0);
+
+            ai = this->palmVerSize[4] -
+              std::ceil(vPosInCol * this->palmVerSize[4]) - 1;
+            aj = std::ceil(hPosInCol * this->palmHorSize[4]) - 1;
             ai = std::max(ai, 0);
             aj = std::max(aj, 0);
-
-            aIndex = fingerColIdx * this->fingerHorSize[0]
-                * this->fingerVerSize[0] +
-                ai * this->fingerHorSize[fingerColIdx] + aj;
-
-            // Set the corresponding index in tactile sensor array to 1
-            switch (fingerIdx)
-            {
-              case 0:
-                 _tactileMsg->f0[aIndex] = tactileOuput;
-                break;
-              case 1:
-                 _tactileMsg->f1[aIndex] = tactileOuput;
-                break;
-              case 2:
-                 _tactileMsg->f2[aIndex] = tactileOuput;
-                break;
-              case 3:
-                 _tactileMsg->f3[aIndex] = tactileOuput;
-                break;
+            if (ai == 0) {
+              // Four sensors on the first row, five on the second, so
+              // adjust aj for sensors 16 and 17.
+              aj = (aj > 2) ? aj - 1 : aj;
+              aIndex = baseIndex + aj;
+            } else {
+              aIndex = baseIndex + ai * (this->palmHorSize[4] - 1) + aj;
             }
+            _tactileMsg.palm[aIndex] = tactileOutput;
+            break;
           }
+        }
+      } else if (info.fingerIdx != -1 && info.fingerColIdx != -1 && pos.Y() > 0) {
+        // Finger, and the contact is on the inside of the hand (palm side).
+        vPosInCol = std::clamp(
+          (pos.Z() + this->fingerColLength[info.fingerColIdx] / 2) /
+          this->fingerColLength[info.fingerColIdx], 0.0, 1.0);
+        hPosInCol = std::clamp(
+          (-pos.X() + this->fingerColWidth[info.fingerColIdx] / 2) /
+          this->fingerColWidth[info.fingerColIdx], 0.0, 1.0);
+
+        ai = this->fingerVerSize[info.fingerColIdx] -
+          std::ceil(vPosInCol * this->fingerVerSize[info.fingerColIdx]) - 1;
+        aj = std::ceil(hPosInCol * this->fingerHorSize[info.fingerColIdx]) - 1;
+        ai = std::max(ai, 0);
+        aj = std::max(aj, 0);
+
+        aIndex = info.fingerColIdx * this->fingerHorSize[0] * this->fingerVerSize[0] +
+          ai * this->fingerHorSize[info.fingerColIdx] + aj;
+
+        switch (info.fingerIdx) {
+          case 0:
+            _tactileMsg.f0[aIndex] = tactileOutput;
+            break;
+          case 1:
+            _tactileMsg.f1[aIndex] = tactileOutput;
+            break;
+          case 2:
+            _tactileMsg.f2[aIndex] = tactileOutput;
+            break;
+          case 3:
+            _tactileMsg.f3[aIndex] = tactileOutput;
+            break;
+          default:
+            break;
         }
       }
     }
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void SandiaHandPlugin::TactileConnect()
-{
-  boost::mutex::scoped_lock lock(this->tactileConnectionMutex);
-  this->tactileConnectCount++;
-}
+//////////////////////////////////////////////////
+GZ_ADD_PLUGIN(SandiaHandPlugin,
+              gz::sim::System,
+              SandiaHandPlugin::ISystemConfigure,
+              SandiaHandPlugin::ISystemPreUpdate)
 
-////////////////////////////////////////////////////////////////////////////////
-void SandiaHandPlugin::TactileDisconnect()
-{
-  boost::mutex::scoped_lock lock(this->tactileConnectionMutex);
-  this->tactileConnectCount--;
-}
-
-}
+GZ_ADD_PLUGIN_ALIAS(SandiaHandPlugin,
+    "drcsim_gazebo_ros_plugins::SandiaHandPlugin")

@@ -16,6 +16,12 @@
   <depend>gz-msgs10</depend>
   <depend>gz-common5</depend>
 
+  <depend>rclcpp</depend>
+  <depend>atlas_msgs</depend>
+  <depend>osrf_msgs</depend>
+  <depend>sandia_hand_msgs</depend>
+  <depend>sensor_msgs</depend>
+
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
