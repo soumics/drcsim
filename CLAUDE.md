@@ -894,3 +894,34 @@ turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
   `.cpp`, never `.cc`** — `ament_uncrustify` misparses these as comparison
   expressions in `.cc` files specifically (see the Tier 2 section's
   "`.cc` vs `.cpp`" writeup for the multi-day version of this one-liner).
+
+## Runtime gotcha found while porting `VRCPlugin`: `declare_parameter()` is one-shot
+
+ROS 1's `NodeHandle::getParam()` can be called for the same name any number
+of times; ROS 2's `Node::declare_parameter()` **throws
+`rclcpp::exceptions::ParameterAlreadyDeclaredException` the second time it's
+called for the same name on the same node**, full stop. This bit `VRCPlugin`
+twice in the same file, in two different shapes:
+- A per-joint parameter name built from a runtime-resolved string
+  (`"atlas_controller.gains." + jointName + ".p"`) collided whenever two
+  loop iterations produced the *same* string — here, whenever
+  `AtlasCommandController::FindJoint()`'s "neither candidate name exists on
+  this robot version" case returned an empty string for more than one DOF,
+  every one of those collided on `"atlas_controller.gains..p"`. Fix: skip
+  declaring anything for a name that turned out empty/invalid rather than
+  assuming every loop iteration produces a distinct key.
+- A **fixed** parameter name declared from inside a per-tick code path
+  (`UpdateStates()`'s state machine) rather than a one-time load path — it
+  worked on the first tick and threw on the second, since the surrounding
+  `if`/`else if` state-machine branch it lived in doesn't necessarily
+  transition away after just one tick. Fix: move any `declare_parameter()`
+  call into a function that runs exactly once (`Load()`/`DeferredLoad()`/
+  `InitModel()`-style setup), cache the resolved value in a member, and
+  reference the member from the per-tick code instead of re-declaring.
+General rule going forward: **before adding a `declare_parameter()` call,
+check that the surrounding function is guaranteed to run exactly once for
+that parameter name over the plugin's lifetime** — a loop over
+runtime-computed keys needs those keys to be provably distinct, and any
+call site inside a per-`PreUpdate`/per-tick path is almost certainly wrong
+unless the name itself changes every time (which parameter names never
+should).

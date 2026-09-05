@@ -491,8 +491,7 @@ void VRCPlugin::DoSetFakeASIC(
       this->atlasCommandController.ac);
     this->UnpinAtlas(_ecm, _eventMgr);
     this->SetRobotCmdVel(zeroVel, 0.0);
-  } else if (_asic.behavior ==
-    atlas_msgs::msg::AtlasSimInterfaceCommand::STAND_PREP) {
+  } else if (_asic.behavior == atlas_msgs::msg::AtlasSimInterfaceCommand::STAND_PREP) {
     // no-op
     this->SetRobotCmdVel(zeroVel, 0.0);
   } else if (_asic.behavior == atlas_msgs::msg::AtlasSimInterfaceCommand::WALK) {
@@ -523,8 +522,7 @@ void VRCPlugin::DoSetFakeASIC(
     this->atlas.lastStepIndex = _asic.step_params.desired_step.step_index;
     this->SetFeetCollide("none");
     this->SetRobotCmdVel(cmdVel, dt);
-  } else if (_asic.behavior ==
-    atlas_msgs::msg::AtlasSimInterfaceCommand::MANIPULATE) {
+  } else if (_asic.behavior == atlas_msgs::msg::AtlasSimInterfaceCommand::MANIPULATE) {
     // We fake STAND by pinning the robot.
     this->PinAtlas(_ecm, _eventMgr, true);
     this->SetRobotCmdVel(zeroVel, 0.0);
@@ -872,9 +870,7 @@ void VRCPlugin::UpdateStates(
 
     this->atlas.startupSequence = Robot::INIT_MODEL_SUCCESS;
   } else if (this->atlas.startupSequence == Robot::INIT_MODEL_SUCCESS) {
-    const bool startInVehicle =
-      this->rosNode->declare_parameter("robot_start_in_vehicle", false);
-    if (startInVehicle) {
+    if (this->atlas.startInVehicle) {
       RCLCPP_INFO(this->rosNode->get_logger(), "Starting robot in vehicle.");
       this->DoRobotEnterCar(_ecm, _eventMgr, gz::math::Pose3d::Zero);
       this->atlas.startupSequence = Robot::INITIALIZED;
@@ -1087,6 +1083,8 @@ void VRCPlugin::LoadRobotROSAPI()
     this->rosNode->declare_parameter("atlas.time_to_unpin", 5.0);
   this->atlas.startupMode =
     this->rosNode->declare_parameter("atlas.startup_mode", std::string(""));
+  this->atlas.startInVehicle =
+    this->rosNode->declare_parameter("robot_start_in_vehicle", false);
   if (this->atlas.startupMode == "bdi_stand") {
     RCLCPP_INFO(this->rosNode->get_logger(), "Starting robot with BDI standing");
   } else if (this->atlas.startupMode == "pinned") {

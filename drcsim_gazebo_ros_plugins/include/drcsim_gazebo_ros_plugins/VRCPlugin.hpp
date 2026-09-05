@@ -394,6 +394,7 @@ public:
     int startupSequence;
 
     double startupHarnessDuration;
+    bool startInVehicle{false};
 
     rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr subTrajectory;
     rclcpp::Subscription<geometry_msgs::msg::Pose>::SharedPtr subPose;
