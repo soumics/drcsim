@@ -1,0 +1,29 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="robotiq_hand_missing_joints_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <!-- No finger joints at all: FindJoints() aborts the whole load the
+         first time a joint by its expected name isn't found, same as
+         IRobotHandPlugin. This world exists to prove that failure path
+         doesn't crash and doesn't stand up any ROS interface. -->
+    <model name="robotiq_hand_missing_joints_test_model">
+      <pose>0 0 1 0 0 0</pose>
+      <static>true</static>
+      <link name="l_hand">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <plugin filename="RobotiqHandPlugin"
+              name="drcsim_gazebo_ros_plugins::RobotiqHandPlugin">
+        <side>left</side>
+      </plugin>
+    </model>
+  </world>
+</sdf>

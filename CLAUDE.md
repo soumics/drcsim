@@ -269,8 +269,8 @@ not happen automatically.
      (`gains.f<N>_j<M>.{p,i,d,i_clamp}`, default `0.0`) — settable the
      same way once a launch file exists to provide them.
 
-3. 🔶 `IRobotHandPlugin` — **ported on `port/irobot_hand_plugin`, not yet
-   built/tested by the user.** 23 joints per hand (2 base-rotation + 3 base +
+3. ✅ `IRobotHandPlugin` — **done, 2/2 gtest cases passing (81/81 package
+   checks total), merged into `ros2-jazzy-harmonic`.** 23 joints per hand (2 base-rotation + 3 base +
    3×(3 flex + 3 twist)); unlike `SandiaHandPlugin`, the original has **no
    stumps fallback** — `FindJoints()` aborts the whole load the first time any
    one expected joint name is missing, and this port preserves that exactly.
@@ -325,14 +325,67 @@ not happen automatically.
      `SandiaHandPlugin`-style follow-up test) — a natural next step if the
      user wants deeper coverage once the ROS-interface test is green.
 
+4. 🔶 `RobotiqHandPlugin` — **ported on `port/robotiq_hand_plugin`, not yet
+   built/tested by the user.** A state machine over the SModel Robot
+   Output/Input protocol (`atlas_msgs::msg::SModelRobotOutput`/`Input`,
+   already ported in Tier 1) driving a 3-finger adaptive gripper: activation,
+   4 grasping modes (Basic/Pinch/Wide/Scissor), per-finger position/speed/
+   force targets, and object-detection feedback, with PID position control
+   on the 5 actuated hinge joints. Notes:
+   - **`gazebo::common::PID` → `gz::math::PID`** — this plugin's PID needs
+     (position control with configurable gains/effort limits) are the same
+     ones already met by `DRCVehiclePlugin`'s `gz::math::PID` usage in Tier 0,
+     so this reuses that exact library rather than reimplementing a PID.
+     Nearly a drop-in replacement: same `Init(p,i,d,imax,imin,cmdMax,cmdMin)`
+     argument order and `error = current - target` convention, but getters
+     dropped their `Get` prefix (`PGain()`, `Errors()`, ...) and `Update()`
+     takes a `std::chrono::duration<double>` instead of a bare double.
+   - **Two joint vectors, preserved deliberately, not simplified**:
+     `fingerJoints` (5, actuated, `SetForce()` target) vs. `joints` (12,
+     every joint worth reading, used for both `JointState` publishing and PID
+     feedback). For the 2 simple spread joints these are the same joint; for
+     the 3 underactuated 4-bar-linkage fingers they're genuinely different —
+     the PID reads the finger's actual curl angle off `finger_N_joint_1` but
+     drives torque through `finger_N_joint_proximal_actuating_hinge`, the
+     real motor DOF. Losing this distinction would silently break the
+     underactuated fingers' control.
+   - Effort limits: no `Joint::GetEffortLimit()` reader in gz-sim (same
+     `Joint::Axis(ecm)` → `sdf::JointAxis` pattern as `IRobotHandPlugin`'s
+     limit reading, this time `.Effort()` instead of `.Lower()`/`.Upper()`).
+   - **Fixed a copy-paste bug found in the original while porting**:
+     `VerifyCommand()` checked every field's range against `rACT` instead of
+     its own field (e.g. `VerifyField("rMOD", 0, 3, _command->rACT)`) — since
+     valid `rACT` is always 0 or 1, this silently made every other range
+     check a no-op. Fixed to check each field against itself; can only newly
+     reject commands that were already out of their own field's declared
+     range, doesn't change behavior for any command that was valid before.
+   - `JointState.effort` left at zero for the 10 non-actuated-hinge joints —
+     no generic "last applied generalized force" reader in gz-sim, and for
+     the 3 underactuated fingers the meaningful torque was commanded on a
+     different joint than the one being read anyway (see above).
+   - A pre-existing behavior deliberately **not** "fixed": `UpdatePIDControl`
+     computes a `targetSpeed` value in the Scissor grasping branch that is
+     never actually read afterward in the original either — looks like
+     vestigial support for a velocity-mode path that was never wired up.
+     Preserved as dead code with a comment rather than removed or wired up,
+     since guessing at unimplemented original intent is worse than leaving
+     it alone.
+   - Test coverage so far: a cheap negative test (no finger joints at all,
+     confirms the no-stumps-fallback abort is graceful) plus a positive test
+     against a simplified (non-4-bar-coupled) test world that commands Wide
+     grasping mode and confirms `l_palm_finger_1_joint` — one of the two
+     joints where the informative and actuated joint are literally the same
+     entity, so it moves correctly even without the real linkage geometry —
+     swings measurably off zero.
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-RobotiqHandPlugin, MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin,
-AtlasPlugin/V3/V4/V5 (biggest/riskiest — ties into the AtlasSimInterface shim
-libs from `drcsim_model_resources`), DRCVehicleROSPlugin (**subclasses**
+MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5
+(biggest/riskiest — ties into the AtlasSimInterface shim libs from
+`drcsim_model_resources`), DRCVehicleROSPlugin (**subclasses**
 `DRCVehiclePlugin` — see below), then the 8 CLI executables +
 `actionlib_server` + `gz_model_teleport` + `test_ros_plugin`.
-ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin 🔶 (ported,
-awaiting first build/test round).
+ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
+RobotiqHandPlugin 🔶 (ported, awaiting first build/test round).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

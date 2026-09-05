@@ -14,856 +14,712 @@
  * limitations under the License.
  *
 */
+#include "drcsim_gazebo_ros_plugins/RobotiqHandPlugin.hpp"
 
-#include <atlas_msgs/SModelRobotInput.h>
-#include <atlas_msgs/SModelRobotOutput.h>
-#include <ros/ros.h>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
-#include <gazebo/common/Plugin.hh>
-#include <gazebo/common/Time.hh>
-#include <gazebo/math/Angle.hh>
-#include <gazebo/physics/physics.hh>
-#include "drcsim_gazebo_ros_plugins/RobotiqHandPlugin.h"
 
-const double RobotiqHandPlugin::VelTolerance = 0.002;
-const double RobotiqHandPlugin::PoseTolerance = 0.002;
-const double RobotiqHandPlugin::MinVelocity = 0.176;
-const double RobotiqHandPlugin::MaxVelocity = 0.88;
+#include <gz/common/Console.hh>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/Joint.hh>
+#include <sdf/JointAxis.hh>
 
-// Default topic names initialization.
-const std::string RobotiqHandPlugin::DefaultLeftTopicCommand  =
-  "/left_hand/command";
-const std::string RobotiqHandPlugin::DefaultLeftTopicState    =
-  "/left_hand/state";
-const std::string RobotiqHandPlugin::DefaultRightTopicCommand =
-  "/right_hand/command";
-const std::string RobotiqHandPlugin::DefaultRightTopicState   =
-  "/right_hand/state";
+using drcsim_gazebo_ros_plugins::RobotiqHandPlugin;
 
-////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////
 RobotiqHandPlugin::RobotiqHandPlugin()
 {
-  // PID default parameters.
-  for (int i = 0; i < this->NumJoints; ++i)
-  {
-    this->posePID[i].Init(1.0, 0, 0.5, 0.0, 0.0, 60.0, -60.0);
-    this->posePID[i].SetCmd(0.0);
-  }
-
-  // Default grasping mode: Basic mode.
-  this->graspingMode = Basic;
-
-  // Default hand state: Disabled.
-  this->handState = Disabled;
 }
 
-////////////////////////////////////////////////////////////////////////////////
+//////////////////////////////////////////////////
 RobotiqHandPlugin::~RobotiqHandPlugin()
 {
-  gazebo::event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-  this->rosNode->shutdown();
-  this->rosQueue.clear();
-  this->rosQueue.disable();
-  this->callbackQueueThread.join();
+  if (this->executor) {
+    this->executor->cancel();
+  }
+  if (this->rosSpinThread.joinable()) {
+    this->rosSpinThread.join();
+  }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::Load(gazebo::physics::ModelPtr _parent,
-                             sdf::ElementPtr _sdf)
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &)
 {
-  this->model = _parent;
-  this->world = this->model->GetWorld();
-  this->sdf = _sdf;
+  this->model = gz::sim::Model(_entity);
+  if (!this->model.Valid(_ecm)) {
+    gzerr << "RobotiqHandPlugin should be attached to a model entity. "
+          << "Failed to initialize." << std::endl;
+    return;
+  }
+  this->sdfConfig = _sdf;
+}
 
-  if (!this->sdf->HasElement("side") ||
-      !this->sdf->GetElement("side")->GetValue()->Get(this->side) ||
-      ((this->side != "left") && (this->side != "right")))
-  {
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::PreUpdate(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->initialized && this->sdfConfig) {
+    // Deferred from Configure(): a model's child joint entities are not
+    // guaranteed to exist yet when Configure() runs.
+    this->Load(_ecm);
+    this->initialized = true;
+  }
+
+  if (this->validConfig) {
+    this->UpdateStates(_info, _ecm);
+  }
+}
+
+//////////////////////////////////////////////////
+double RobotiqHandPlugin::FirstOrZero(
+  const std::optional<std::vector<double>> & _values)
+{
+  if (_values && !_values->empty()) {
+    return (*_values)[0];
+  }
+  return 0.0;
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::Load(gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->sdfConfig->HasElement("side")) {
     gzerr << "Failed to determine which hand we're controlling; "
-             "aborting plugin load. <Side> should be either 'left' or 'right'."
-          << std::endl;
+          << "aborting plugin load." << std::endl;
+    return;
+  }
+  this->side = this->sdfConfig->Get<std::string>("side");
+  if (this->side != "left" && this->side != "right") {
+    gzerr << "Failed to determine which hand we're controlling; "
+          << "aborting plugin load." << std::endl;
     return;
   }
 
-  // Load the vector of all joints.
-  if (!this->FindJoints())
-    return;
-
-  // Initialize joint state vector.
-  this->jointStates.name.resize(this->jointNames.size());
-  this->jointStates.position.resize(this->jointNames.size());
-  this->jointStates.velocity.resize(this->jointNames.size());
-  this->jointStates.effort.resize(this->jointNames.size());
-  for (size_t i = 0; i < this->jointNames.size(); ++i)
-  {
-    this->jointStates.name[i] = this->jointNames[i];
-    this->jointStates.position[i] = 0;
-    this->jointStates.velocity[i] = 0;
-    this->jointStates.effort[i] = 0;
-  }
-
-  // Default ROS topic names.
-  std::string controlTopicName = this->DefaultLeftTopicCommand;
-  std::string stateTopicName   = this->DefaultLeftTopicState;
-  if (this->side == "right")
-  {
-    controlTopicName = this->DefaultRightTopicCommand;
-    stateTopicName   = this->DefaultRightTopicState;
-  }
-
-  for (int i = 0; i < this->NumJoints; ++i)
-  {
-    // Set the PID effort limits.
-    this->posePID[i].SetCmdMin(-this->fingerJoints[i]->GetEffortLimit(0));
-    this->posePID[i].SetCmdMax(this->fingerJoints[i]->GetEffortLimit(0));
-
-    // Overload the PID parameters if they are available.
-    if (this->sdf->HasElement("kp_position"))
-      this->posePID[i].SetPGain(this->sdf->Get<double>("kp_position"));
-
-    if (this->sdf->HasElement("ki_position"))
-      this->posePID[i].SetIGain(this->sdf->Get<double>("ki_position"));
-
-    if (this->sdf->HasElement("kd_position"))
-    {
-      this->posePID[i].SetDGain(this->sdf->Get<double>("kd_position"));
-      std::cout << "dGain after overloading: " << this->posePID[i].GetDGain()
-                << std::endl;
-    }
-
-    if (this->sdf->HasElement("position_effort_min"))
-      this->posePID[i].SetCmdMin(this->sdf->Get<double>("position_effort_min"));
-
-    if (this->sdf->HasElement("position_effort_max"))
-      this->posePID[i].SetCmdMax(this->sdf->Get<double>("position_effort_max"));
-  }
-
-  // Overload the ROS topics for the hand if they are available.
-  if (this->sdf->HasElement("topic_command"))
-    controlTopicName = this->sdf->Get<std::string>("topic_command");
-
-  if (this->sdf->HasElement("topic_state"))
-    stateTopicName = this->sdf->Get<std::string>("topic_state");
-
-  // Initialize ROS.
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS hasn't been "
-          << "properly initialized. Try starting gazebo with ROS plugin:\n"
-          << " gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
-
-  // Create a ROS node.
-  this->rosNode.reset(new ros::NodeHandle(""));
-
-  // Publish multi queue.
-  this->pmq.startServiceThread();
-
-  // Broadcasts state.
-  this->pubHandleStateQueue = this->pmq.addPub<atlas_msgs::SModelRobotInput>();
-  this->pubHandleState = this->rosNode->advertise<atlas_msgs::SModelRobotInput>(
-    stateTopicName, 100, true);
-
-  // Broadcast joint state.
-  std::string topicBase = std::string("robotiq_hands/") + this->side;
-  this->pubJointStatesQueue = this->pmq.addPub<sensor_msgs::JointState>();
-  this->pubJointStates = this->rosNode->advertise<sensor_msgs::JointState>(
-    topicBase + std::string("_hand/joint_states"), 10);
-
-  // Subscribe to user published handle control commands.
-  ros::SubscribeOptions handleCommandSo =
-    ros::SubscribeOptions::create<atlas_msgs::SModelRobotOutput>(
-      controlTopicName, 100,
-      boost::bind(&RobotiqHandPlugin::SetHandleCommand, this, _1),
-      ros::VoidPtr(), &this->rosQueue);
-
-  // Enable TCP_NODELAY since TCP causes bursty communication with high jitter.
-  handleCommandSo.transport_hints =
-    ros::TransportHints().reliable().tcpNoDelay(true);
-  this->subHandleCommand = this->rosNode->subscribe(handleCommandSo);
-
-  // Controller time control.
-  this->lastControllerUpdateTime = this->world->GetSimTime();
-
-  // Start callback queue.
-  this->callbackQueueThread =
-    boost::thread(boost::bind(&RobotiqHandPlugin::RosQueueThread, this));
-
-  // Connect to gazebo world update.
-  this->updateConnection =
-    gazebo::event::Events::ConnectWorldUpdateBegin(
-      boost::bind(&RobotiqHandPlugin::UpdateStates, this));
-
-  // Log information.
-  gzlog << "RobotiqHandPlugin loaded for " << this->side << " hand."
+  gzmsg << "RobotiqHandPlugin loading for " << this->side << " hand."
         << std::endl;
-  for (int i = 0; i < this->NumJoints; ++i)
-  {
-    gzlog << "Position PID parameters for joint ["
-          << this->fingerJoints[i]->GetName() << "]:"     << std::endl
-          << "\tKP: "     << this->posePID[i].GetPGain()  << std::endl
-          << "\tKI: "     << this->posePID[i].GetIGain()  << std::endl
-          << "\tKD: "     << this->posePID[i].GetDGain()  << std::endl
-          << "\tIMin: "   << this->posePID[i].GetIMin()   << std::endl
-          << "\tIMax: "   << this->posePID[i].GetIMax()   << std::endl
-          << "\tCmdMin: " << this->posePID[i].GetCmdMin() << std::endl
-          << "\tCmdMax: " << this->posePID[i].GetCmdMax() << std::endl
-          << std::endl;
-  }
-  gzlog << "Topic for sending hand commands: ["   << controlTopicName
-        << "]\nTopic for receiving hand state: [" << stateTopicName
-        << "]" << std::endl;
-}
 
-////////////////////////////////////////////////////////////////////////////////
-bool RobotiqHandPlugin::VerifyField(const std::string &_label, int _min,
-  int _max, int _v)
-{
-  if (_v < _min || _v > _max)
-  {
-    std::cerr << "Illegal " << _label << " value: [" << _v << "]. The correct "
-              << "range is [" << _min << "," << _max << "]" << std::endl;
-    return false;
-  }
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-bool RobotiqHandPlugin::VerifyCommand(
-    const atlas_msgs::SModelRobotOutput::ConstPtr &_command)
-{
-  return this->VerifyField("rACT", 0, 1,   _command->rACT) &&
-         this->VerifyField("rMOD", 0, 3,   _command->rACT) &&
-         this->VerifyField("rGTO", 0, 1,   _command->rACT) &&
-         this->VerifyField("rATR", 0, 1,   _command->rACT) &&
-         this->VerifyField("rICF", 0, 1,   _command->rACT) &&
-         this->VerifyField("rICS", 0, 1,   _command->rACT) &&
-         this->VerifyField("rPRA", 0, 255, _command->rACT) &&
-         this->VerifyField("rSPA", 0, 255, _command->rACT) &&
-         this->VerifyField("rFRA", 0, 255, _command->rACT) &&
-         this->VerifyField("rPRB", 0, 255, _command->rACT) &&
-         this->VerifyField("rSPB", 0, 255, _command->rACT) &&
-         this->VerifyField("rFRB", 0, 255, _command->rACT) &&
-         this->VerifyField("rPRC", 0, 255, _command->rACT) &&
-         this->VerifyField("rSPC", 0, 255, _command->rACT) &&
-         this->VerifyField("rFRC", 0, 255, _command->rACT) &&
-         this->VerifyField("rPRS", 0, 255, _command->rACT) &&
-         this->VerifyField("rSPS", 0, 255, _command->rACT) &&
-         this->VerifyField("rFRS", 0, 255, _command->rACT);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::SetHandleCommand(
-    const atlas_msgs::SModelRobotOutput::ConstPtr &_msg)
-{
-  boost::mutex::scoped_lock lock(this->controlMutex);
-
-  // Sanity check.
-  if (!this->VerifyCommand(_msg))
-  {
-    std::cerr << "Ignoring command" << std::endl;
+  if (!this->FindJoints(_ecm)) {
     return;
   }
 
-  this->prevCommand = this->handleCommand;
+  this->jointStates.name = this->jointNames;
+  this->jointStates.position.assign(this->jointNames.size(), 0.0);
+  this->jointStates.velocity.assign(this->jointNames.size(), 0.0);
+  this->jointStates.effort.assign(this->jointNames.size(), 0.0);
 
-  // Update handleCommand.
-  this->handleCommand = *_msg;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::ReleaseHand()
-{
-  // Open the fingers.
-  this->handleCommand.rPRA = 0;
-  this->handleCommand.rPRB = 0;
-  this->handleCommand.rPRC = 0;
-
-  // Half speed.
-  this->handleCommand.rSPA = 127;
-  this->handleCommand.rSPB = 127;
-  this->handleCommand.rSPC = 127;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::StopHand()
-{
-  // Set the target positions to the current ones.
-  this->handleCommand.rPRA = this->handleState.gPRA;
-  this->handleCommand.rPRB = this->handleState.gPRB;
-  this->handleCommand.rPRC = this->handleState.gPRC;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-bool RobotiqHandPlugin::IsHandFullyOpen()
-{
-  bool fingersOpen = true;
-
-  // The hand will be fully open when all the fingers are within 'tolerance'
-  // from their lower limits.
-  gazebo::math::Angle tolerance;
-  tolerance.SetFromDegree(1.0);
-
-  for (int i = 2; i < this->NumJoints; ++i)
-  {
-    fingersOpen = fingersOpen &&
-      (this->joints[i]->GetAngle(0) <
-       (this->joints[i]->GetLowerLimit(0) + tolerance));
+  std::string controlTopicName = "/left_hand/command";
+  std::string stateTopicName = "/left_hand/state";
+  if (this->side == "right") {
+    controlTopicName = "/right_hand/command";
+    stateTopicName = "/right_hand/state";
   }
 
-  return fingersOpen;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::UpdateStates()
-{
-  boost::mutex::scoped_lock lock(this->controlMutex);
-
-  gazebo::common::Time curTime = this->world->GetSimTime();
-
-  // Step 1: State transitions.
-  if (curTime > this->lastControllerUpdateTime)
-  {
-    this->userHandleCommand = this->handleCommand;
-
-    // Deactivate gripper.
-    if (this->handleCommand.rACT == 0)
-    {
-      this->handState = Disabled;
+  for (int i = 0; i < kNumJoints; ++i) {
+    gz::sim::Joint fingerJoint(this->fingerJoints[i]);
+    double effortLimit = 60.0;
+    const auto axes = fingerJoint.Axis(_ecm);
+    if (axes && !axes->empty() && std::isfinite((*axes)[0].Effort())) {
+      effortLimit = (*axes)[0].Effort();
     }
-    // Emergency auto-release.
-    else if (this->handleCommand.rATR == 1)
-    {
-      this->handState = Emergency;
+    this->posePID[i].Init(1.0, 0, 0.5, 0.0, 0.0, effortLimit, -effortLimit);
+
+    if (this->sdfConfig->HasElement("kp_position")) {
+      this->posePID[i].SetPGain(this->sdfConfig->Get<double>("kp_position"));
     }
-    // Individual Control of Scissor.
-    else if (this->handleCommand.rICS == 1)
-    {
-      this->handState = ICS;
+    if (this->sdfConfig->HasElement("ki_position")) {
+      this->posePID[i].SetIGain(this->sdfConfig->Get<double>("ki_position"));
     }
-    // Individual Control of Fingers.
-    else if (this->handleCommand.rICF == 1)
-    {
-      this->handState = ICF;
+    if (this->sdfConfig->HasElement("kd_position")) {
+      this->posePID[i].SetDGain(this->sdfConfig->Get<double>("kd_position"));
     }
-    else
-    {
-      // Change the grasping mode.
-      if (static_cast<int>(this->handleCommand.rMOD) != this->graspingMode)
-      {
-        this->handState = ChangeModeInProgress;
-        lastHandleCommand = handleCommand;
-
-        // Update the grasping mode.
-        this->graspingMode =
-          static_cast<GraspingMode>(this->handleCommand.rMOD);
-      }
-      else if (this->handState != ChangeModeInProgress)
-      {
-        this->handState = Simplified;
-      }
-
-      // Grasping mode initialized, let's change the state to Simplified Mode.
-      if (this->handState == ChangeModeInProgress && this->IsHandFullyOpen())
-      {
-        this->prevCommand = this->handleCommand;
-
-        // Restore the original command.
-        this->handleCommand = this->lastHandleCommand;
-        this->handState = Simplified;
-      }
+    if (this->sdfConfig->HasElement("position_effort_min")) {
+      this->posePID[i].SetCmdMin(
+        this->sdfConfig->Get<double>("position_effort_min"));
     }
-
-    // Step 2: Actions in each state.
-    switch (this->handState)
-    {
-      case Disabled:
-        break;
-
-      case Emergency:
-        // Open the hand.
-        if (this->IsHandFullyOpen())
-          this->StopHand();
-        else
-          this->ReleaseHand();
-        break;
-
-      case ICS:
-        std::cerr << "Individual Control of Scissor not supported" << std::endl;
-        break;
-
-      case ICF:
-        if (this->handleCommand.rGTO == 0)
-        {
-          // "Stop" action.
-          this->StopHand();
-        }
-        break;
-
-      case ChangeModeInProgress:
-        // Open the hand.
-        this->ReleaseHand();
-        break;
-
-      case Simplified:
-        // We are in Simplified mode, so all the fingers should follow finger A.
-        // Position.
-        this->handleCommand.rPRB = this->handleCommand.rPRA;
-        this->handleCommand.rPRC = this->handleCommand.rPRA;
-        // Velocity.
-        this->handleCommand.rSPB = this->handleCommand.rSPA;
-        this->handleCommand.rSPC = this->handleCommand.rSPA;
-        // Force.
-        this->handleCommand.rFRB = this->handleCommand.rFRA;
-        this->handleCommand.rFRC = this->handleCommand.rFRA;
-
-        if (this->handleCommand.rGTO == 0)
-        {
-          // "Stop" action.
-          this->StopHand();
-        }
-        break;
-
-      default:
-        std::cerr << "Unrecognized state [" << this->handState << "]"
-                  << std::endl;
-    }
-
-    // Update the hand controller.
-    this->UpdatePIDControl((curTime - this->lastControllerUpdateTime).Double());
-
-    // Gather robot state data and publish them.
-    this->GetAndPublishHandleState();
-
-    // Publish joint states.
-    this->GetAndPublishJointState(curTime);
-
-    this->lastControllerUpdateTime = curTime;
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-uint8_t RobotiqHandPlugin::GetObjectDetection(
-  const gazebo::physics::JointPtr &_joint, int _index, uint8_t _rPR,
-  uint8_t _prevrPR)
-{
-  // Check finger's speed.
-  bool isMoving = _joint->GetVelocity(0) > this->VelTolerance;
-
-  // Check if the finger reached its target positions. We look at the error in
-  // the position PID to decide if reached the target.
-  double pe, ie, de;
-  this->posePID[_index].GetErrors(pe, ie, de);
-  bool reachPosition = pe < this->PoseTolerance;
-
-  if (isMoving)
-  {
-    // Finger is in motion.
-    return 0;
-  }
-  else
-  {
-    if (reachPosition)
-    {
-      // Finger is at the requestedPosition.
-      return 3;
-    }
-    else if (_rPR - _prevrPR > 0)
-    {
-      // Finger has stopped due to a contact while closing.
-      return 2;
-    }
-    else
-    {
-      // Finger has stopped due to a contact while opening.
-      return 1;
-    }
-  }
-}
-
-////////////////////////////////////////////////////////////////////////////////
-uint8_t RobotiqHandPlugin::GetCurrentPosition(
-  const gazebo::physics::JointPtr &_joint)
-{
-  // Full range of motion.
-  gazebo::math::Angle range =
-    _joint->GetUpperLimit(0) - _joint->GetLowerLimit(0);
-
-  // The maximum value in pinch mode is 177.
-  if (this->graspingMode == Pinch)
-    range *= 177.0 / 255.0;
-
-  // Angle relative to the lower limit.
-  gazebo::math::Angle relAngle = _joint->GetAngle(0) - _joint->GetLowerLimit(0);
-
-  return
-    static_cast<uint8_t>(round(255.0 * relAngle.Radian() / range.Radian()));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::GetAndPublishHandleState()
-{
-  // gACT. Initialization status.
-  this->handleState.gACT = this->userHandleCommand.rACT;
-
-  // gMOD. Operation mode status.
-  this->handleState.gMOD = this->userHandleCommand.rMOD;
-
-  // gGTO. Action status.
-  this->handleState.gGTO = this->userHandleCommand.rGTO;
-
-  // gIMC. Gripper status.
-  if (this->handState == Emergency)
-    this->handleState.gIMC = 0;
-  else if (this->handState == ChangeModeInProgress)
-    this->handleState.gIMC = 2;
-  else
-    this->handleState.gIMC = 3;
-
-  // Check fingers' speed.
-  bool isMovingA = this->joints[2]->GetVelocity(0) > this->VelTolerance;
-  bool isMovingB = this->joints[3]->GetVelocity(0) > this->VelTolerance;
-  bool isMovingC = this->joints[4]->GetVelocity(0) > this->VelTolerance;
-
-  // Check if the fingers reached their target positions.
-  double pe, ie, de;
-  this->posePID[2].GetErrors(pe, ie, de);
-  bool reachPositionA = pe < this->PoseTolerance;
-  this->posePID[3].GetErrors(pe, ie, de);
-  bool reachPositionB = pe < this->PoseTolerance;
-  this->posePID[4].GetErrors(pe, ie, de);
-  bool reachPositionC = pe < this->PoseTolerance;
-
-  // gSTA. Motion status.
-  if (isMovingA || isMovingB || isMovingC)
-  {
-    // Gripper is in motion.
-    this->handleState.gSTA = 0;
-  }
-  else
-  {
-    if (reachPositionA && reachPositionB && reachPositionC)
-    {
-      // Gripper is stopped: All fingers reached requested position.
-      this->handleState.gSTA = 3;
-    }
-    else if (!reachPositionA && !reachPositionB && !reachPositionC)
-    {
-      // Gripper is stopped: All fingers stopped before requested position.
-      this->handleState.gSTA = 2;
-    }
-    else
-    {
-      // Gripper stopped. One or two fingers stopped before requested position.
-      this->handleState.gSTA = 1;
+    if (this->sdfConfig->HasElement("position_effort_max")) {
+      this->posePID[i].SetCmdMax(
+        this->sdfConfig->Get<double>("position_effort_max"));
     }
   }
 
-  // gDTA. Finger A object detection.
-  this->handleState.gDTA = this->GetObjectDetection(this->joints[2], 2,
-    this->handleCommand.rPRA, this->prevCommand.rPRA);
-
-  // gDTB. Finger B object detection.
-  this->handleState.gDTB = this->GetObjectDetection(this->joints[3], 3,
-    this->handleCommand.rPRB, this->prevCommand.rPRB);
-
-  // gDTC. Finger C object detection
-  this->handleState.gDTC = this->GetObjectDetection(this->joints[4], 4,
-    this->handleCommand.rPRC, this->prevCommand.rPRC);
-
-  // gDTS. Scissor object detection. We use finger A as a reference.
-  this->handleState.gDTS = this->GetObjectDetection(this->joints[0], 0,
-    this->handleCommand.rPRS, this->prevCommand.rPRS);
-
-  // gFLT. Fault status.
-  if (this->handState == ChangeModeInProgress)
-    this->handleState.gFLT = 6;
-  else if (this->handState == Disabled)
-    this->handleState.gFLT = 7;
-  else if (this->handState == Emergency)
-    this->handleState.gFLT = 11;
-  else
-    this->handleState.gFLT = 0;
-
-  // gPRA. Echo of requested position for finger A.
-  this->handleState.gPRA = this->userHandleCommand.rPRA;
-  // gPOA. Finger A position [0-255].
-  this->handleState.gPOA = this->GetCurrentPosition(this->joints[2]);
-  // gCUA. Not implemented.
-  this->handleState.gCUA = 0;
-
-  // gPRB. Echo of requested position for finger B.
-  this->handleState.gPRB = this->userHandleCommand.rPRB;
-  // gPOB. Finger B position [0-255].
-  this->handleState.gPOB = this->GetCurrentPosition(this->joints[3]);
-  // gCUB. Not implemented.
-  this->handleState.gCUB = 0;
-
-  // gPRC. Echo of requested position for finger C.
-  this->handleState.gPRC = this->userHandleCommand.rPRC;
-  // gPOC. Finger C position [0-255].
-  this->handleState.gPOC = this->GetCurrentPosition(this->joints[4]);
-  // gCUS. Not implemented.
-  this->handleState.gCUC = 0;
-
-  // gPRS. Echo of requested position of the scissor action
-  this->handleState.gPRS = this->userHandleCommand.rPRS;
-  // gPOS. Scissor current position [0-255]. We use finger B as reference.
-  this->handleState.gPOS = this->GetCurrentPosition(this->joints[1]);
-  // gCUS. Not implemented.
-  this->handleState.gCUS = 0;
-
-  // Publish robot states.
-  this->pubHandleStateQueue->push(this->handleState, this->pubHandleState);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::GetAndPublishJointState(
-                                           const gazebo::common::Time &_curTime)
-{
-  this->jointStates.header.stamp = ros::Time(_curTime.sec, _curTime.nsec);
-  for (size_t i = 0; i < this->joints.size(); ++i)
-  {
-    this->jointStates.position[i] = this->joints[i]->GetAngle(0).Radian();
-    this->jointStates.velocity[i] = this->joints[i]->GetVelocity(0);
-    // better to use GetForceTorque dot joint axis
-    this->jointStates.effort[i] = this->joints[i]->GetForce(0u);
+  if (this->sdfConfig->HasElement("topic_command")) {
+    controlTopicName = this->sdfConfig->Get<std::string>("topic_command");
   }
-  this->pubJointStatesQueue->push(this->jointStates, this->pubJointStates);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::UpdatePIDControl(double _dt)
-{
-  if (this->handState == Disabled)
-  {
-    for (int i = 0; i < this->NumJoints; ++i)
-      this->fingerJoints[i]->SetForce(0, 0.0);
-
-    return;
+  if (this->sdfConfig->HasElement("topic_state")) {
+    stateTopicName = this->sdfConfig->Get<std::string>("topic_state");
   }
 
-  for (int i = 0; i < this->NumJoints; ++i)
-  {
-    double targetPose = 0.0;
-    double targetSpeed = (this->MinVelocity + this->MaxVelocity) / 2.0;
-
-    if (i == 0)
-    {
-      switch (this->graspingMode)
-      {
-        case Wide:
-          targetPose = this->joints[i]->GetUpperLimit(0).Radian();
-          break;
-
-        case Pinch:
-          // --11 degrees.
-          targetPose = -0.1919;
-          break;
-
-        case Scissor:
-          // Max position is reached at value 215.
-          targetPose = this->joints[i]->GetUpperLimit(0).Radian() -
-            (this->joints[i]->GetUpperLimit(0).Radian() -
-             this->joints[i]->GetLowerLimit(0).Radian()) * (215.0 / 255.0)
-            * this->handleCommand.rPRA / 255.0;
-          break;
-      }
-    }
-    else if (i == 1)
-    {
-      switch (this->graspingMode)
-      {
-        case Wide:
-          targetPose = this->joints[i]->GetLowerLimit(0).Radian();
-          break;
-
-        case Pinch:
-          // 11 degrees.
-          targetPose = 0.1919;
-          break;
-
-        case Scissor:
-        // Max position is reached at value 215.
-          targetPose = this->joints[i]->GetLowerLimit(0).Radian() +
-            (this->joints[i]->GetUpperLimit(0).Radian() -
-             this->joints[i]->GetLowerLimit(0).Radian()) * (215.0 / 255.0)
-            * this->handleCommand.rPRA / 255.0;
-          break;
-      }
-    }
-    else if (i >= 2 && i <= 4)
-    {
-      if (this->graspingMode == Pinch)
-      {
-        // Max position is reached at value 177.
-        targetPose = this->joints[i]->GetLowerLimit(0).Radian() +
-          (this->joints[i]->GetUpperLimit(0).Radian() -
-           this->joints[i]->GetLowerLimit(0).Radian()) * (177.0 / 255.0)
-          * this->handleCommand.rPRA / 255.0;
-      }
-      else if (this->graspingMode == Scissor)
-      {
-        targetSpeed = this->MinVelocity +
-          ((this->MaxVelocity - this->MinVelocity) *
-          this->handleCommand.rSPA / 255.0);
-      }
-      else
-      {
-        targetPose = this->joints[i]->GetLowerLimit(0).Radian() +
-          (this->joints[i]->GetUpperLimit(0).Radian() -
-           this->joints[i]->GetLowerLimit(0).Radian())
-          * this->handleCommand.rPRA / 255.0;
-      }
-    }
-
-    // Get the current pose.
-    double currentPose = this->joints[i]->GetAngle(0).Radian();
-
-    // Position error.
-    double poseError = currentPose - targetPose;
-
-    // Update the PID.
-    double torque = this->posePID[i].Update(poseError, _dt);
-
-    // Apply the PID command.
-    this->fingerJoints[i]->SetForce(0, torque);
+  if (!rclcpp::ok()) {
+    rclcpp::init(0, nullptr);
   }
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "robotiq_hand_plugin_" + this->side);
+
+  this->pubHandleState =
+    this->rosNode->create_publisher<atlas_msgs::msg::SModelRobotInput>(
+    stateTopicName, rclcpp::QoS(100).transient_local());
+
+  this->pubJointStates =
+    this->rosNode->create_publisher<sensor_msgs::msg::JointState>(
+    "robotiq_hands/" + this->side + "_hand/joint_states", 10);
+
+  this->subHandleCommand =
+    this->rosNode->create_subscription<atlas_msgs::msg::SModelRobotOutput>(
+    controlTopicName, rclcpp::QoS(100),
+    std::bind(&RobotiqHandPlugin::SetHandleCommand, this, std::placeholders::_1));
+
+  this->executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  this->executor->add_node(this->rosNode);
+  this->rosSpinThread = std::thread(
+    [this]()
+    {
+      this->executor->spin();
+    });
+
+  gzmsg << "Topic for sending hand commands: [" << controlTopicName
+        << "]. Topic for receiving hand state: [" << stateTopicName << "]"
+        << std::endl;
+
+  this->validConfig = true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-bool RobotiqHandPlugin::GetAndPushBackJoint(const std::string& _jointName,
-                                            gazebo::physics::Joint_V& _joints)
+//////////////////////////////////////////////////
+bool RobotiqHandPlugin::GetAndPushBackJoint(
+  gz::sim::EntityComponentManager & _ecm,
+  const std::string & _jointName,
+  std::vector<gz::sim::Entity> & _joints)
 {
-  gazebo::physics::JointPtr joint = this->model->GetJoint(_jointName);
-
-  if (!joint)
-  {
+  const gz::sim::Entity joint = this->model.JointByName(_ecm, _jointName);
+  if (joint == gz::sim::kNullEntity) {
     gzerr << "Failed to find joint [" << _jointName
-          << "] aborting plugin load." << std::endl;
+          << "]; aborting plugin load." << std::endl;
     return false;
   }
+  gz::sim::Joint jointWrapper(joint);
+  jointWrapper.EnablePositionCheck(_ecm);
+  jointWrapper.EnableVelocityCheck(_ecm);
   _joints.push_back(joint);
-  gzlog << "RobotiqHandPlugin found joint [" << _jointName << "]" << std::endl;
+  gzmsg << "RobotiqHandPlugin found joint [" << _jointName << "]" << std::endl;
   return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-bool RobotiqHandPlugin::FindJoints()
+//////////////////////////////////////////////////
+bool RobotiqHandPlugin::FindJoints(gz::sim::EntityComponentManager & _ecm)
 {
-  // Load up the joints we expect to use, finger by finger.
-  gazebo::physics::JointPtr joint;
-  std::string prefix;
-  std::string suffix;
-  if (this->side == "left")
-    prefix = "l_";
-  else
-    prefix = "r_";
+  const std::string prefix = (this->side == "left") ? "l_" : "r_";
 
-  // palm_finger_1_joint (actuated).
-  suffix = "palm_finger_1_joint";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
+  std::string suffix = "palm_finger_1_joint";
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->joints)) {
     return false;
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->fingerJoints))
+  }
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->fingerJoints)) {
     return false;
+  }
   this->jointNames.push_back(prefix + suffix);
 
-  // palm_finger_2_joint (actuated).
   suffix = "palm_finger_2_joint";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->joints)) {
     return false;
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->fingerJoints))
+  }
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->fingerJoints)) {
     return false;
+  }
   this->jointNames.push_back(prefix + suffix);
 
-  // We read the joint state from finger_1_joint_1
-  // but we actuate finger_1_joint_proximal_actuating_hinge (actuated).
+  // We read the joint state from finger_1_joint_1 but actuate
+  // finger_1_joint_proximal_actuating_hinge (see the class-level design
+  // note on the two joint vectors).
   suffix = "finger_1_joint_proximal_actuating_hinge";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->fingerJoints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->fingerJoints)) {
     return false;
+  }
   suffix = "finger_1_joint_1";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->joints)) {
     return false;
+  }
   this->jointNames.push_back(prefix + suffix);
 
-  // We read the joint state from finger_2_joint_1
-  // but we actuate finger_2_proximal_actuating_hinge (actuated).
   suffix = "finger_2_joint_proximal_actuating_hinge";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->fingerJoints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->fingerJoints)) {
     return false;
+  }
   suffix = "finger_2_joint_1";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->joints)) {
     return false;
+  }
   this->jointNames.push_back(prefix + suffix);
 
-  // We read the joint state from finger_middle_joint_1
-  // but we actuate finger_middle_proximal_actuating_hinge (actuated).
   suffix = "finger_middle_joint_proximal_actuating_hinge";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->fingerJoints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->fingerJoints)) {
     return false;
+  }
   suffix = "finger_middle_joint_1";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
+  if (!this->GetAndPushBackJoint(_ecm, prefix + suffix, this->joints)) {
     return false;
+  }
   this->jointNames.push_back(prefix + suffix);
 
-  // finger_1_joint_2 (underactuated).
-  suffix = "finger_1_joint_2";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
+  // Remaining underactuated joints: informative only, never driven directly.
+  static const char * const kUnderactuated[] = {
+    "finger_1_joint_2", "finger_1_joint_3",
+    "finger_2_joint_2", "finger_2_joint_3",
+    "palm_finger_middle_joint",
+    "finger_middle_joint_2", "finger_middle_joint_3"
+  };
+  for (const char * s : kUnderactuated) {
+    if (!this->GetAndPushBackJoint(_ecm, prefix + s, this->joints)) {
+      return false;
+    }
+    this->jointNames.push_back(prefix + s);
+  }
 
-  // finger_1_joint_3 (underactuated).
-  suffix = "finger_1_joint_3";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  // finger_2_joint_2 (underactuated).
-  suffix = "finger_2_joint_2";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  // finger_2_joint_3 (underactuated).
-  suffix = "finger_2_joint_3";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  // palm_finger_middle_joint (underactuated).
-  suffix = "palm_finger_middle_joint";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  // finger_middle_joint_2 (underactuated).
-  suffix = "finger_middle_joint_2";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  // finger_middle_joint_3 (underactuated).
-  suffix = "finger_middle_joint_3";
-  if (!this->GetAndPushBackJoint(prefix + suffix, this->joints))
-    return false;
-  this->jointNames.push_back(prefix + suffix);
-
-  gzlog << "RobotiqHandPlugin found all joints for " << this->side
+  gzmsg << "RobotiqHandPlugin found all joints for " << this->side
         << " hand." << std::endl;
   return true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void RobotiqHandPlugin::RosQueueThread()
+//////////////////////////////////////////////////
+bool RobotiqHandPlugin::VerifyField(
+  const std::string & _label, int _min, int _max, int _v)
 {
-  static const double timeout = 0.01;
+  if (_v < _min || _v > _max) {
+    RCLCPP_ERROR(
+      this->rosNode->get_logger(),
+      "Illegal %s value: [%d]. The correct range is [%d,%d]",
+      _label.c_str(), _v, _min, _max);
+    return false;
+  }
+  return true;
+}
 
-  while (this->rosNode->ok())
-  {
-    this->rosQueue.callAvailable(ros::WallDuration(timeout));
+//////////////////////////////////////////////////
+bool RobotiqHandPlugin::VerifyCommand(
+  const atlas_msgs::msg::SModelRobotOutput & _command)
+{
+  return this->VerifyField("r_act", 0, 1, _command.r_act) &&
+         this->VerifyField("r_mod", 0, 3, _command.r_mod) &&
+         this->VerifyField("r_gto", 0, 1, _command.r_gto) &&
+         this->VerifyField("r_atr", 0, 1, _command.r_atr) &&
+         this->VerifyField("r_icf", 0, 1, _command.r_icf) &&
+         this->VerifyField("r_ics", 0, 1, _command.r_ics) &&
+         this->VerifyField("r_pra", 0, 255, _command.r_pra) &&
+         this->VerifyField("r_spa", 0, 255, _command.r_spa) &&
+         this->VerifyField("r_fra", 0, 255, _command.r_fra) &&
+         this->VerifyField("r_prb", 0, 255, _command.r_prb) &&
+         this->VerifyField("r_spb", 0, 255, _command.r_spb) &&
+         this->VerifyField("r_frb", 0, 255, _command.r_frb) &&
+         this->VerifyField("r_prc", 0, 255, _command.r_prc) &&
+         this->VerifyField("r_spc", 0, 255, _command.r_spc) &&
+         this->VerifyField("r_frc", 0, 255, _command.r_frc) &&
+         this->VerifyField("r_prs", 0, 255, _command.r_prs) &&
+         this->VerifyField("r_sps", 0, 255, _command.r_sps) &&
+         this->VerifyField("r_frs", 0, 255, _command.r_frs);
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::SetHandleCommand(
+  const atlas_msgs::msg::SModelRobotOutput::SharedPtr _msg)
+{
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+
+  if (!this->VerifyCommand(*_msg)) {
+    RCLCPP_ERROR(this->rosNode->get_logger(), "Ignoring command");
+    return;
+  }
+
+  this->prevCommand = this->handleCommand;
+  this->handleCommand = *_msg;
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::ReleaseHand()
+{
+  this->handleCommand.r_pra = 0;
+  this->handleCommand.r_prb = 0;
+  this->handleCommand.r_prc = 0;
+
+  this->handleCommand.r_spa = 127;
+  this->handleCommand.r_spb = 127;
+  this->handleCommand.r_spc = 127;
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::StopHand()
+{
+  this->handleCommand.r_pra = this->handleState.g_pra;
+  this->handleCommand.r_prb = this->handleState.g_prb;
+  this->handleCommand.r_prc = this->handleState.g_prc;
+}
+
+//////////////////////////////////////////////////
+bool RobotiqHandPlugin::IsHandFullyOpen(gz::sim::EntityComponentManager & _ecm)
+{
+  const double toleranceRad = 1.0 * M_PI / 180.0;
+
+  for (int i = 2; i < kNumJoints; ++i) {
+    gz::sim::Joint joint(this->joints[i]);
+    double lower = 0.0;
+    const auto axes = joint.Axis(_ecm);
+    if (axes && !axes->empty()) {
+      lower = (*axes)[0].Lower();
+    }
+    if (!(FirstOrZero(joint.Position(_ecm)) < lower + toleranceRad)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::UpdateStates(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
+{
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+
+  if (_info.simTime <= this->lastControllerUpdateTime) {
+    return;
+  }
+
+  this->userHandleCommand = this->handleCommand;
+
+  // Step 1: state transitions.
+  if (this->handleCommand.r_act == 0) {
+    this->handState = Disabled;
+  } else if (this->handleCommand.r_atr == 1) {
+    this->handState = Emergency;
+  } else if (this->handleCommand.r_ics == 1) {
+    this->handState = ICS;
+  } else if (this->handleCommand.r_icf == 1) {
+    this->handState = ICF;
+  } else {
+    if (static_cast<int>(this->handleCommand.r_mod) != this->graspingMode) {
+      this->handState = ChangeModeInProgress;
+      this->lastHandleCommand = this->handleCommand;
+      this->graspingMode =
+        static_cast<GraspingMode>(this->handleCommand.r_mod);
+    } else if (this->handState != ChangeModeInProgress) {
+      this->handState = Simplified;
+    }
+
+    if (this->handState == ChangeModeInProgress && this->IsHandFullyOpen(_ecm)) {
+      this->prevCommand = this->handleCommand;
+      this->handleCommand = this->lastHandleCommand;
+      this->handState = Simplified;
+    }
+  }
+
+  // Step 2: actions in each state.
+  switch (this->handState) {
+    case Disabled:
+      break;
+
+    case Emergency:
+      if (this->IsHandFullyOpen(_ecm)) {
+        this->StopHand();
+      } else {
+        this->ReleaseHand();
+      }
+      break;
+
+    case ICS:
+      RCLCPP_ERROR_THROTTLE(
+        this->rosNode->get_logger(), *this->rosNode->get_clock(), 5000,
+        "Individual Control of Scissor not supported");
+      break;
+
+    case ICF:
+      if (this->handleCommand.r_gto == 0) {
+        this->StopHand();
+      }
+      break;
+
+    case ChangeModeInProgress:
+      this->ReleaseHand();
+      break;
+
+    case Simplified:
+      // All fingers follow finger A.
+      this->handleCommand.r_prb = this->handleCommand.r_pra;
+      this->handleCommand.r_prc = this->handleCommand.r_pra;
+      this->handleCommand.r_spb = this->handleCommand.r_spa;
+      this->handleCommand.r_spc = this->handleCommand.r_spa;
+      this->handleCommand.r_frb = this->handleCommand.r_fra;
+      this->handleCommand.r_frc = this->handleCommand.r_fra;
+
+      if (this->handleCommand.r_gto == 0) {
+        this->StopHand();
+      }
+      break;
+
+    default:
+      RCLCPP_ERROR(
+        this->rosNode->get_logger(), "Unrecognized state [%d]", this->handState);
+  }
+
+  const double dt = std::chrono::duration<double>(
+    _info.simTime - this->lastControllerUpdateTime).count();
+  this->UpdatePIDControl(_ecm, dt);
+
+  this->GetAndPublishHandleState(_ecm);
+
+  const rclcpp::Time stamp(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(_info.simTime).count());
+  this->GetAndPublishJointState(_ecm, stamp);
+
+  this->lastControllerUpdateTime = _info.simTime;
+}
+
+//////////////////////////////////////////////////
+uint8_t RobotiqHandPlugin::GetObjectDetection(
+  gz::sim::EntityComponentManager & _ecm, gz::sim::Entity _jointEntity,
+  int _index, uint8_t _rPR, uint8_t _prevRPR)
+{
+  gz::sim::Joint joint(_jointEntity);
+  const bool isMoving = FirstOrZero(joint.Velocity(_ecm)) > kVelTolerance;
+
+  double pe, ie, de;
+  this->posePID[_index].Errors(pe, ie, de);
+  const bool reachPosition = pe < kPoseTolerance;
+
+  if (isMoving) {
+    // Finger is in motion.
+    return 0;
+  }
+  if (reachPosition) {
+    // Finger is at the requested position.
+    return 3;
+  }
+  if (static_cast<int>(_rPR) - static_cast<int>(_prevRPR) > 0) {
+    // Finger has stopped due to a contact while closing.
+    return 2;
+  }
+  // Finger has stopped due to a contact while opening.
+  return 1;
+}
+
+//////////////////////////////////////////////////
+uint8_t RobotiqHandPlugin::GetCurrentPosition(
+  gz::sim::EntityComponentManager & _ecm, gz::sim::Entity _jointEntity)
+{
+  gz::sim::Joint joint(_jointEntity);
+  double lower = 0.0;
+  double upper = 0.0;
+  const auto axes = joint.Axis(_ecm);
+  if (axes && !axes->empty()) {
+    lower = (*axes)[0].Lower();
+    upper = (*axes)[0].Upper();
+  }
+
+  // Full range of motion.
+  double range = upper - lower;
+
+  // The maximum value in pinch mode is 177.
+  if (this->graspingMode == Pinch) {
+    range *= 177.0 / 255.0;
+  }
+
+  const double relAngle = FirstOrZero(joint.Position(_ecm)) - lower;
+
+  return static_cast<uint8_t>(std::round(255.0 * relAngle / range));
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::GetAndPublishHandleState(
+  gz::sim::EntityComponentManager & _ecm)
+{
+  this->handleState.g_act = this->userHandleCommand.r_act;
+  this->handleState.g_mod = this->userHandleCommand.r_mod;
+  this->handleState.g_gto = this->userHandleCommand.r_gto;
+
+  if (this->handState == Emergency) {
+    this->handleState.g_imc = 0;
+  } else if (this->handState == ChangeModeInProgress) {
+    this->handleState.g_imc = 2;
+  } else {
+    this->handleState.g_imc = 3;
+  }
+
+  gz::sim::Joint jointA(this->joints[2]);
+  gz::sim::Joint jointB(this->joints[3]);
+  gz::sim::Joint jointC(this->joints[4]);
+  const bool isMovingA = FirstOrZero(jointA.Velocity(_ecm)) > kVelTolerance;
+  const bool isMovingB = FirstOrZero(jointB.Velocity(_ecm)) > kVelTolerance;
+  const bool isMovingC = FirstOrZero(jointC.Velocity(_ecm)) > kVelTolerance;
+
+  double pe, ie, de;
+  this->posePID[2].Errors(pe, ie, de);
+  const bool reachPositionA = pe < kPoseTolerance;
+  this->posePID[3].Errors(pe, ie, de);
+  const bool reachPositionB = pe < kPoseTolerance;
+  this->posePID[4].Errors(pe, ie, de);
+  const bool reachPositionC = pe < kPoseTolerance;
+
+  if (isMovingA || isMovingB || isMovingC) {
+    this->handleState.g_sta = 0;
+  } else if (reachPositionA && reachPositionB && reachPositionC) {
+    this->handleState.g_sta = 3;
+  } else if (!reachPositionA && !reachPositionB && !reachPositionC) {
+    this->handleState.g_sta = 2;
+  } else {
+    this->handleState.g_sta = 1;
+  }
+
+  this->handleState.g_dta = this->GetObjectDetection(
+    _ecm, this->joints[2], 2, this->handleCommand.r_pra, this->prevCommand.r_pra);
+  this->handleState.g_dtb = this->GetObjectDetection(
+    _ecm, this->joints[3], 3, this->handleCommand.r_prb, this->prevCommand.r_prb);
+  this->handleState.g_dtc = this->GetObjectDetection(
+    _ecm, this->joints[4], 4, this->handleCommand.r_prc, this->prevCommand.r_prc);
+  this->handleState.g_dts = this->GetObjectDetection(
+    _ecm, this->joints[0], 0, this->handleCommand.r_prs, this->prevCommand.r_prs);
+
+  if (this->handState == ChangeModeInProgress) {
+    this->handleState.g_flt = 6;
+  } else if (this->handState == Disabled) {
+    this->handleState.g_flt = 7;
+  } else if (this->handState == Emergency) {
+    this->handleState.g_flt = 11;
+  } else {
+    this->handleState.g_flt = 0;
+  }
+
+  this->handleState.g_pra = this->userHandleCommand.r_pra;
+  this->handleState.g_poa = this->GetCurrentPosition(_ecm, this->joints[2]);
+  this->handleState.g_cua = 0;
+
+  this->handleState.g_prb = this->userHandleCommand.r_prb;
+  this->handleState.g_pob = this->GetCurrentPosition(_ecm, this->joints[3]);
+  this->handleState.g_cub = 0;
+
+  this->handleState.g_prc = this->userHandleCommand.r_prc;
+  this->handleState.g_poc = this->GetCurrentPosition(_ecm, this->joints[4]);
+  this->handleState.g_cuc = 0;
+
+  this->handleState.g_prs = this->userHandleCommand.r_prs;
+  this->handleState.g_pos = this->GetCurrentPosition(_ecm, this->joints[1]);
+  this->handleState.g_cus = 0;
+
+  this->pubHandleState->publish(this->handleState);
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::GetAndPublishJointState(
+  const gz::sim::EntityComponentManager & _ecm, const rclcpp::Time & _stamp)
+{
+  this->jointStates.header.stamp = _stamp;
+  for (std::size_t i = 0; i < this->joints.size(); ++i) {
+    gz::sim::Joint joint(this->joints[i]);
+    this->jointStates.position[i] = FirstOrZero(joint.Position(_ecm));
+    this->jointStates.velocity[i] = FirstOrZero(joint.Velocity(_ecm));
+  }
+  this->pubJointStates->publish(this->jointStates);
+}
+
+//////////////////////////////////////////////////
+void RobotiqHandPlugin::UpdatePIDControl(
+  gz::sim::EntityComponentManager & _ecm, double _dt)
+{
+  if (this->handState == Disabled) {
+    for (int i = 0; i < kNumJoints; ++i) {
+      gz::sim::Joint(this->fingerJoints[i]).SetForce(_ecm, {0.0});
+    }
+    return;
+  }
+
+  const std::chrono::duration<double> dtDuration(_dt);
+
+  for (int i = 0; i < kNumJoints; ++i) {
+    gz::sim::Joint informativeJoint(this->joints[i]);
+    double lower = 0.0;
+    double upper = 0.0;
+    const auto axes = informativeJoint.Axis(_ecm);
+    if (axes && !axes->empty()) {
+      lower = (*axes)[0].Lower();
+      upper = (*axes)[0].Upper();
+    }
+
+    double targetPose = 0.0;
+    // Only ever assigned in the Scissor branches below, and -- same as the
+    // original -- never actually read afterward. Preserved as-is: it looks
+    // like vestigial support for a velocity-mode Scissor control path that
+    // was never wired up to the PID, not a deliberate design choice worth
+    // "fixing" during a port.
+    double targetSpeed = (kMinVelocity + kMaxVelocity) / 2.0;
+
+    if (i == 0) {
+      switch (this->graspingMode) {
+        case Wide:
+          targetPose = upper;
+          break;
+        case Pinch:
+          // -11 degrees.
+          targetPose = -0.1919;
+          break;
+        case Scissor:
+          // Max position is reached at value 215.
+          targetPose = upper -
+            (upper - lower) * (215.0 / 255.0) * this->handleCommand.r_pra / 255.0;
+          break;
+        case Basic:
+        default:
+          break;
+      }
+    } else if (i == 1) {
+      switch (this->graspingMode) {
+        case Wide:
+          targetPose = lower;
+          break;
+        case Pinch:
+          // 11 degrees.
+          targetPose = 0.1919;
+          break;
+        case Scissor:
+          // Max position is reached at value 215.
+          targetPose = lower +
+            (upper - lower) * (215.0 / 255.0) * this->handleCommand.r_pra / 255.0;
+          break;
+        case Basic:
+        default:
+          break;
+      }
+    } else {
+      if (this->graspingMode == Pinch) {
+        // Max position is reached at value 177.
+        targetPose = lower +
+          (upper - lower) * (177.0 / 255.0) * this->handleCommand.r_pra / 255.0;
+      } else if (this->graspingMode == Scissor) {
+        targetSpeed = kMinVelocity +
+          (kMaxVelocity - kMinVelocity) * this->handleCommand.r_spa / 255.0;
+      } else {
+        targetPose = lower +
+          (upper - lower) * this->handleCommand.r_pra / 255.0;
+      }
+    }
+    static_cast<void>(targetSpeed);
+
+    const double currentPose = FirstOrZero(informativeJoint.Position(_ecm));
+    const double poseError = currentPose - targetPose;
+    const double torque = this->posePID[i].Update(poseError, dtDuration);
+    gz::sim::Joint(this->fingerJoints[i]).SetForce(_ecm, {torque});
   }
 }
 
-GZ_REGISTER_MODEL_PLUGIN(RobotiqHandPlugin)
+//////////////////////////////////////////////////
+GZ_ADD_PLUGIN(RobotiqHandPlugin,
+              gz::sim::System,
+              RobotiqHandPlugin::ISystemConfigure,
+              RobotiqHandPlugin::ISystemPreUpdate)
+
+GZ_ADD_PLUGIN_ALIAS(RobotiqHandPlugin,
+    "drcsim_gazebo_ros_plugins::RobotiqHandPlugin")
