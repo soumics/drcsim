@@ -325,8 +325,8 @@ not happen automatically.
      `SandiaHandPlugin`-style follow-up test) — a natural next step if the
      user wants deeper coverage once the ROS-interface test is green.
 
-4. 🔶 `RobotiqHandPlugin` — **ported on `port/robotiq_hand_plugin`, not yet
-   built/tested by the user.** A state machine over the SModel Robot
+4. ✅ `RobotiqHandPlugin` — **done, 94/94 package checks passing, merged into
+   `ros2-jazzy-harmonic`.** A state machine over the SModel Robot
    Output/Input protocol (`atlas_msgs::msg::SModelRobotOutput`/`Input`,
    already ported in Tier 1) driving a 3-finger adaptive gripper: activation,
    4 grasping modes (Basic/Pinch/Wide/Scissor), per-finger position/speed/
@@ -376,7 +376,17 @@ not happen automatically.
      grasping mode and confirms `l_palm_finger_1_joint` — one of the two
      joints where the informative and actuated joint are literally the same
      entity, so it moves correctly even without the real linkage geometry —
-     swings measurably off zero.
+     swings measurably off zero. **First run failed** (moved only 0.0105 rad,
+     well under the 0.05 rad threshold): the command publisher started
+     publishing immediately with no confirmation that DDS discovery had
+     actually matched it to the plugin's subscription, so most of the timed
+     loop likely ran with `handState == Disabled` (zero commanded force)
+     before the first command ever arrived. Fixed by adding a
+     `count_subscribers()` wait before the timed loop — same graph-
+     introspection-discovery-wait pattern already noted in the lessons below,
+     re-confirmed here as something to reach for by default whenever a test
+     publishes a command and then immediately expects it to have taken
+     effect.
 
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
 MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5
@@ -385,7 +395,7 @@ MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5
 `DRCVehiclePlugin` — see below), then the 8 CLI executables +
 `actionlib_server` + `gz_model_teleport` + `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin 🔶 (ported, awaiting first build/test round).
+RobotiqHandPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
