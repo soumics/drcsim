@@ -36,7 +36,6 @@
 #include <gz/sim/SdfEntityCreator.hh>
 #include <gz/sim/Util.hh>
 #include <gz/sim/components/Collision.hh>
-#include <gz/sim/components/CollisionElement.hh>
 #include <gz/sim/components/DetachableJoint.hh>
 #include <gz/sim/components/Link.hh>
 #include <gz/sim/components/Name.hh>
