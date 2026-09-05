@@ -14,563 +14,429 @@
  * limitations under the License.
  *
 */
+#include "drcsim_gazebo_ros_plugins/MultiSenseSLPlugin.hpp"
 
-#include <gazebo/physics/PhysicsTypes.hh>
-#include <gazebo/rendering/Camera.hh>
-#include <sensor_msgs/Imu.h>
+#include <cmath>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
 
-#include "drcsim_gazebo_ros_plugins/GazeboCompat.hh"
-#include "drcsim_gazebo_ros_plugins/MultiSenseSLPlugin.h"
+#include <gz/common/Console.hh>
+#include <gz/math/Vector3.hh>
+#include <gz/plugin/Register.hh>
+#include <gz/sim/Joint.hh>
+#include <gz/sim/Link.hh>
+#include <gz/sim/components/Name.hh>
 
-namespace gazebo
+using drcsim_gazebo_ros_plugins::MultiSenseSLPlugin;
+
+//////////////////////////////////////////////////
+MultiSenseSLPlugin::MultiSenseSLPlugin()
 {
-// Register this plugin with the simulator
-GZ_REGISTER_MODEL_PLUGIN(MultiSenseSL)
+}
 
-////////////////////////////////////////////////////////////////////////////////
-MultiSenseSL::MultiSenseSL()
+//////////////////////////////////////////////////
+MultiSenseSLPlugin::~MultiSenseSLPlugin()
 {
+  if (this->executor) {
+    this->executor->cancel();
+  }
+  if (this->rosSpinThread.joinable()) {
+    this->rosSpinThread.join();
+  }
+}
+
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::Configure(
+  const gz::sim::Entity & _entity,
+  const std::shared_ptr<const sdf::Element> & _sdf,
+  gz::sim::EntityComponentManager & _ecm,
+  gz::sim::EventManager &)
+{
+  this->model = gz::sim::Model(_entity);
+  if (!this->model.Valid(_ecm)) {
+    gzerr << "MultiSenseSLPlugin should be attached to a model entity. "
+          << "Failed to initialize." << std::endl;
+    return;
+  }
+  this->sdfConfig = _sdf;
+}
+
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::PreUpdate(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
+{
+  if (!this->initialized && this->sdfConfig) {
+    // Deferred from Configure(): a model's child link/joint entities are
+    // not guaranteed to exist yet when Configure() runs.
+    this->Load(_ecm);
+    this->initialized = true;
+  }
+
+  if (this->validConfig) {
+    this->UpdateStates(_info, _ecm);
+  }
+}
+
+//////////////////////////////////////////////////
+double MultiSenseSLPlugin::FirstOrZero(
+  const std::optional<std::vector<double>> & _values)
+{
+  if (_values && !_values->empty()) {
+    return (*_values)[0];
+  }
+  return 0.0;
+}
+
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::Load(gz::sim::EntityComponentManager & _ecm)
+{
+  // Get imu link.
+  this->imuLinkEntity = this->model.LinkByName(_ecm, this->imuLinkName);
+  if (this->imuLinkEntity == gz::sim::kNullEntity) {
+    gzerr << this->imuLinkName << " not found" << std::endl;
+  } else {
+    gz::sim::Link imuLink(this->imuLinkEntity);
+    imuLink.EnableVelocityChecks(_ecm);
+    imuLink.EnableAccelerationChecks(_ecm);
+  }
+
+  const gz::sim::Entity spindleLinkEntity =
+    this->model.LinkByName(_ecm, "hokuyo_link");
+  if (spindleLinkEntity == gz::sim::kNullEntity) {
+    gzerr << "spindle link not found, plugin will stop loading" << std::endl;
+    return;
+  }
+
+  this->spindleJointEntity = this->model.JointByName(_ecm, "hokuyo_joint");
+  if (this->spindleJointEntity == gz::sim::kNullEntity) {
+    gzerr << "spindle joint not found, plugin will stop loading" << std::endl;
+    return;
+  }
+  gz::sim::Joint spindleJoint(this->spindleJointEntity);
+  spindleJoint.EnablePositionCheck(_ecm);
+  spindleJoint.EnableVelocityCheck(_ecm);
+
+  // Publish joint states for spindle joint.
+  this->jointStates.name = {"hokuyo_joint"};
+  this->jointStates.position.assign(1, 0.0);
+  this->jointStates.velocity.assign(1, 0.0);
+  this->jointStates.effort.assign(1, 0.0);
+
+  if (_ecm.EntityByComponents(gz::sim::components::Name("stereo_camera")) ==
+    gz::sim::kNullEntity)
+  {
+    gzerr << "multicamera sensor not found" << std::endl;
+  }
+  if (_ecm.EntityByComponents(
+      gz::sim::components::Name("head_hokuyo_sensor")) == gz::sim::kNullEntity)
+  {
+    gzerr << "laser sensor not found" << std::endl;
+  }
+
   /// \todo: hardcoded for now, make them into plugin parameters
-  this->spindlePID.Init(0.03, 0.30, 0.00001, 1., -1., 10.0, -10.0);
-  this->spindleOn = true;
-  this->spindleSpeed = 0;
-  this->spindleMaxRPM = 50.0;
-  this->spindleMinRPM = 0;
-  this->multiCameraExposureTime = 0.001;
-  this->multiCameraGain = 1.0;
-  // the parent link of the head_imu_sensor ends up being head after
-  // fixed joint reduction.  Offset of the imu_link is lumped into
-  // the <pose> tag in the imu_sensor block.
-  this->imuLinkName = "head";
+  this->spindlePID.Init(0.03, 0.30, 0.00001, 1.0, -1.0, 10.0, -10.0);
 
-  // change default imager mode to 1 (1Hz ~ 30Hz)
-  // in simulation, we are using 800X800 pixels @30Hz
-  this->imagerMode = 1;
-  this->rosNamespace = "/multisense";
-
-  this->pmq = new PubMultiQueue();
-}
-
-////////////////////////////////////////////////////////////////////////////////
-MultiSenseSL::~MultiSenseSL()
-{
-  event::Events::DisconnectWorldUpdateBegin(this->updateConnection);
-  delete this->pmq;
-  this->rosnode_->shutdown();
-  this->queue_.clear();
-  this->queue_.disable();
-  this->callback_queue_thread_.join();
-  delete this->rosnode_;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::Load(physics::ModelPtr _parent, sdf::ElementPtr _sdf)
-{
-  this->atlasModel = _parent;
-  this->world = _parent->GetWorld();
-  this->sdf = _sdf;
-
-  ROS_DEBUG("Loading MultiSense ROS node.");
-
-  this->lastTime = this->world->GetSimTime();
-
-  // Get imu link
-  this->imuLink = this->atlasModel->GetLink(this->imuLinkName);
-  if (!this->imuLink)
-    gzerr << this->imuLinkName << " not found\n";
-
-  GAZEBO_DRCSIM_USING_DYNAMIC_POINTER_CAST;
-
-  // Get sensors
-  this->imuSensor = dynamic_pointer_cast<sensors::ImuSensor>
-      (sensors::SensorManager::Instance()->GetSensor(
-        this->world->GetName() + "::" + this->atlasModel->GetScopedName()
-        + "::head::"
-        "head_imu_sensor"));
-  if (!this->imuSensor)
-    gzerr << "head_imu_sensor not found\n" << "\n";
-
-  // \todo: add ros topic / service to reset imu (imuReferencePose, etc.)
-  this->spindleLink = this->atlasModel->GetLink("atlas::hokuyo_link");
-  if (!this->spindleLink)
-  {
-    gzerr << "spindle link not found, plugin will stop loading\n";
-    return;
+  if (!rclcpp::ok()) {
+    rclcpp::init(0, nullptr);
   }
+  this->rosNode = std::make_shared<rclcpp::Node>("multisense_sl_plugin");
 
-  this->spindleJoint = this->atlasModel->GetJoint("atlas::hokuyo_joint");
-  if (!this->spindleJoint)
-  {
-    gzerr << "spindle joint not found, plugin will stop loading\n";
-    return;
-  }
-
-  // publish joint states for spindle joint
-  this->jointStates.name.resize(1);
-  this->jointStates.position.resize(1);
-  this->jointStates.velocity.resize(1);
-  this->jointStates.effort.resize(1);
-
-  // sensors::Sensor_V s = sensors::SensorManager::Instance()->GetSensors();
-  // for (sensors::Sensor_V::iterator siter = s.begin();
-  //                                  siter != s.end(); ++siter)
-  //   gzerr << (*siter)->GetName() << "\n";
-
-  this->multiCameraSensor = dynamic_pointer_cast<sensors::MultiCameraSensor>(
-    sensors::SensorManager::Instance()->GetSensor("stereo_camera"));
-  if (!this->multiCameraSensor)
-    gzerr << "multicamera sensor not found\n";
-
-  // get default frame rate
-# if GAZEBO_MAJOR_VERSION >= 7
-  this->multiCameraFrameRate = this->multiCameraSensor->UpdateRate();
-# else
-  this->multiCameraFrameRate = this->multiCameraSensor->GetUpdateRate();
-# endif
-
-  if (!sensors::SensorManager::Instance()->GetSensor("head_hokuyo_sensor"))
-    gzerr << "laser sensor not found\n";
-
-  if (!ros::isInitialized())
-  {
-    gzerr << "Not loading plugin since ROS hasn't been "
-          << "properly initialized.  Try starting gazebo with ros plugin:\n"
-          << "  gazebo -s libgazebo_ros_api_plugin.so\n";
-    return;
-  }
-
-  this->deferred_load_thread_ = boost::thread(
-    boost::bind(&MultiSenseSL::LoadThread, this));
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::LoadThread()
-{
-  // create ros node
-  this->rosnode_ = new ros::NodeHandle("");
-
-  // publish multi queue
-  this->pmq->startServiceThread();
-
-  int atlasVersion;
-  this->rosnode_->getParam("/atlas_version", atlasVersion);
-  if (atlasVersion == 1)
-  {
-    ROS_INFO("ros param /atlas_version == 1");
+  const int atlasVersion = this->rosNode->declare_parameter("atlas_version", 5);
+  if (atlasVersion == 1) {
     this->rosNamespace = "/multisense_sl";
-  }
-  else if (atlasVersion >= 3)
-  {
-    ROS_INFO("ros param /atlas_version == %d", atlasVersion);
+  } else if (atlasVersion >= 3) {
     this->rosNamespace = "/multisense";
-  }
-  else
-  {
-    ROS_WARN(
-        "/atlas_version not specified (1, 3, 4, or 5), assuming atlas v1.");
+  } else {
+    RCLCPP_WARN(
+      this->rosNode->get_logger(),
+      "atlas_version [%d] not one of 1, 3, 4, or 5; assuming atlas v1.",
+      atlasVersion);
     this->rosNamespace = "/multisense_sl";
   }
 
-  // ros publications
-  // publish joint states for tf (robot state publisher)
-  this->pubJointStatesQueue = this->pmq->addPub<sensor_msgs::JointState>();
-  this->pubJointStates = this->rosnode_->advertise<sensor_msgs::JointState>(
+  this->pubJointStates =
+    this->rosNode->create_publisher<sensor_msgs::msg::JointState>(
     this->rosNamespace + "/joint_states", 10);
+  this->pubImu = this->rosNode->create_publisher<sensor_msgs::msg::Imu>(
+    this->rosNamespace + "/imu", 10);
 
-  // publish imu data
-  this->pubImuQueue = this->pmq->addPub<sensor_msgs::Imu>();
-  this->pubImu =
-    this->rosnode_->advertise<sensor_msgs::Imu>(
-      this->rosNamespace + "/imu", 10);
-
-  // ros subscription
-  ros::SubscribeOptions set_spindle_speed_so =
-    ros::SubscribeOptions::create<std_msgs::Float64>(
+  this->subSetSpindleSpeed =
+    this->rosNode->create_subscription<std_msgs::msg::Float64>(
     this->rosNamespace + "/set_spindle_speed", 100,
-    boost::bind(static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Float64::ConstPtr&)>(
-        &MultiSenseSL::SetSpindleSpeed), this, _1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_spindle_speed_sub_ =
-    this->rosnode_->subscribe(set_spindle_speed_so);
+    std::bind(&MultiSenseSLPlugin::SetSpindleSpeed, this, std::placeholders::_1));
 
-  /// for deprecation from ~/multisense[_sl]/fps to ~/multisense[_sl]/set_fps
-  /// per issue 272
-  ros::SubscribeOptions set_multi_camera_frame_rate_so_old =
-    ros::SubscribeOptions::create<std_msgs::Float64>(
+  // Deprecated alias, kept for backward compatibility (originally added for
+  // upstream issue 272).
+  this->subSetMultiCameraFrameRateOld =
+    this->rosNode->create_subscription<std_msgs::msg::Float64>(
     this->rosNamespace + "/fps", 100,
-    boost::bind(static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Float64::ConstPtr&)>(
-        &MultiSenseSL::SetMultiCameraFrameRateOld), this, _1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_multi_camera_frame_rate_sub_old_ =
-    this->rosnode_->subscribe(set_multi_camera_frame_rate_so_old);
+    std::bind(
+      &MultiSenseSLPlugin::SetMultiCameraFrameRateOld, this,
+      std::placeholders::_1));
 
-  ros::SubscribeOptions set_multi_camera_frame_rate_so =
-    ros::SubscribeOptions::create<std_msgs::Float64>(
+  this->subSetMultiCameraFrameRate =
+    this->rosNode->create_subscription<std_msgs::msg::Float64>(
     this->rosNamespace + "/set_fps", 100,
-    boost::bind(static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Float64::ConstPtr&)>(
-        &MultiSenseSL::SetMultiCameraFrameRate), this, _1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_multi_camera_frame_rate_sub_ =
-    this->rosnode_->subscribe(set_multi_camera_frame_rate_so);
+    std::bind(
+      &MultiSenseSLPlugin::SetMultiCameraFrameRate, this, std::placeholders::_1));
 
-  /* FIXME currently this causes simulation to crash,
-  ros::SubscribeOptions set_multi_camera_resolution_so =
-    ros::SubscribeOptions::create<std_msgs::Int32>(
+  // The original left this subscription commented out ("currently this
+  // causes simulation to crash"); that crash was specific to old
+  // Gazebo/ROS 1, and this callback only ever updates cached values now
+  // (see the class-level design note on dropped camera-sensor mutation),
+  // so it's wired up here.
+  this->subSetMultiCameraResolution =
+    this->rosNode->create_subscription<std_msgs::msg::Int32>(
     this->rosNamespace + "/set_camera_resolution_mode", 100,
-    boost::bind(static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Int32::ConstPtr&)>(
-        &MultiSenseSL::SetMultiCameraResolution), this, _1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_multi_camera_resolution_sub_ =
-    this->rosnode_->subscribe(set_multi_camera_resolution_so);
-  */
+    std::bind(
+      &MultiSenseSLPlugin::SetMultiCameraResolution, this, std::placeholders::_1));
 
-  /* not implemented, not supported
-  ros::SubscribeOptions set_spindle_state_so =
-    ros::SubscribeOptions::create<std_msgs::Bool>(
-    this->rosNamespace + "/set_spindle_state", 100,
-    boost::bind( static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Bool::ConstPtr&)>(
-        &MultiSenseSL::SetSpindleState),this,_1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_spindle_state_sub_ =
-    this->rosnode_->subscribe(set_spindle_state_so);
+  // SetSpindleState/SetMultiCameraExposureTime/SetMultiCameraGain are kept
+  // as methods (below) but, matching the original exactly, are never bound
+  // to a subscription -- the original marked this whole group "not
+  // implemented, not supported" and never advertised them either.
 
-  ros::SubscribeOptions set_multi_camera_exposure_time_so =
-    ros::SubscribeOptions::create<std_msgs::Float64>(
-    this->rosNamespace + "/set_camera_exposure_time", 100,
-    boost::bind( static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Float64::ConstPtr&)>(
-        &MultiSenseSL::SetMultiCameraExposureTime),this,_1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_multi_camera_exposure_time_sub_ =
-    this->rosnode_->subscribe(set_multi_camera_exposure_time_so);
+  this->executor = std::make_shared<rclcpp::executors::SingleThreadedExecutor>();
+  this->executor->add_node(this->rosNode);
+  this->rosSpinThread = std::thread(
+    [this]()
+    {
+      this->executor->spin();
+    });
 
-  ros::SubscribeOptions set_multi_camera_gain_so =
-    ros::SubscribeOptions::create<std_msgs::Float64>(
-    this->rosNamespace + "/set_camera_gain", 100,
-    boost::bind( static_cast<void (MultiSenseSL::*)
-      (const std_msgs::Float64::ConstPtr&)>(
-        &MultiSenseSL::SetMultiCameraGain),this,_1),
-    ros::VoidPtr(), &this->queue_);
-  this->set_multi_camera_gain_sub_ =
-    this->rosnode_->subscribe(set_multi_camera_gain_so);
-  */
-
-  /// \todo: waiting for gen_srv to be implemented (issue #37)
-  /* Advertise services on the custom queue
-  std::string set_spindle_speed_service_name(
-    this->rosNamespace + "/set_spindle_speed");
-  ros::AdvertiseServiceOptions set_spindle_speed_aso =
-    ros::AdvertiseServiceOptions::create<std_srvs::Empty>(
-      set_spindle_speed_service_name,
-      boost::bind(&MultiSenseSL::SetSpindleSpeed,this,_1,_2),
-      ros::VoidPtr(), &this->queue_);
-  this->set_spindle_speed_service_ =
-    this->rosnode_->advertiseService(set_spindle_speed_aso);
-
-  std::string set_spindle_state_service_name(
-    this->rosNamespace + "/set_spindle_state");
-  ros::AdvertiseServiceOptions set_spindle_state_aso =
-    ros::AdvertiseServiceOptions::create<std_srvs::Empty>(
-      set_spindle_state_service_name,
-      boost::bind(&MultiSenseSL::SetSpindleState,this,_1,_2),
-      ros::VoidPtr(), &this->queue_);
-  this->set_spindle_state_service_ =
-    this->rosnode_->advertiseService(set_spindle_state_aso);
-  */
-
-  this->lastUpdateTime = this->world->GetSimTime().Double();
-  this->updateRate = 1.0;
-
-  // ros callback queue for processing subscription
-  this->callback_queue_thread_ = boost::thread(
-    boost::bind(&MultiSenseSL::QueueThread, this));
-
-  this->updateConnection = event::Events::ConnectWorldUpdateBegin(
-     boost::bind(&MultiSenseSL::UpdateStates, this));
+  this->validConfig = true;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::UpdateStates()
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::UpdateStates(
+  const gz::sim::UpdateInfo & _info,
+  gz::sim::EntityComponentManager & _ecm)
 {
-  common::Time curTime = this->world->GetSimTime();
+  std::lock_guard<std::mutex> lock(this->controlMutex);
 
-  // get imu data from imu link
-  if (this->imuSensor)
-  {
-    sensor_msgs::Imu imuMsg;
-    imuMsg.header.frame_id = this->imuLinkName;
-    imuMsg.header.stamp = ros::Time(curTime.Double());
-
-    // compute angular rates
-    {
-# if GAZEBO_MAJOR_VERSION >= 7
-      math::Vector3 wLocal = this->imuSensor->AngularVelocity();
-# else
-      math::Vector3 wLocal = this->imuSensor->GetAngularVelocity();
-# endif
-      imuMsg.angular_velocity.x = wLocal.x;
-      imuMsg.angular_velocity.y = wLocal.y;
-      imuMsg.angular_velocity.z = wLocal.z;
-    }
-
-    // compute acceleration
-    {
-# if GAZEBO_MAJOR_VERSION >= 7
-      math::Vector3 accel = this->imuSensor->LinearAcceleration();
-# else
-      math::Vector3 accel = this->imuSensor->GetLinearAcceleration();
-# endif
-      imuMsg.linear_acceleration.x = accel.x;
-      imuMsg.linear_acceleration.y = accel.y;
-      imuMsg.linear_acceleration.z = accel.z;
-    }
-
-    // compute orientation
-    {
-      math::Quaternion imuRot =
-# if GAZEBO_MAJOR_VERSION >= 7
-        this->imuSensor->Orientation();
-# else
-        this->imuSensor->GetOrientation();
-# endif
-      imuMsg.orientation.x = imuRot.x;
-      imuMsg.orientation.y = imuRot.y;
-      imuMsg.orientation.z = imuRot.z;
-      imuMsg.orientation.w = imuRot.w;
-    }
-
-    this->pubImuQueue->push(imuMsg, this->pubImu);
+  if (_info.simTime <= this->lastControllerUpdateTime) {
+    return;
   }
 
-  double dt = (curTime - this->lastTime).Double();
-  if (dt > 0)
-  {
-    this->jointStates.header.stamp = ros::Time(curTime.sec, curTime.nsec);
-    this->jointStates.name[0] = this->spindleJoint->GetName();
-    this->jointStates.position[0] = this->spindleJoint->GetAngle(0).Radian();
-    this->jointStates.velocity[0] = this->spindleJoint->GetVelocity(0);
-    this->jointStates.effort[0] = 0;
+  const rclcpp::Time stamp(
+    std::chrono::duration_cast<std::chrono::nanoseconds>(_info.simTime).count());
 
-    if (this->spindleOn)
-    {
-      // PID control (velocity) spindle
-      double spindleError = this->spindleJoint->GetVelocity(0)
-                          - this->spindleSpeed;
-      double spindleCmd = this->spindlePID.Update(spindleError, dt);
-      this->spindleJoint->SetForce(0, spindleCmd);
+  // IMU: read the link's raw physics state and rotate world-frame vectors
+  // into the link's own frame (see the class-level design note).
+  if (this->imuLinkEntity != gz::sim::kNullEntity) {
+    gz::sim::Link imuLink(this->imuLinkEntity);
+    auto worldPose = imuLink.WorldPose(_ecm);
+    auto angularVel = imuLink.WorldAngularVelocity(_ecm);
+    auto linearAcc = imuLink.WorldLinearAcceleration(_ecm);
+    if (worldPose && angularVel && linearAcc) {
+      const gz::math::Vector3d bodyAngularVel =
+        worldPose->Rot().RotateVectorReverse(*angularVel);
+      const gz::math::Vector3d bodyLinearAcc =
+        worldPose->Rot().RotateVectorReverse(*linearAcc);
 
-      this->jointStates.effort[0] = spindleCmd;
+      sensor_msgs::msg::Imu imuMsg;
+      imuMsg.header.frame_id = this->imuLinkName;
+      imuMsg.header.stamp = stamp;
 
-      this->lastTime = curTime;
+      imuMsg.angular_velocity.x = bodyAngularVel.X();
+      imuMsg.angular_velocity.y = bodyAngularVel.Y();
+      imuMsg.angular_velocity.z = bodyAngularVel.Z();
+
+      imuMsg.linear_acceleration.x = bodyLinearAcc.X();
+      imuMsg.linear_acceleration.y = bodyLinearAcc.Y();
+      imuMsg.linear_acceleration.z = bodyLinearAcc.Z();
+
+      imuMsg.orientation.x = worldPose->Rot().X();
+      imuMsg.orientation.y = worldPose->Rot().Y();
+      imuMsg.orientation.z = worldPose->Rot().Z();
+      imuMsg.orientation.w = worldPose->Rot().W();
+
+      this->pubImu->publish(imuMsg);
     }
-    else
-    {
-      this->spindlePID.Reset();
-    }
-    this->pubJointStatesQueue->push(this->jointStates, this->pubJointStates);
+  }
+
+  const double dt = std::chrono::duration<double>(
+    _info.simTime - this->lastControllerUpdateTime).count();
+
+  gz::sim::Joint spindleJoint(this->spindleJointEntity);
+  this->jointStates.header.stamp = stamp;
+  this->jointStates.position[0] = FirstOrZero(spindleJoint.Position(_ecm));
+  this->jointStates.velocity[0] = FirstOrZero(spindleJoint.Velocity(_ecm));
+  this->jointStates.effort[0] = 0.0;
+
+  if (this->spindleOn) {
+    // PID control (velocity) spindle.
+    const double spindleError =
+      FirstOrZero(spindleJoint.Velocity(_ecm)) - this->spindleSpeed;
+    const double spindleCmd =
+      this->spindlePID.Update(spindleError, std::chrono::duration<double>(dt));
+    spindleJoint.SetForce(_ecm, {spindleCmd});
+    this->jointStates.effort[0] = spindleCmd;
+  } else {
+    this->spindlePID.Reset();
+  }
+  this->pubJointStates->publish(this->jointStates);
+
+  this->lastControllerUpdateTime = _info.simTime;
+}
+
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetSpindleSpeed(
+  const std_msgs::msg::Float64::SharedPtr _msg)
+{
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+  this->spindleSpeed = _msg->data;
+  const double maxRad = this->spindleMaxRPM * 2.0 * M_PI / 60.0;
+  const double minRad = this->spindleMinRPM * 2.0 * M_PI / 60.0;
+  if (this->spindleSpeed > maxRad) {
+    this->spindleSpeed = maxRad;
+  } else if (this->spindleSpeed < minRad) {
+    this->spindleSpeed = minRad;
   }
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::QueueThread()
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetSpindleState(
+  const std_msgs::msg::Bool::SharedPtr _msg)
 {
-  static const double timeout = 0.01;
-
-  while (this->rosnode_->ok())
-  {
-    this->queue_.callAvailable(ros::WallDuration(timeout));
-  }
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+  this->spindleOn = _msg->data;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-bool MultiSenseSL::SetSpindleSpeed(std_srvs::Empty::Request &req,
-                                   std_srvs::Empty::Response &res)
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetMultiCameraFrameRateOld(
+  const std_msgs::msg::Float64::SharedPtr _msg)
 {
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-bool MultiSenseSL::SetSpindleState(std_srvs::Empty::Request &req,
-                                   std_srvs::Empty::Response &res)
-{
-  return true;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetSpindleSpeed(const std_msgs::Float64::ConstPtr &_msg)
-{
-  this->spindleSpeed = static_cast<double>(_msg->data);
-  if (this->spindleSpeed > this->spindleMaxRPM * 2.0*M_PI / 60.0)
-    this->spindleSpeed = this->spindleMaxRPM * 2.0*M_PI / 60.0;
-  else if (this->spindleSpeed < this->spindleMinRPM * 2.0*M_PI / 60.0)
-    this->spindleSpeed = this->spindleMinRPM * 2.0*M_PI / 60.0;
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetSpindleState(const std_msgs::Bool::ConstPtr &_msg)
-{
-  this->spindleOn = static_cast<double>(_msg->data);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetMultiCameraFrameRateOld(const std_msgs::Float64::ConstPtr
-                                          &_msg)
-{
-  ROS_WARN("Frame rate was modified but the ros topic ~/mutlisense_sl/fps"
-           " has been replaced by ~/mutlisense_sl/set_fps per issue 272.");
+  RCLCPP_WARN(
+    this->rosNode->get_logger(),
+    "Frame rate was modified but the topic ~/fps has been replaced by "
+    "~/set_fps.");
   this->SetMultiCameraFrameRate(_msg);
 }
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetMultiCameraFrameRate(const std_msgs::Float64::ConstPtr
-                                          &_msg)
-{
-  // limit frame rate to what is capable
-  this->multiCameraFrameRate = static_cast<double>(_msg->data);
 
-  // FIXME: Hardcoded lower limit on all resolution
-  if (this->multiCameraFrameRate < 1.0)
-  {
-    ROS_INFO("Camera rate cannot be below 1Hz at any resolution\n");
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetMultiCameraFrameRate(
+  const std_msgs::msg::Float64::SharedPtr _msg)
+{
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+
+  // Limit frame rate to what is capable.
+  this->multiCameraFrameRate = _msg->data;
+
+  // FIXME: Hardcoded lower limit on all resolutions.
+  if (this->multiCameraFrameRate < 1.0) {
+    RCLCPP_INFO(
+      this->rosNode->get_logger(),
+      "Camera rate cannot be below 1Hz at any resolution");
     this->multiCameraFrameRate = 1.0;
   }
 
-  // FIXME: Hardcoded upper limit.  Need to switch rates between modes.
-  if (this->imagerMode == 0)
-  {
-    if (this->multiCameraFrameRate > 15.0)
-    {
-      ROS_INFO("Camera rate cannot be above 15Hz at this resolution\n");
-      this->multiCameraFrameRate = 15.0;
-    }
+  // FIXME: Hardcoded upper limit. Need to switch rates between modes.
+  double maxRate = 30.0;
+  switch (this->imagerMode) {
+    case 0:
+      maxRate = 15.0;
+      break;
+    case 1:
+      maxRate = 30.0;
+      break;
+    case 2:
+      maxRate = 60.0;
+      break;
+    case 3:
+      maxRate = 70.0;
+      break;
+    default:
+      RCLCPP_ERROR(
+        this->rosNode->get_logger(),
+        "MultiSense SL internal state error (%d)", this->imagerMode);
+      break;
   }
-  else if (this->imagerMode == 1)
-  {
-    if (this->multiCameraFrameRate > 30.0)
-    {
-      ROS_INFO("Camera rate cannot be above 30Hz at this resolution\n");
-      this->multiCameraFrameRate = 30.0;
-    }
-  }
-  else if (this->imagerMode == 2)
-  {
-    if (this->multiCameraFrameRate > 60.0)
-    {
-      ROS_INFO("Camera rate cannot be above 60Hz at this resolution\n");
-      this->multiCameraFrameRate = 60.0;
-    }
-  }
-  else if (this->imagerMode == 3)
-  {
-    if (this->multiCameraFrameRate > 70.0)
-    {
-      ROS_INFO("Camera rate cannot be above 70Hz at this resolution\n");
-      this->multiCameraFrameRate = 70.0;
-    }
-  }
-  else
-  {
-    ROS_ERROR("MultiSense SL internal state error (%d)", this->imagerMode);
+  if (this->multiCameraFrameRate > maxRate) {
+    RCLCPP_INFO(
+      this->rosNode->get_logger(),
+      "Camera rate cannot be above %.0fHz at this resolution", maxRate);
+    this->multiCameraFrameRate = maxRate;
   }
 
-  this->multiCameraSensor->SetUpdateRate(this->multiCameraFrameRate);
+  // No live camera-sensor reconfiguration API in gz-sim reachable from a
+  // System plugin (see the class-level design note) -- multiCameraFrameRate
+  // is now a cached value only.
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetMultiCameraResolution(
-  const std_msgs::Int32::ConstPtr &_msg)
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetMultiCameraResolution(
+  const std_msgs::msg::Int32::SharedPtr _msg)
 {
-  /// see MultiSenseSLPlugin.h for available modes
-  if (_msg->data < 0 || _msg->data > 3)
-  {
-    ROS_WARN("set_camera_resolution_mode must"
-              " be between 0 - 3:\n"
-              "  0 - 2MP (2048*1088) @ up to 15 fps\n"
-              "  1 - 1MP (2048*544) @ up to 30 fps\n"
-              "  2 - 0.5MP (1024*544) @ up to 60 fps (default)\n"
-              "  3 - VGA (640*480) @ up to 70 fps\n");
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+
+  if (_msg->data < 0 || _msg->data > 3) {
+    RCLCPP_WARN(
+      this->rosNode->get_logger(),
+      "set_camera_resolution_mode must be between 0 - 3: "
+      "0=2MP(2048x1088)@15fps, 1=1MP(2048x544)@30fps, "
+      "2=0.5MP(1024x544)@60fps (default), 3=VGA(640x480)@70fps");
     return;
   }
 
   this->imagerMode = _msg->data;
 
-  unsigned int width = 640;
-  unsigned int height = 480;
-  if (this->imagerMode == 0)
-  {
-    width = 2048;
-    height = 1088;
-    if (this->multiCameraFrameRate > 15)
-    {
-      ROS_INFO("Reducing frame rate to 15Hz.");
-      this->multiCameraFrameRate = 15.0;
-    }
+  double maxRate = 30.0;
+  switch (this->imagerMode) {
+    case 0:
+      maxRate = 15.0;
+      break;
+    case 1:
+      maxRate = 30.0;
+      break;
+    case 2:
+      maxRate = 60.0;
+      break;
+    case 3:
+      maxRate = 70.0;
+      break;
+    default:
+      break;
   }
-  else if (this->imagerMode == 1)
-  {
-    width = 2048;
-    height = 544;
-    if (this->multiCameraFrameRate > 30)
-    {
-      ROS_INFO("Reducing frame rate to 30Hz.");
-      this->multiCameraFrameRate = 30.0;
-    }
-  }
-  else if (this->imagerMode == 2)
-  {
-    width = 1024;
-    height = 544;
-    if (this->multiCameraFrameRate > 60)
-    {
-      ROS_INFO("Reducing frame rate to 60Hz.");
-      this->multiCameraFrameRate = 60.0;
-    }
-  }
-  else if (this->imagerMode == 3)
-  {
-    width = 640;
-    height = 480;
-    if (this->multiCameraFrameRate > 70)
-    {
-      ROS_INFO("Reducing frame rate to 70Hz.");
-      this->multiCameraFrameRate = 70.0;
-    }
+  if (this->multiCameraFrameRate > maxRate) {
+    RCLCPP_INFO(
+      this->rosNode->get_logger(), "Reducing frame rate to %.0fHz.", maxRate);
+    this->multiCameraFrameRate = maxRate;
   }
 
-  this->multiCameraSensor->SetUpdateRate(this->multiCameraFrameRate);
-
-# if GAZEBO_MAJOR_VERSION >= 7
-  for (unsigned int i = 0; i < this->multiCameraSensor->CameraCount(); ++i)
-  {
-    this->multiCameraSensor->Camera(i)->SetImageWidth(width);
-    this->multiCameraSensor->Camera(i)->SetImageHeight(height);
-  }
-# else
-  for (unsigned int i = 0; i < this->multiCameraSensor->GetCameraCount(); ++i)
-  {
-    this->multiCameraSensor->GetCamera(i)->SetImageWidth(width);
-    this->multiCameraSensor->GetCamera(i)->SetImageHeight(height);
-  }
-# endif
+  // No live camera-sensor reconfiguration API in gz-sim reachable from a
+  // System plugin -- imagerMode/multiCameraFrameRate are cached values
+  // only; the original's per-mode image width/height reconfiguration
+  // (Camera::SetImageWidth/Height()) has no equivalent here.
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetMultiCameraExposureTime(const std_msgs::Float64::ConstPtr
-                                          &_msg)
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetMultiCameraExposureTime(
+  const std_msgs::msg::Float64::SharedPtr _msg)
 {
-  this->multiCameraExposureTime = static_cast<double>(_msg->data);
-  gzwarn << "setting camera exposure time in sim not implemented\n";
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+  this->multiCameraExposureTime = _msg->data;
+  gzwarn << "setting camera exposure time in sim not implemented" << std::endl;
 }
 
-////////////////////////////////////////////////////////////////////////////////
-void MultiSenseSL::SetMultiCameraGain(const std_msgs::Float64::ConstPtr
-                                          &_msg)
+//////////////////////////////////////////////////
+void MultiSenseSLPlugin::SetMultiCameraGain(
+  const std_msgs::msg::Float64::SharedPtr _msg)
 {
-  this->multiCameraGain = static_cast<double>(_msg->data);
-  gzwarn << "setting camera gain in sim not implemented\n";
+  std::lock_guard<std::mutex> lock(this->controlMutex);
+  this->multiCameraGain = _msg->data;
+  gzwarn << "setting camera gain in sim not implemented" << std::endl;
 }
-}
+
+//////////////////////////////////////////////////
+GZ_ADD_PLUGIN(MultiSenseSLPlugin,
+              gz::sim::System,
+              MultiSenseSLPlugin::ISystemConfigure,
+              MultiSenseSLPlugin::ISystemPreUpdate)
+
+GZ_ADD_PLUGIN_ALIAS(MultiSenseSLPlugin,
+    "drcsim_gazebo_ros_plugins::MultiSenseSLPlugin")

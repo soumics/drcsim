@@ -388,14 +388,67 @@ not happen automatically.
      publishes a command and then immediately expects it to have taken
      effect.
 
+5. 🔶 `MultiSenseSLPlugin` — **ported on `port/multisense_sl_plugin`, not yet
+   built/tested by the user.** Drives the MultiSense SL head sensor head: a
+   velocity-PID spindle joint (rotates the head lidar), a head IMU feed,
+   spindle joint-state publishing, and ROS topics for the stereo camera's
+   frame rate/resolution/exposure/gain. Renamed from the original's bare
+   `MultiSenseSL` class name to `MultiSenseSLPlugin` for consistency with
+   every other ported plugin's class-name-matches-file-name convention.
+   Notes:
+   - IMU handled via the same "read the link's raw physics state, rotate
+     into local frame" technique as `SandiaHandPlugin` (no ECM-readable IMU
+     sensor object in gz-sim).
+   - **Camera control has no live backing anymore**: the original mutated a
+     `sensors::MultiCameraSensor` found via the global `SensorManager`
+     singleton (frame rate, resolution, image dimensions). gz-sim has no
+     runtime camera-reconfiguration API reachable from a `System` plugin, so
+     `SetMultiCameraFrameRate`/`SetMultiCameraResolution` now only update a
+     cached value — same "cache but don't mutate" pattern as the
+     joint-damping/limit gaps in earlier plugins, just applied to a sensor
+     instead of a joint this time.
+   - `atlas_version` (decides `/multisense` vs `/multisense_sl` namespace)
+     was read from a shared ROS 1 param-server value in the original; no
+     such shared server in ROS 2, so it's declared as this node's own
+     parameter instead (default `5` → `/multisense`), same fix already
+     applied to `SandiaHandPlugin`'s PID gains.
+   - **A closer read of the original turned up more dead code than expected**:
+     of the 7 `Set*` ROS callback methods the class defines, only 3
+     (`SetSpindleSpeed`, the deprecated `~/fps` alias, `~/set_fps`) were
+     ever actually wired to a subscription — `SetSpindleState`,
+     `SetMultiCameraExposureTime`, and `SetMultiCameraGain` sat inside a
+     `/* not implemented, not supported */` comment block in the original
+     and were never advertised; a matching `SetSpindleSpeed`/`SetSpindleState`
+     *service* overload pair (`std_srvs::Empty`-based) was similarly
+     never advertised (`/* waiting for gen_srv */`). Preserved that split
+     faithfully: the never-wired methods are ported (still just update a
+     cached value) but still never bound to a subscription, and the fully
+     inert service overloads were dropped entirely rather than ported, since
+     there's nothing to preserve about code nobody could ever call. The one
+     exception: `SetMultiCameraResolution`'s subscription *was* wired up
+     here, even though the original commented it out too — but for a
+     different, load-bearing reason ("currently causes simulation to
+     crash"), a bug specific to old Gazebo/ROS 1 that doesn't carry over,
+     and this callback is no riskier than the two neighboring ones that
+     *are* live in the original.
+   - A minor, deliberate non-preservation: the original only advanced its
+     own `lastTime` (used for the spindle PID's `dt`) while the spindle was
+     on, leaving it frozen while off and producing one oversized `dt` on the
+     next re-enable. This port always advances `lastControllerUpdateTime`
+     every step regardless, matching the convention every other plugin in
+     this package already uses -- avoids that edge case rather than
+     reproducing it, since it looks like an accidental side effect of the
+     original's structure rather than a meaningful design choice.
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5
-(biggest/riskiest — ties into the AtlasSimInterface shim libs from
-`drcsim_model_resources`), DRCVehicleROSPlugin (**subclasses**
-`DRCVehiclePlugin` — see below), then the 8 CLI executables +
-`actionlib_server` + `gz_model_teleport` + `test_ros_plugin`.
+VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5 (biggest/riskiest — ties
+into the AtlasSimInterface shim libs from `drcsim_model_resources`),
+DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
+the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
+`test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅.
+RobotiqHandPlugin ✅, MultiSenseSLPlugin 🔶 (ported, awaiting first
+build/test round).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
