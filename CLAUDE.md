@@ -388,8 +388,8 @@ not happen automatically.
      publishes a command and then immediately expects it to have taken
      effect.
 
-5. 🔶 `MultiSenseSLPlugin` — **ported on `port/multisense_sl_plugin`, not yet
-   built/tested by the user.** Drives the MultiSense SL head sensor head: a
+5. ✅ `MultiSenseSLPlugin` — **done, 106/106 package checks passing, merged
+   into `ros2-jazzy-harmonic`.** Drives the MultiSense SL head sensor head: a
    velocity-PID spindle joint (rotates the head lidar), a head IMU feed,
    spindle joint-state publishing, and ROS topics for the stereo camera's
    frame rate/resolution/exposure/gain. Renamed from the original's bare
@@ -447,8 +447,7 @@ DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
 the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin 🔶 (ported, awaiting first
-build/test round).
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
