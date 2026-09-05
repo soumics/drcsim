@@ -88,7 +88,10 @@ void VRCPlugin::Configure(
           << "Failed to initialize." << std::endl;
     return;
   }
-  this->sdfConfig = _sdf;
+  // _sdf is a const pointer; clone it into a mutable one since the plugin's
+  // nested SDF blocks (<atlas>, <drc_vehicle>, <drc_fire_hose>) need
+  // GetElement(), which is non-const in this sdformat version.
+  this->sdfConfig = _sdf->Clone();
   this->eventMgr = &_eventMgr;
 }
 
@@ -1204,7 +1207,7 @@ void VRCPlugin::CheckThreadStart(gz::sim::EntityComponentManager & _ecm)
 //////////////////////////////////////////////////
 void VRCPlugin::Vehicle::Load(
   gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
-  const std::shared_ptr<const sdf::Element> & _pluginSdf)
+  const sdf::ElementPtr & _pluginSdf)
 {
   this->isInitialized = false;
 
@@ -1240,7 +1243,7 @@ void VRCPlugin::Vehicle::Load(
 //////////////////////////////////////////////////
 void VRCPlugin::FireHose::Load(
   gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
-  const std::shared_ptr<const sdf::Element> & _pluginSdf)
+  const sdf::ElementPtr & _pluginSdf)
 {
   this->isInitialized = false;
 
@@ -1323,9 +1326,9 @@ void VRCPlugin::FireHose::Load(
 
 //////////////////////////////////////////////////
 VRCPlugin::Robot::Robot()
-: startupSequence(Robot::NONE),
-  bdiStandSequence(Robot::BS_NONE),
+: bdiStandSequence(Robot::BS_NONE),
   pinnedSequence(Robot::PS_NONE),
+  startupSequence(Robot::NONE),
   startupHarnessDuration(5.0),
   currentBehavior(-1),
   currentStepIndex(0),
@@ -1341,7 +1344,7 @@ VRCPlugin::Robot::Robot()
 void VRCPlugin::Robot::InsertModel(
   gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
   gz::sim::EventManager & _eventMgr,
-  const std::shared_ptr<const sdf::Element> & _pluginSdf,
+  const sdf::ElementPtr & _pluginSdf,
   const rclcpp::Node::SharedPtr & _rosNode)
 {
   this->spawnPose = gz::math::Pose3d::Zero;
@@ -1398,11 +1401,14 @@ void VRCPlugin::Robot::InsertModel(
     this->startupSequence = Robot::NONE;
     return;
   }
-  root.Model()->SetRawPose(this->spawnPose);
-
   gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
   this->modelEntity = creator.CreateEntities(root.Model());
   creator.SetParent(this->modelEntity, _world.Entity());
+  // sdf::Root::Model() only returns a const pointer, so the spawn pose
+  // can't be set on the DOM before creation -- command it on the live
+  // entity instead, the same mechanism used for every other teleport in
+  // this plugin.
+  gz::sim::Model(this->modelEntity).SetWorldPoseCmd(_ecm, this->spawnPose);
 
   // SdfEntityCreator::CreateEntities() is synchronous (unlike Classic's
   // async InsertModelString()+poll), so the model is already live -- no

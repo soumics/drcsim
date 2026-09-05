@@ -332,7 +332,7 @@ public:
     void InsertModel(
       gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
       gz::sim::EventManager & _eventMgr,
-      const std::shared_ptr<const sdf::Element> & _pluginSdf,
+      const sdf::ElementPtr & _pluginSdf,
       const rclcpp::Node::SharedPtr & _rosNode);
     bool CheckGetModel(gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm);
 
@@ -416,7 +416,7 @@ public:
 public:
     void Load(
       gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
-      const std::shared_ptr<const sdf::Element> & _pluginSdf);
+      const sdf::ElementPtr & _pluginSdf);
 
     gz::sim::Entity modelEntity{gz::sim::kNullEntity};
     gz::math::Pose3d initialPose;
@@ -433,7 +433,7 @@ public:
 public:
     void Load(
       gz::sim::World & _world, gz::sim::EntityComponentManager & _ecm,
-      const std::shared_ptr<const sdf::Element> & _pluginSdf);
+      const sdf::ElementPtr & _pluginSdf);
 
     gz::sim::Entity fireHoseModelEntity{gz::sim::kNullEntity};
     gz::sim::Entity standpipeModelEntity{gz::sim::kNullEntity};
@@ -517,7 +517,14 @@ public:
   /// explicit here because this is the first plugin needing it beyond
   /// Configure().
   gz::sim::EventManager * eventMgr{nullptr};
-  std::shared_ptr<const sdf::Element> sdfConfig;
+  /// \brief A mutable clone of the plugin's SDF config, taken in Configure()
+  /// -- Configure() itself only receives a `const shared_ptr<const
+  /// Element>`, but every nested-block accessor (`GetElement()`) that this
+  /// plugin's `<atlas>`/`<drc_vehicle>`/`<drc_fire_hose>` blocks need is
+  /// non-const in this sdformat version (only leaf `Get<T>()` reads are
+  /// const), so a const pointer can't be handed to `Vehicle::Load()`/
+  /// `FireHose::Load()`/`Robot::InsertModel()` directly.
+  sdf::ElementPtr sdfConfig;
   bool initialized{false};
   bool validConfig{false};
 
