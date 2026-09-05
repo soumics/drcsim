@@ -19,6 +19,7 @@ find_package(osrf_msgs REQUIRED)
 find_package(sandia_hand_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(handle_msgs REQUIRED)
+find_package(std_msgs REQUIRED)
 
 include_directories(include)
 
@@ -96,6 +97,26 @@ install(TARGETS RobotiqHandPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(MultiSenseSLPlugin SHARED src/MultiSenseSLPlugin.cpp)
+target_link_libraries(MultiSenseSLPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+  gz-math7::gz-math7
+)
+ament_target_dependencies(MultiSenseSLPlugin
+  rclcpp
+  sensor_msgs
+  std_msgs
+)
+install(TARGETS MultiSenseSLPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -126,6 +147,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IRobotHandPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/RobotiqHandPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/RobotiqHandPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/MultiSenseSLPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/MultiSenseSLPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -219,6 +242,22 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_robotiq_hand_plugin RobotiqHandPlugin)
+
+  ament_add_gtest(test_multisense_sl_plugin
+    test/test_multisense_sl_plugin.cpp)
+  target_link_libraries(test_multisense_sl_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_multisense_sl_plugin
+    rclcpp
+    sensor_msgs
+    std_msgs
+  )
+  target_compile_definitions(test_multisense_sl_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:MultiSenseSLPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_multisense_sl_plugin MultiSenseSLPlugin)
 endif()
 
 ament_package()

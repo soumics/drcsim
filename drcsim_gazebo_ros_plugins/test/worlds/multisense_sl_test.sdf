@@ -1,0 +1,48 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="multisense_sl_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="multisense_sl_test_model">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="head">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="anchor" type="fixed">
+        <parent>world</parent>
+        <child>head</child>
+      </joint>
+
+      <link name="hokuyo_link">
+        <pose>0 0 0.05 0 0 0</pose>
+        <inertial>
+          <mass>0.05</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <!-- Unlimited rotation, SDF-idiom "continuous" joint: no <joint> type
+           for that exists, so use a revolute with a very wide position
+           limit instead. -->
+      <joint name="hokuyo_joint" type="revolute">
+        <parent>head</parent>
+        <child>hokuyo_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1e16</lower><upper>1e16</upper><effort>10</effort></limit>
+        </axis>
+      </joint>
+
+      <plugin filename="MultiSenseSLPlugin"
+              name="drcsim_gazebo_ros_plugins::MultiSenseSLPlugin"/>
+    </model>
+  </world>
+</sdf>
