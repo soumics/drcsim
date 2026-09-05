@@ -103,6 +103,20 @@ TEST(RobotiqHandPluginTest, MovesFingerTowardCommandedPosition)
   auto commandPub = testNode->create_publisher<atlas_msgs::msg::SModelRobotOutput>(
     "/left_hand/command", 10);
 
+  // Wait for DDS discovery to actually match this publisher with the
+  // plugin's subscription before spending loop iterations on it below --
+  // otherwise the first several dozen milliseconds of published commands
+  // are silently dropped (no match yet) and the joint spends most of the
+  // loop below sitting at handState == Disabled (zero commanded force).
+  bool sawCommandSubscriber = false;
+  for (int attempt = 0; attempt < 100 && !sawCommandSubscriber; ++attempt) {
+    sawCommandSubscriber = testNode->count_subscribers("/left_hand/command") > 0;
+    if (!sawCommandSubscriber) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+  }
+  EXPECT_TRUE(sawCommandSubscriber);
+
   // Wide grasping mode drives joint index 0 (l_palm_finger_1_joint) straight
   // to its upper position limit regardless of r_pra -- unlike the three
   // underactuated curl joints, this one is both the informative (PID
@@ -113,7 +127,7 @@ TEST(RobotiqHandPluginTest, MovesFingerTowardCommandedPosition)
   command.r_act = 1;
   command.r_mod = 2;  // Wide.
   command.r_gto = 1;
-  for (int i = 0; i < 500; ++i) {
+  for (int i = 0; i < 1000; ++i) {
     commandPub->publish(command);
     fixture.Server()->Run(true /*blocking*/, 1 /*iterations*/, false /*paused*/);
     rclcpp::spin_some(testNode);
