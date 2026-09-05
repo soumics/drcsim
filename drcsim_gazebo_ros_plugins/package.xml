@@ -15,6 +15,7 @@
   <depend>gz-transport13</depend>
   <depend>gz-msgs10</depend>
   <depend>gz-common5</depend>
+  <depend>gz-math7</depend>
 
   <depend>rclcpp</depend>
   <depend>atlas_msgs</depend>

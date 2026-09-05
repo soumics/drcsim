@@ -1,0 +1,242 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="robotiq_hand_full_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="robotiq_hand_full_test_model">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="l_hand">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="anchor" type="fixed">
+        <parent>world</parent>
+        <child>l_hand</child>
+      </joint>
+
+      <link name="l_1_palm_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_palm_finger_1_joint" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_1_palm_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_1_hinge_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_1_joint_proximal_actuating_hinge" type="revolute">
+        <parent>l_1_palm_link</parent>
+        <child>l_1_hinge_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_1_link_1">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_1_joint_1" type="revolute">
+        <parent>l_1_hinge_link</parent>
+        <child>l_1_link_1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_1_link_2">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_1_joint_2" type="revolute">
+        <parent>l_1_link_1</parent>
+        <child>l_1_link_2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_1_link_3">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_1_joint_3" type="revolute">
+        <parent>l_1_link_2</parent>
+        <child>l_1_link_3</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_2_palm_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_palm_finger_2_joint" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_2_palm_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_2_hinge_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_2_joint_proximal_actuating_hinge" type="revolute">
+        <parent>l_2_palm_link</parent>
+        <child>l_2_hinge_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_2_link_1">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_2_joint_1" type="revolute">
+        <parent>l_2_hinge_link</parent>
+        <child>l_2_link_1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_2_link_2">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_2_joint_2" type="revolute">
+        <parent>l_2_link_1</parent>
+        <child>l_2_link_2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_2_link_3">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_2_joint_3" type="revolute">
+        <parent>l_2_link_2</parent>
+        <child>l_2_link_3</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_middle_palm_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_palm_finger_middle_joint" type="revolute">
+        <parent>l_hand</parent>
+        <child>l_middle_palm_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_middle_hinge_link">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_middle_joint_proximal_actuating_hinge" type="revolute">
+        <parent>l_middle_palm_link</parent>
+        <child>l_middle_hinge_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_middle_link_1">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_middle_joint_1" type="revolute">
+        <parent>l_middle_hinge_link</parent>
+        <child>l_middle_link_1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_middle_link_2">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_middle_joint_2" type="revolute">
+        <parent>l_middle_link_1</parent>
+        <child>l_middle_link_2</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+      <link name="l_middle_link_3">
+        <inertial>
+          <mass>0.02</mass>
+          <inertia><ixx>0.0001</ixx><iyy>0.0001</iyy><izz>0.0001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_finger_middle_joint_3" type="revolute">
+        <parent>l_middle_link_2</parent>
+        <child>l_middle_link_3</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>60.0</effort></limit>
+        </axis>
+      </joint>
+
+      <plugin filename="RobotiqHandPlugin"
+              name="drcsim_gazebo_ros_plugins::RobotiqHandPlugin">
+        <side>left</side>
+      </plugin>
+    </model>
+  </world>
+</sdf>

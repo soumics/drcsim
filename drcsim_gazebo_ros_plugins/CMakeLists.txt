@@ -11,6 +11,7 @@ find_package(gz-plugin2 REQUIRED COMPONENTS register)
 find_package(gz-transport13 REQUIRED)
 find_package(gz-msgs10 REQUIRED)
 find_package(gz-common5 REQUIRED)
+find_package(gz-math7 REQUIRED)
 
 find_package(rclcpp REQUIRED)
 find_package(atlas_msgs REQUIRED)
@@ -75,6 +76,26 @@ install(TARGETS IRobotHandPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(RobotiqHandPlugin SHARED src/RobotiqHandPlugin.cpp)
+target_link_libraries(RobotiqHandPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+  gz-math7::gz-math7
+)
+ament_target_dependencies(RobotiqHandPlugin
+  rclcpp
+  atlas_msgs
+  sensor_msgs
+)
+install(TARGETS RobotiqHandPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -103,6 +124,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/SandiaHandPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/IRobotHandPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/IRobotHandPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/RobotiqHandPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/RobotiqHandPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -180,6 +203,22 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_irobot_hand_plugin IRobotHandPlugin)
+
+  ament_add_gtest(test_robotiq_hand_plugin
+    test/test_robotiq_hand_plugin.cpp)
+  target_link_libraries(test_robotiq_hand_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_robotiq_hand_plugin
+    rclcpp
+    atlas_msgs
+    sensor_msgs
+  )
+  target_compile_definitions(test_robotiq_hand_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:RobotiqHandPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_robotiq_hand_plugin RobotiqHandPlugin)
 endif()
 
 ament_package()
