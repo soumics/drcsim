@@ -440,10 +440,10 @@ not happen automatically.
      reproducing it, since it looks like an accidental side effect of the
      original's structure rather than a meaningful design choice.
 
-6. 🔶 `VRCPlugin` — **ported on `port/vrc_plugin`, not yet built/tested by
-   the user. By far the largest and most speculative port in this
-   migration** (2685 original lines; a `WorldPlugin`, not a `ModelPlugin`
-   like everything else so far) — pin/teleport the robot, planar cmd_vel
+6. ✅ `VRCPlugin` — **done, 118/118 package checks passing, merged into
+   `ros2-jazzy-harmonic`. By far the largest and most speculative port in
+   this migration** (2685 original lines; a `WorldPlugin`, not a
+   `ModelPlugin` like everything else so far) — pin/teleport the robot, planar cmd_vel
    teleop while pinned, vehicle enter/exit, fire-hose grab, and a fake
    AtlasSimInterface that turns STAND/FREEZE/WALK/STEP commands into
    pin/PID/teleport tricks. **User explicitly chose the full port** (not a
@@ -556,15 +556,38 @@ not happen automatically.
      raycast found nothing — `components::RaycastData` is real but its
      result carries no entity-identity, and this mode was already excluded
      from the original's own "available modes" help text.
-   - Test coverage so far: one test bringing up a minimal free-floating
-     "atlas" stand-in (utorso + fixed-jointed feet, already present in the
-     world file so the SDF-string-spawn path isn't exercised yet) and
-     confirming both that the ROS interface (fake ASIS state, AtlasCommand,
-     cmd_vel subscriber) stands up, and — the more meaningful check — that
-     the default startup sequence's automatic "pinned" mode actually holds
-     the 50kg body almost exactly at its spawn height under real gravity,
-     which only works if the world-pin joint creation *and* the
-     counter-gravity force are both actually functioning.
+   - Test coverage: one test bringing up a minimal free-floating "atlas"
+     stand-in (utorso + fixed-jointed feet, already present in the world
+     file so the SDF-string-spawn path isn't exercised yet), confirming the
+     ROS interface (AtlasCommand publisher, cmd_vel subscriber) stands up,
+     and — the more meaningful check — reading utorso's world pose directly
+     off the ECM via `TestFixture::OnPostUpdate()` to confirm the default
+     startup sequence's automatic "pinned" mode actually holds the 50kg
+     body almost exactly at its spawn height under real gravity, which only
+     works if the world-pin joint creation *and* the counter-gravity force
+     are both actually functioning. (The fake-ASIS state topic was tried
+     first for this check and dropped: it only starts publishing once
+     `Robot::INITIALIZED`, which — by design — is well *after* the default
+     5-second harness duration auto-unpins the robot again, so it can never
+     usefully confirm "still pinned.")
+   - **Real bugs the build/test round actually caught** (beyond the
+     speculative-API risk already flagged above): (1) `sdf::Element::
+     GetElement()` is non-const in this sdformat version, but `Configure()`
+     only hands a plugin a `const shared_ptr<const sdf::Element>` — needed
+     `_sdf->Clone()` into a mutable `sdf::ElementPtr` before any code that
+     digs into nested `<atlas>`/`<drc_vehicle>`/`<drc_fire_hose>` blocks.
+     (2) `components::CollisionElement` (the sdf::Collision-wrapping
+     component) is declared inside `components/Collision.hh`, not its own
+     `CollisionElement.hh`. (3) **Two separate ROS 2
+     `declare_parameter()`-is-one-shot crashes** — one from a per-joint
+     parameter name colliding whenever `FindJoint()` returned an empty
+     string for more than one missing DOF, one from a *fixed* parameter
+     name declared from inside `UpdateStates()`'s per-tick state machine
+     instead of a true one-time setup path. See the new "Runtime gotcha...
+     declare_parameter() is one-shot" section below — this is now a
+     general lesson, not VRCPlugin-specific, and worth watching for in
+     `AtlasPlugin` given how much startup-parameter machinery it likely
+     has too.
 
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
 VRCScoringPlugin, AtlasPlugin/V3/V4/V5 (biggest/riskiest of what's left —
@@ -573,8 +596,7 @@ DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
 the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin 🔶 (ported, awaiting
-first build/test round — expect several correction rounds given its size).
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
