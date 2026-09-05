@@ -269,14 +269,70 @@ not happen automatically.
      (`gains.f<N>_j<M>.{p,i,d,i_clamp}`, default `0.0`) — settable the
      same way once a launch file exists to provide them.
 
-**Remaining Tier 2 plugins** (each its own `port/<name>` branch): IRobotHandPlugin
-(needs the `handle_msgs` camelCase→snake_case field fix noted in Tier 0),
+3. 🔶 `IRobotHandPlugin` — **ported on `port/irobot_hand_plugin`, not yet
+   built/tested by the user.** 23 joints per hand (2 base-rotation + 3 base +
+   3×(3 flex + 3 twist)); unlike `SandiaHandPlugin`, the original has **no
+   stumps fallback** — `FindJoints()` aborts the whole load the first time any
+   one expected joint name is missing, and this port preserves that exactly.
+   Control is tendon-based: a PID computes a torque per DOF (index flex,
+   middle flex, thumb flex, thumb antagonist, spread), split between a finger
+   base joint and its flexure-flex joints. Topics keep the original's
+   inconsistent prefix scheme on purpose (not normalized): joint states on
+   `irobot_hands/<l/r>_hand/joint_states`, but handle sensors/control on bare
+   `<left/right>_hand/sensors/raw` and `<left/right>_hand/control` (full word
+   side, no `l_`/`r_` shorthand). Notes:
+   - **Passive joint springs reimplemented as an explicit PD force**: the
+     original faked flexure/base-joint springiness with
+     `gazebo::physics::Joint::SetStiffnessDamping()` (ODE-specific, no gz-sim
+     equivalent — same gap as `DRCVehiclePlugin`'s dropped `Set*Limits` and
+     `SandiaHandPlugin`'s dropped damping mutation), re-called every step with
+     a **dynamically overwritten damping value** ("hack to reduce jitter" per
+     the original's own comment) alongside the active tendon force. Since a
+     spring is just `force = -kp*(pos - preload) - kd*vel`, this port computes
+     that explicitly each step — including the dynamic-damping override — and
+     adds it to the tendon force in one `Joint::SetForce()` call per joint.
+     The flexure **twist** joints and finger-base-rotation joint 1 are
+     passive-only in the original (never touched by `UpdatePIDControl`) and
+     keep a fixed (non-dynamic) spring here.
+   - **Thumb antagonist limit: control-level check only, no hard physics
+     stop.** The original also called `Joint::SetUpperLimit()` every step to
+     move the thumb base joint's hard physics limit as the antagonist value
+     changed; gz-sim has no runtime joint-limit mutation API, so only the
+     control-level check the original already had independently (skip
+     applying tendon force once past the effective limit) survives.
+   - `gz::sim::Joint` has **no `UpperLimit()`/`LowerLimit()` reader methods**
+     (only `Set*Limits()` setters) — read the thumb's static SDF-configured
+     limits once at load time via `Joint::Axis(ecm)` →
+     `sdf::JointAxis::Lower()`/`Upper()` instead (needs
+     `#include <sdf/JointAxis.hh>`).
+   - Reuses `SandiaHandPlugin`'s rclcpp node/executor/thread pattern exactly
+     (own node named `irobot_hand_plugin_<side>` since two instances share
+     the process).
+   - **Caught before it ever reached the user**: first draft computed the PID
+     derivative term *after* overwriting `positionError` with the new error,
+     making `(qP - positionError)/dt` always evaluate to zero. Fixed by
+     computing the derivative first, then updating `positionError` —
+     `SandiaHandPlugin.cpp`'s `UpdateStates()` already does this in the right
+     order and was the reference for the fix.
+   - Test coverage so far: a cheap negative test (`irobot_hand_missing_joints_test.sdf`,
+     no finger joints at all) confirming the no-stumps-fallback abort path
+     doesn't crash and never stands up a ROS interface, plus a full 23-joint
+     test (`irobot_hand_full_test.sdf`, generated with a small Python script
+     rather than hand-typed — see `/tmp/gen_irobot_world.py` pattern for any
+     future large kinematic-chain test world) confirming the joint_states/
+     handle sensors publishers and the control subscription all stand up.
+     No test yet exercises actual tendon control moving a joint (the
+     `SandiaHandPlugin`-style follow-up test) — a natural next step if the
+     user wants deeper coverage once the ROS-interface test is green.
+
+**Remaining Tier 2 plugins** (each its own `port/<name>` branch):
 RobotiqHandPlugin, MultiSenseSLPlugin, VRCPlugin, VRCScoringPlugin,
 AtlasPlugin/V3/V4/V5 (biggest/riskiest — ties into the AtlasSimInterface shim
 libs from `drcsim_model_resources`), DRCVehicleROSPlugin (**subclasses**
-`DRCVehiclePlugin` — see below), ContactModelPlugin ✅, SandiaHandPlugin ✅,
-then the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
-`test_ros_plugin`.
+`DRCVehiclePlugin` — see below), then the 8 CLI executables +
+`actionlib_server` + `gz_model_teleport` + `test_ros_plugin`.
+ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin 🔶 (ported,
+awaiting first build/test round).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
@@ -527,9 +583,10 @@ turn up when Tier 3's `drcsim_gazebo` world-heavy testing happens:
   `builtin_interfaces/Duration` (+ dependency). Fails at CMake time with an
   opaque `KeyError: 'time'`, not a clear per-field error.
 - ROS 2 message/field names must be lower snake_case (no camelCase) — rename and
-  flag any downstream C++ consumers that used the old field names (e.g.
-  `IRobotHandPlugin.cpp` in `drcsim_gazebo_ros_plugins`, Tier 2, still uses old
-  `handle_msgs` camelCase field names — needs updating when that package's ported).
+  flag any downstream C++ consumers that used the old field names. This bit
+  `IRobotHandPlugin.cpp` in `drcsim_gazebo_ros_plugins` (Tier 2) when that
+  plugin was finally ported — its rewrite uses the already-snake_cased
+  `handle_msgs` fields throughout, see the Tier 2 section above.
 - ROS 2 **constant** names (a `TYPE NAME = value` line, as opposed to a plain
   field) must be **UPPER_CASE** — this is a hard rosidl parse error, the mirror
   image of the field-name rule above. grep every `.msg`/`.srv`/`.action` for

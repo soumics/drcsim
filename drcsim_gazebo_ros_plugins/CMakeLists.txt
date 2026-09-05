@@ -17,6 +17,7 @@ find_package(atlas_msgs REQUIRED)
 find_package(osrf_msgs REQUIRED)
 find_package(sandia_hand_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(handle_msgs REQUIRED)
 
 include_directories(include)
 
@@ -55,6 +56,25 @@ install(TARGETS SandiaHandPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(IRobotHandPlugin SHARED src/IRobotHandPlugin.cpp)
+target_link_libraries(IRobotHandPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+)
+ament_target_dependencies(IRobotHandPlugin
+  rclcpp
+  handle_msgs
+  sensor_msgs
+)
+install(TARGETS IRobotHandPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -81,6 +101,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ContactModelPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/SandiaHandPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/SandiaHandPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/IRobotHandPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/IRobotHandPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -146,6 +168,18 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_sandia_hand_plugin_joints SandiaHandPlugin)
+
+  ament_add_gtest(test_irobot_hand_plugin
+    test/test_irobot_hand_plugin.cpp)
+  target_link_libraries(test_irobot_hand_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_irobot_hand_plugin rclcpp)
+  target_compile_definitions(test_irobot_hand_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:IRobotHandPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_irobot_hand_plugin IRobotHandPlugin)
 endif()
 
 ament_package()
