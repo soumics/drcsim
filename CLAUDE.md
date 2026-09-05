@@ -440,14 +440,141 @@ not happen automatically.
      reproducing it, since it looks like an accidental side effect of the
      original's structure rather than a meaningful design choice.
 
+6. 🔶 `VRCPlugin` — **ported on `port/vrc_plugin`, not yet built/tested by
+   the user. By far the largest and most speculative port in this
+   migration** (2685 original lines; a `WorldPlugin`, not a `ModelPlugin`
+   like everything else so far) — pin/teleport the robot, planar cmd_vel
+   teleop while pinned, vehicle enter/exit, fire-hose grab, and a fake
+   AtlasSimInterface that turns STAND/FREEZE/WALK/STEP commands into
+   pin/PID/teleport tricks. **User explicitly chose the full port** (not a
+   reduced-scope version) when asked, given the size/risk — see the
+   extensive class-level design-note doc comment at the top of
+   `VRCPlugin.hpp`, which is the authoritative record of every judgment
+   call below; this entry summarizes it.
+   - **Five separate gz-sim capability gaps were individually researched
+     against installed headers and, where ambiguous, shipped `.so` binary
+     symbol tables** (a first for this migration — every previous gap was
+     resolved from headers/doc comments alone) before deciding on a
+     substitute:
+     1. **Per-link/model runtime gravity and static toggling**
+        (`Link::SetGravityMode()`, `Link::SetLinkStatic()`): the matching
+        `components::GravityEnabled`/`components::Static` exist, but binary
+        evidence (an SDF getter paired 1:1 with a one-shot native
+        engine call, e.g. `dart::dynamics::Skeleton::setMobile()`) says
+        both are construction-time-only, not read every step. Gravity:
+        substituted with an explicit per-step counter-force
+        (`Link::AddWorldForce(ecm, -mass*gravity)`) on a tracked set of
+        "gravity disabled" links — the same "reimplement the missing
+        mutation as an explicit force" idiom already used for joint
+        springs in `IRobotHandPlugin`/`RobotiqHandPlugin`. Static: not
+        needed at all, since the *primary* pinning mechanism (a real
+        joint) doesn't depend on it — only Classic's simbody/dart-specific
+        fallback branch did, and that branch is dropped outright.
+     2. **Per-link/collision collide-mode toggling** (`SetCollideMode()`,
+        Classic's `SetFeetCollide()`): no component-flag equivalent exists
+        at all (only full collision-entity removal/recreation, evidence-
+        supported but heavy). Dropped to a no-op — cosmetic only (feet may
+        briefly clip during pin/teleport), not functional.
+     3. **Runtime model spawning from an SDF/URDF string**
+        (`World::InsertModelString()`, used only for the Atlas robot if
+        missing from the world file): fully achievable via
+        `sdf::Root::LoadSdfString()` (auto-converts URDF) +
+        `gz::sim::SdfEntityCreator::CreateEntities()` + `SetParent()` —
+        confirmed to be the exact mechanism gz-sim's own `UserCommands`
+        system uses behind `/world/<world>/create`. Synchronous (unlike
+        Classic's async spawn-then-poll), so `SPAWN_QUEUED`/
+        `CheckGetModel()` are now unreachable dead states, kept only for
+        state-machine fidelity.
+     4. **Runtime joint creation between two links** (a custom
+        `PhysicsEngine::CreateJoint()`-based `AddJoint()` in the original):
+        split by whether the weld is to the world or cross-model.
+        World-pin: a real SDF `fixed` joint (`parent` name literally
+        `"world"`) via `SdfEntityCreator`, parented under the pinned
+        link's own model — the same `<parent>world</parent>` idiom this
+        project's test worlds already use, built at runtime instead of
+        loaded from text. Cross-model rigid welds (robot hand↔fire hose,
+        vehicle seat↔robot pelvis): `gz::sim::components::DetachableJoint`
+        on a fresh bare entity — confirmed via the physics system's own
+        binary symbols to need no other components, work across
+        completely different models (`parentLink`/`childLink` are raw
+        `Entity` ids, no scoping check), and need no extra world-level
+        system plugin loaded. The fire-hose↔standpipe docking connection
+        is *also* cross-model but needed a real screw joint (dartsim
+        genuinely implements screw joints, confirmed by binary symbol
+        inspection down to `dart::dynamics::ScrewJoint::setPitch`) — but
+        only reachable via the intra-model `SdfEntityCreator` joint path,
+        which doesn't apply cross-model, and `DetachableJoint` only
+        supports `"fixed"`. **Dropped**: docking is now a fixed weld too
+        (same proximity/alignment auto-attach check as the original,
+        `CheckThreadStart()`, unchanged), permanently losing the
+        "unscrew to disconnect" mechanic (no live joint angle to read
+        anymore).
+     5. **Instant world-pose teleport** (`Model::SetWorldPose()`/
+        `SetLinkWorldPose()`, used constantly: pin, enter/exit car, grab
+        hose, cmd_vel warp): **not** a direct `components::Pose` write
+        (that's a physics *output*, silently clobbered next step) —
+        the real mechanism is `Model::SetWorldPoseCmd(ecm, pose)`, a
+        *command* component (`components::WorldPoseCmd`) the physics
+        system consumes via `gz::physics::SetFreeGroupWorldPose`,
+        confirmed by binary inspection and by `gz-sim-user-commands-
+        system`'s own `/world/<world>/set_pose` service being built on
+        the identical component. **Model-level only** — no per-link
+        teleport exists, so repositioning one link of a multi-link model
+        means computing what model pose would place that link at the
+        desired pose (via the link's currently-solved rigid offset from
+        the model) and commanding that instead — the same transform
+        Classic's `SetLinkWorldPose()` did internally. A related, smaller
+        gap: no instant "snap all joints to this pose" writer either
+        (`Model::SetJointPositions()`), used for BDI-stand/seated-pose
+        visual snaps — dropped; only the `AtlasCommand` publish survives,
+        so those poses only take effect once `AtlasPlugin` (not yet
+        ported) exists downstream to PID toward them.
+   - **A sixth, architectural change, not a missing-API gap**: the
+     original directly mutated Gazebo Classic physics objects *from
+     inside* ROS callbacks — safe there only because Classic's physics
+     objects have their own internal locking. gz-sim's ECM has no such
+     protection, so (matching what every other ROS-coupled plugin in this
+     migration already did, just made explicit and rigorous here given how
+     much more `VRCPlugin` does) every ROS callback that needs to touch
+     the ECM now only records a pending request (`pendingSetRobotMode`,
+     `pendingFakeASIC`, `pendingEnterCar`, etc., all under
+     `controlMutex`); a new `ProcessPendingActions()`, called once per
+     `PreUpdate` on the sim thread, copies the pending data out under the
+     mutex, releases it, then performs the actual `Do*` (`DoSetRobotMode`,
+     `DoSetFakeASIC`, `DoRobotEnterCar`, ...) methods with real ECM access
+     — releasing the mutex first is required since some `Do*` methods
+     (e.g. `DoSetFakeASIC`) internally call other public methods
+     (`SetRobotCmdVel`) that themselves lock the same mutex, which would
+     otherwise deadlock. A side effect: this also makes the original's
+     `World::SetPaused()`/`EnablePhysicsEngine()` pause/unpause dance —
+     which existed specifically to guard against a ROS-callback thread and
+     the physics thread touching the same object at once — unnecessary
+     rather than merely hard to port, since that race can no longer occur.
+   - The rarely-used `"harnessed"` startup mode's downward raycast for
+     ground height (`Entity::GetNearestEntityBelow()`) is replaced with the
+     same flat-ground fallback the original already used whenever its own
+     raycast found nothing — `components::RaycastData` is real but its
+     result carries no entity-identity, and this mode was already excluded
+     from the original's own "available modes" help text.
+   - Test coverage so far: one test bringing up a minimal free-floating
+     "atlas" stand-in (utorso + fixed-jointed feet, already present in the
+     world file so the SDF-string-spawn path isn't exercised yet) and
+     confirming both that the ROS interface (fake ASIS state, AtlasCommand,
+     cmd_vel subscriber) stands up, and — the more meaningful check — that
+     the default startup sequence's automatic "pinned" mode actually holds
+     the 50kg body almost exactly at its spawn height under real gravity,
+     which only works if the world-pin joint creation *and* the
+     counter-gravity force are both actually functioning.
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-VRCPlugin, VRCScoringPlugin, AtlasPlugin/V3/V4/V5 (biggest/riskiest — ties
-into the AtlasSimInterface shim libs from `drcsim_model_resources`),
+VRCScoringPlugin, AtlasPlugin/V3/V4/V5 (biggest/riskiest of what's left —
+ties into the AtlasSimInterface shim libs from `drcsim_model_resources`),
 DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
 the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅.
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin 🔶 (ported, awaiting
+first build/test round — expect several correction rounds given its size).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

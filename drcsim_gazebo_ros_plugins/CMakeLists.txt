@@ -20,6 +20,7 @@ find_package(sandia_hand_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
 find_package(handle_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
 
 include_directories(include)
 
@@ -117,6 +118,28 @@ install(TARGETS MultiSenseSLPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(VRCPlugin SHARED src/VRCPlugin.cpp)
+target_link_libraries(VRCPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+  gz-math7::gz-math7
+)
+ament_target_dependencies(VRCPlugin
+  rclcpp
+  atlas_msgs
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+)
+install(TARGETS VRCPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -149,6 +172,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/RobotiqHandPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/MultiSenseSLPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/MultiSenseSLPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/VRCPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -258,6 +283,21 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_multisense_sl_plugin MultiSenseSLPlugin)
+
+  ament_add_gtest(test_vrc_plugin
+    test/test_vrc_plugin.cpp)
+  target_link_libraries(test_vrc_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_vrc_plugin
+    rclcpp
+    atlas_msgs
+  )
+  target_compile_definitions(test_vrc_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:VRCPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_vrc_plugin VRCPlugin)
 endif()
 
 ament_package()
