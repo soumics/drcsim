@@ -65,7 +65,7 @@ TEST(VRCPluginTest, StandsUpRosInterfaceAndAutoPinsOnStartup)
         return;
       }
       const gz::sim::Entity utorso =
-        gz::sim::Model(atlasModel).LinkByName(_ecm, "utorso");
+      gz::sim::Model(atlasModel).LinkByName(_ecm, "utorso");
       if (utorso == gz::sim::kNullEntity) {
         return;
       }
