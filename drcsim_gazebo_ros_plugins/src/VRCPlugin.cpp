@@ -154,14 +154,12 @@ gz::sim::Entity VRCPlugin::AddJoint(
   if (_link1 == gz::sim::kNullEntity) {
     // Pin _link2 to the world via a real SDF fixed joint, parented under
     // the same model as _link2 (see the class-level design note).
-    const std::string * childName =
-      _ecm.Component<gz::sim::components::Name>(_link2)
-      ? &_ecm.Component<gz::sim::components::Name>(_link2)->Data()
-      : nullptr;
-    if (!childName) {
+    const auto * nameComponent = _ecm.Component<gz::sim::components::Name>(_link2);
+    if (!nameComponent) {
       gzerr << "AddJoint: pin target link has no Name component." << std::endl;
       return gz::sim::kNullEntity;
     }
+    const std::string * childName = &nameComponent->Data();
 
     sdf::Joint jointSdf;
     jointSdf.SetName(*childName + "_world_pin_joint");
@@ -494,8 +492,7 @@ void VRCPlugin::DoSetFakeASIC(
     this->UnpinAtlas(_ecm, _eventMgr);
     this->SetRobotCmdVel(zeroVel, 0.0);
   } else if (_asic.behavior ==
-    atlas_msgs::msg::AtlasSimInterfaceCommand::STAND_PREP)
-  {
+    atlas_msgs::msg::AtlasSimInterfaceCommand::STAND_PREP) {
     // no-op
     this->SetRobotCmdVel(zeroVel, 0.0);
   } else if (_asic.behavior == atlas_msgs::msg::AtlasSimInterfaceCommand::WALK) {
@@ -527,8 +524,7 @@ void VRCPlugin::DoSetFakeASIC(
     this->SetFeetCollide("none");
     this->SetRobotCmdVel(cmdVel, dt);
   } else if (_asic.behavior ==
-    atlas_msgs::msg::AtlasSimInterfaceCommand::MANIPULATE)
-  {
+    atlas_msgs::msg::AtlasSimInterfaceCommand::MANIPULATE) {
     // We fake STAND by pinning the robot.
     this->PinAtlas(_ecm, _eventMgr, true);
     this->SetRobotCmdVel(zeroVel, 0.0);
@@ -981,7 +977,9 @@ void VRCPlugin::UpdateStates(
       rpy.Z() = rpy.Z() + this->robotCmdVel.angular.z * dt;
       newPose.Rot() = gz::math::Quaterniond(rpy);
 
-      this->Teleport(_ecm, _eventMgr, this->atlas.pinLinkEntity, this->atlas.pinJointEntity, newPose);
+      this->Teleport(
+        _ecm, _eventMgr, this->atlas.pinLinkEntity, this->atlas.pinJointEntity,
+        newPose);
     }
   }
 
@@ -1536,6 +1534,16 @@ void VRCPlugin::AtlasCommandController::InitModel(
   this->ac.k_effort.resize(n);
 
   for (unsigned int i = 0; i < n; ++i) {
+    // FindJoint() returns an empty name for any DOF this robot version
+    // doesn't have (e.g. no wry2 joints on Atlas 4.1) -- ROS 2's
+    // declare_parameter(), unlike ROS 1's getParam(), throws if the same
+    // parameter name is declared twice, and every missing joint would
+    // otherwise collide on the same "atlas_controller.gains..*" name.
+    // Nothing to configure for a joint that doesn't exist anyway, so just
+    // leave its gains at their already-zeroed default.
+    if (this->jointNames[i].empty()) {
+      continue;
+    }
     const std::string prefix = "atlas_controller.gains." + this->jointNames[i] + ".";
     this->ac.kp_position[i] = _rosNode->declare_parameter(prefix + "p", 0.0);
     this->ac.ki_position[i] = _rosNode->declare_parameter(prefix + "i", 0.0);
