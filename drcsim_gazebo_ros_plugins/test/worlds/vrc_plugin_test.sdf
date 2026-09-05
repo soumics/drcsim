@@ -1,0 +1,56 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="vrc_plugin_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <!-- Minimal stand-in for the real atlas_description model: a single
+         free-floating "utorso" link (no joint to the world, so it's the
+         model's free-floating root, matching a real floating-base robot's
+         pelvis/torso), plus l_foot/r_foot as simple fixed-joint children --
+         just enough for VRCPlugin's pin/gravity-mode/mode-switch logic to
+         have something real to act on. -->
+    <model name="atlas">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="utorso">
+        <inertial>
+          <mass>50.0</mass>
+          <inertia><ixx>1.0</ixx><iyy>1.0</iyy><izz>1.0</izz></inertia>
+        </inertial>
+      </link>
+
+      <link name="l_foot">
+        <pose>0 0.1 -1.0 0 0 0</pose>
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_foot_fixed" type="fixed">
+        <parent>utorso</parent>
+        <child>l_foot</child>
+      </joint>
+
+      <link name="r_foot">
+        <pose>0 -0.1 -1.0 0 0 0</pose>
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_foot_fixed" type="fixed">
+        <parent>utorso</parent>
+        <child>r_foot</child>
+      </joint>
+    </model>
+
+    <!-- VRCPlugin is a world plugin (Classic's WorldPlugin), attached to
+         the <world>, not to the atlas model itself. -->
+    <plugin filename="VRCPlugin" name="drcsim_gazebo_ros_plugins::VRCPlugin"/>
+  </world>
+</sdf>
