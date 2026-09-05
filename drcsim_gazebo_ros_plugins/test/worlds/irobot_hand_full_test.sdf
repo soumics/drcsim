@@ -1,0 +1,354 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="irobot_hand_full_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="irobot_hand_full_test_model">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="l_hand">
+        <inertial>
+          <mass>0.5</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="anchor" type="fixed">
+        <parent>world</parent>
+        <child>l_hand</child>
+      </joint>
+
+      <link name="left_f0_rot_link">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/joint_base_rotation" type="revolute">
+        <parent>l_hand</parent>
+        <child>left_f0_rot_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_base_link">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/joint_base" type="revolute">
+        <parent>left_f0_rot_link</parent>
+        <child>left_f0_base_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_flex_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_flex_from_proximal_to_1" type="revolute">
+        <parent>left_f0_base_link</parent>
+        <child>left_f0_flex_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_twist_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_twist_from_proximal_to_1" type="revolute">
+        <parent>left_f0_flex_p1</parent>
+        <child>left_f0_twist_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_flex_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_flex_from_1_to_2" type="revolute">
+        <parent>left_f0_twist_p1</parent>
+        <child>left_f0_flex_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_twist_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_twist_from_1_to_2" type="revolute">
+        <parent>left_f0_flex_12</parent>
+        <child>left_f0_twist_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_flex_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_flex_from_2_to_distal" type="revolute">
+        <parent>left_f0_twist_12</parent>
+        <child>left_f0_flex_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f0_twist_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[0]/flexible_joint_twist_from_2_to_distal" type="revolute">
+        <parent>left_f0_flex_2d</parent>
+        <child>left_f0_twist_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_rot_link">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/joint_base_rotation" type="revolute">
+        <parent>l_hand</parent>
+        <child>left_f1_rot_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_base_link">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/joint_base" type="revolute">
+        <parent>left_f1_rot_link</parent>
+        <child>left_f1_base_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_flex_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_flex_from_proximal_to_1" type="revolute">
+        <parent>left_f1_base_link</parent>
+        <child>left_f1_flex_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_twist_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_twist_from_proximal_to_1" type="revolute">
+        <parent>left_f1_flex_p1</parent>
+        <child>left_f1_twist_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_flex_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_flex_from_1_to_2" type="revolute">
+        <parent>left_f1_twist_p1</parent>
+        <child>left_f1_flex_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_twist_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_twist_from_1_to_2" type="revolute">
+        <parent>left_f1_flex_12</parent>
+        <child>left_f1_twist_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_flex_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_flex_from_2_to_distal" type="revolute">
+        <parent>left_f1_twist_12</parent>
+        <child>left_f1_flex_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f1_twist_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[1]/flexible_joint_twist_from_2_to_distal" type="revolute">
+        <parent>left_f1_flex_2d</parent>
+        <child>left_f1_twist_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_base_link">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/joint_base" type="revolute">
+        <parent>l_hand</parent>
+        <child>left_f2_base_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_flex_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_flex_from_proximal_to_1" type="revolute">
+        <parent>left_f2_base_link</parent>
+        <child>left_f2_flex_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_twist_p1">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_twist_from_proximal_to_1" type="revolute">
+        <parent>left_f2_flex_p1</parent>
+        <child>left_f2_twist_p1</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_flex_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_flex_from_1_to_2" type="revolute">
+        <parent>left_f2_twist_p1</parent>
+        <child>left_f2_flex_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_twist_12">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_twist_from_1_to_2" type="revolute">
+        <parent>left_f2_flex_12</parent>
+        <child>left_f2_twist_12</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_flex_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_flex_from_2_to_distal" type="revolute">
+        <parent>left_f2_twist_12</parent>
+        <child>left_f2_flex_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+      <link name="left_f2_twist_2d">
+        <inertial>
+          <mass>0.01</mass>
+          <inertia><ixx>5e-05</ixx><iyy>5e-05</iyy><izz>5e-05</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="left_finger[2]/flexible_joint_twist_from_2_to_distal" type="revolute">
+        <parent>left_f2_flex_2d</parent>
+        <child>left_f2_twist_2d</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <limit><lower>-1.57</lower><upper>1.57</upper></limit>
+        </axis>
+      </joint>
+
+      <plugin filename="IRobotHandPlugin"
+              name="drcsim_gazebo_ros_plugins::IRobotHandPlugin">
+        <side>left</side>
+      </plugin>
+    </model>
+  </world>
+</sdf>
