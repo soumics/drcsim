@@ -593,6 +593,12 @@ double DRCVehiclePlugin::GetGasPedalPercent() const
 }
 
 //////////////////////////////////////////////////
+bool DRCVehiclePlugin::IsValidConfig() const
+{
+  return this->validConfig;
+}
+
+//////////////////////////////////////////////////
 double DRCVehiclePlugin::GetBrakePedalPercent() const
 {
   return Clamp((this->brakePedalState - this->brakePedalLow) /

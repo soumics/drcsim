@@ -20,7 +20,16 @@ target_link_libraries(DRCVehiclePlugin
   gz-math7::gz-math7
   gz-common5::gz-common5
 )
+# Usage requirements for downstream packages that link against this target
+# (drcsim_gazebo_ros_plugins' DRCVehicleROSPlugin subclasses DRCVehiclePlugin)
+# -- plain include_directories() below is enough to build this package's own
+# targets, but doesn't propagate through an exported target.
+target_include_directories(DRCVehiclePlugin PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
 install(TARGETS DRCVehiclePlugin
+  EXPORT export_${PROJECT_NAME}
   LIBRARY DESTINATION lib
   ARCHIVE DESTINATION lib
   RUNTIME DESTINATION bin
@@ -75,5 +84,8 @@ if(BUILD_TESTING)
   add_dependencies(test_drc_vehicle_plugin
     DRCBuildingPlugin DRCVehiclePlugin)
 endif()
+
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(gz-sim8 gz-plugin2 gz-math7 gz-common5)
 
 ament_package()

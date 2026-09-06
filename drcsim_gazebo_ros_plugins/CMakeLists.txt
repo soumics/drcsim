@@ -13,6 +13,8 @@ find_package(gz-msgs10 REQUIRED)
 find_package(gz-common5 REQUIRED)
 find_package(gz-math7 REQUIRED)
 
+find_package(drcsim_gazebo_plugins REQUIRED)
+
 find_package(rclcpp REQUIRED)
 find_package(atlas_msgs REQUIRED)
 find_package(osrf_msgs REQUIRED)
@@ -181,6 +183,23 @@ install(TARGETS VRCScoringPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(DRCVehicleROSPlugin SHARED src/DRCVehicleROSPlugin.cpp)
+target_link_libraries(DRCVehicleROSPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-common5::gz-common5
+  drcsim_gazebo_plugins::DRCVehiclePlugin
+)
+ament_target_dependencies(DRCVehicleROSPlugin
+  rclcpp
+  std_msgs
+)
+install(TARGETS DRCVehicleROSPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -219,6 +238,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/AtlasPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/VRCScoringPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCScoringPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/DRCVehicleROSPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/DRCVehicleROSPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -374,6 +395,21 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_vrc_scoring_plugin VRCScoringPlugin)
+
+  ament_add_gtest(test_drc_vehicle_ros_plugin
+    test/test_drc_vehicle_ros_plugin.cpp)
+  target_link_libraries(test_drc_vehicle_ros_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_drc_vehicle_ros_plugin
+    rclcpp
+    std_msgs
+  )
+  target_compile_definitions(test_drc_vehicle_ros_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:DRCVehicleROSPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_drc_vehicle_ros_plugin DRCVehicleROSPlugin)
 endif()
 
 ament_package()

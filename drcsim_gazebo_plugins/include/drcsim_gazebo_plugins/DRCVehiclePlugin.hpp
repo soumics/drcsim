@@ -211,6 +211,12 @@ public:
   ///        to its cached limits.
   double GetBrakePedalPercent() const;
 
+  /// \brief Returns whether `Configure()` succeeded (all required joints
+  ///        were resolved). `DRCVehicleROSPlugin` uses this to decide
+  ///        whether to stand up its ROS interface at all, mirroring the
+  ///        original's `try { Load(...) } catch { return; }`.
+  bool IsValidConfig() const;
+
 private:
   double GetGasTorqueMultiplier() const;
   /// \brief Recompute the steering wheel / tire angle ratio from the
