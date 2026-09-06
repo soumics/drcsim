@@ -697,8 +697,10 @@ not happen automatically.
      on `back_bkz` via `atlas/atlas_command` actually moves that joint
      there under real PID control.
 
-8. 🚧 `VRCScoringPlugin` — written on `port/vrc_scoring_plugin`, not yet
-   built/tested by the user. A `WorldPlugin` (~1300 lines across header +
+8. ✅ `VRCScoringPlugin` — **done, 506/506 package checks passing (2
+   pre-existing, unrelated errors in `drcsim_model_resources`'s
+   cpplint/uncrustify result files, not this package), merged into
+   `ros2-jazzy-harmonic`.** A `WorldPlugin` (~1300 lines across header +
    source) that implements the VRC/qualifier scoring algorithms (gate
    crossings, vehicle entry, drill-in-bin, fire hose docking/connection/
    valve) and writes a running score log plus a latched `vrc_score` ROS
@@ -758,6 +760,25 @@ not happen automatically.
      `SetWorldPoseCmd` (no real dynamics involved), checking the latched
      `vrc_score` topic reports `completion_score == 2` after crossing
      both.
+   - **Real bugs the build/test round actually caught**:
+     (1) `sdf::Geometry::BoxShape()` returns a forward-declared `sdf::Box`
+     (only `<gz/sim/components/Collision.hh>` was included) — needed a
+     direct `#include <sdf/Box.hh>` before calling `.Size()` on it, the
+     same gap `VRCPlugin` already hit for the analogous `CylinderShape()`
+     case. (2) **The much more interesting one**: `FindGates()` (and
+     every other `Find*Stuff` variant) reliably found *nothing* when
+     called once, synchronously, from `Configure()` — even though the
+     gate models were declared in the very same SDF world file. Turns out
+     a world-scoped gz-sim system's `Configure()` runs before sibling
+     `<model>` entities from that same file are necessarily constructed;
+     Classic gave the opposite guarantee (`WorldPlugin::Load()` only ever
+     runs once every model in the world file already exists), which is
+     exactly what the original's one-shot `Load()`-time lookup relied on.
+     Fixed by giving `FindArenaStuff()` the same "retry every
+     `PreUpdate` tick until it succeeds" treatment already used for the
+     atlas lookup — **general lesson for any future world-scoped plugin
+     that looks up a sibling SDF model: never assume it exists yet inside
+     `Configure()`, only from `PreUpdate` onward.**
 
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
 DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
@@ -765,7 +786,7 @@ the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
-VRCScoringPlugin 🚧 (written, awaiting build/test).
+VRCScoringPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
