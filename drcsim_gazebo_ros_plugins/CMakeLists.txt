@@ -140,6 +140,28 @@ install(TARGETS VRCPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(AtlasPlugin SHARED src/AtlasPlugin.cpp)
+target_link_libraries(AtlasPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+)
+ament_target_dependencies(AtlasPlugin
+  rclcpp
+  atlas_msgs
+  osrf_msgs
+  geometry_msgs
+  sensor_msgs
+  std_msgs
+)
+install(TARGETS AtlasPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -174,6 +196,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/MultiSenseSLPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/VRCPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/AtlasPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/AtlasPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -298,6 +322,22 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_vrc_plugin VRCPlugin)
+
+  ament_add_gtest(test_atlas_plugin
+    test/test_atlas_plugin.cpp)
+  target_link_libraries(test_atlas_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_atlas_plugin
+    rclcpp
+    atlas_msgs
+    sensor_msgs
+  )
+  target_compile_definitions(test_atlas_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:AtlasPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_atlas_plugin AtlasPlugin)
 endif()
 
 ament_package()
