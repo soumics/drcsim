@@ -780,10 +780,14 @@ not happen automatically.
      that looks up a sibling SDF model: never assume it exists yet inside
      `Configure()`, only from `PreUpdate` onward.**
 
-9. 🚧 `DRCVehicleROSPlugin` — written on `port/drc_vehicle_ros_plugin`, not
-   yet built/tested by the user. A thin ROS wrapper (~430 lines across
-   header + source, by far the smallest Tier 2 plugin) subclassing the
-   already-ported `drcsim_gazebo_plugins::DRCVehiclePlugin`: subscribes to
+9. ✅ `DRCVehicleROSPlugin` — **done, 518/518 package checks passing across
+   both `drcsim_gazebo_plugins` and `drcsim_gazebo_ros_plugins` on the
+   first real attempt (2 pre-existing, unrelated errors in
+   `drcsim_model_resources`'s cpplint/uncrustify result files, not
+   either of these packages), merged into `ros2-jazzy-harmonic`.** A thin
+   ROS wrapper (~430 lines across header + source, by far the smallest
+   Tier 2 plugin) subclassing the already-ported
+   `drcsim_gazebo_plugins::DRCVehiclePlugin`: subscribes to
    `<model>/{hand_wheel,hand_brake,gas_pedal,brake_pedal}/cmd` and
    `<model>/{key,direction}/cmd`, calling straight into the base class's
    existing setters, and periodically publishes the matching `.../state`
@@ -844,7 +848,7 @@ The 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
-VRCScoringPlugin ✅, DRCVehicleROSPlugin 🚧 (written, awaiting build/test).
+VRCScoringPlugin ✅, DRCVehicleROSPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
