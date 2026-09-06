@@ -843,12 +843,90 @@ not happen automatically.
      specifically, not the underlying PID (already covered by
      `DRCVehiclePlugin`'s own test).
 
-**Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-The 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
-`test_ros_plugin`.
+10. ✅ CLI executables (`port/cli_executables`) — the last item in Tier 2.
+    Of the 9 remaining files, 6 were **dropped** after checking the whole
+    repo for any real dependency on them (none found), and 3 were ported
+    as plain ROS 2 nodes (`add_executable`, not gz-sim plugins).
+    - **Dropped, no port**:
+      - `pub_atlas_state.cpp` and `pub_joint_states.cpp` were **byte-for-
+        byte identical files** — a latency-benchmark scratch tool full of
+        commented-out debug code whose one real `publish()` call was
+        itself commented out, so neither ever actually published
+        anything. Confirmed via repo-wide grep: referenced by nothing.
+      - `pub_atlas_joint_trajectory_test.cpp` published to a
+        `joint_trajectory` topic that nothing in this repo (or the
+        dropped `actionlib_server`, checked specifically) ever
+        subscribed to — an orphaned one-off test script. Also used
+        pre-rename joint names (`atlas::back_lbz` style) and a stray
+        `#include <gazebo/math/Quaternion.hh>` it didn't even use.
+      - `gz_model_teleport.cpp` was a standalone CLI using Classic's raw
+        `gazebo::transport` client API to teleport a model by name —
+        gz-sim/Harmonic already exposes this directly via its own
+        `gz service -s /world/<world>/set_pose --reqtype gz.msgs.Pose
+        --reptype gz.msgs.Boolean --req '...'`; porting a bespoke
+        wrapper around a capability the platform now ships built-in
+        would add nothing.
+      - `test_ros_plugin.{hh,cc}` was a **completely empty** template
+        `ModelPlugin` — `Load()` does basic bookkeeping, `UpdateStates()`
+        is an empty function body, no ROS coupling despite the name,
+        registered but never referenced by any world/launch file in the
+        repo. Nothing to port.
+      - `actionlib_server.{h,cpp}` (~740 lines, by far the largest of the
+        9) implements a `WalkDemo` actionlib server driving Atlas via
+        `AtlasSimInterfaceCommand`/`AtlasSimInterfaceState` — exactly the
+        "BDI walk" mechanism `AtlasPlugin`'s own port already confirmed
+        is an inert shim (every behavior function a no-op, `NONE`
+        reported as current behavior, **even in the original
+        codebase**). Porting it would faithfully reproduce a walk-goal
+        interface that could never complete a walk, same as the
+        original — there is no real balance controller anywhere in this
+        codebase to eventually back it with. Its only repo references
+        were two **not-yet-ported** Tier 3 launch files
+        (`drcsim_gazebo/launch/keyboard_teleop.launch`,
+        `drcsim_gazebo/test/vrc_task_1_commander.launch`), which will
+        simply not reference it once those get ported. Its dependencies
+        (`actionlib`, `tf`) were never even declared in this package's
+        (already-ROS2-ified) `package.xml`, meaning this file hasn't
+        actually compiled since the ROS 2 conversion began — further
+        confirming it was already dead weight, not a working feature
+        quietly waiting for its turn.
+    - **Ported, plain ROS 2 nodes** (not gz-sim plugins — ordinary
+      `add_executable` targets, runnable via `ros2 run
+      drcsim_gazebo_ros_plugins <name>`):
+      - `pub_atlas_command.cpp` / `pub_atlas_command_fast.cpp`: drive
+        every Atlas joint through an arbitrary sine-wave trajectory over
+        `atlas/atlas_command`, for exercising/latency-testing
+        `AtlasPlugin`'s command/state round trip. Two genuinely distinct
+        modes preserved from the original: `_fast` computes and
+        publishes synchronously inside the `atlas_state` callback itself
+        (tighter loop, round-trip-time testing); the plain version uses
+        a separate worker thread decoupled from the callback (more
+        representative of an external controller on its own schedule).
+        `boost::thread`/`boost::mutex` → `std::thread`/`std::mutex`;
+        `ros::Time`/`getParam` → `rclcpp::Time`/`declare_parameter`,
+        otherwise a direct translation.
+      - `pub_joint_commands.cpp`: same idea over the lower-level
+        `osrf_msgs/JointCommands` topic (`AtlasPlugin::SetJointCommands`)
+        instead. Per-joint PID gains are read from the same
+        `atlas_controller.gains.<joint>.{p,i,d,i_clamp}` parameters
+        `AtlasPlugin` itself loads (`LoadPIDGainsFromParameter`) — pass
+        a matching `--ros-args --params-file` for these to be anything
+        but zero. **Joint names updated from the original's stale,
+        pre-rename `"atlas::back_lbz"`-style names to the current
+        canonical bare names** (`back_bkz`, etc., matching
+        `AtlasPlugin::Load`'s own preferred names) — functionally
+        harmless either way since `SetJointCommands` matches arrays
+        purely by length, never by the message's `name` field, but the
+        old names would have pointed the parameter lookup at nonexistent
+        parameter keys.
+
+**Tier 2 complete.** All of `drcsim_gazebo_ros_plugins` is now ported:
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
-VRCScoringPlugin ✅, DRCVehicleROSPlugin ✅.
+VRCScoringPlugin ✅, DRCVehicleROSPlugin ✅, CLI executables ✅.
+Next: Tier 3 (`drcsim_gazebo` — launch files, ros2_control config, and
+the real per-joint PID gains YAML that `AtlasPlugin`/`pub_joint_commands`
+both expect but that doesn't exist yet in this workspace).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

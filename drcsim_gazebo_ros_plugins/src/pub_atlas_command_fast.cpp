@@ -14,108 +14,96 @@
  * limitations under the License.
  *
 */
-#include <string>
-#include <vector>
-#include <math.h>
-#include <ros/ros.h>
-#include <ros/subscribe_options.h>
-#include <boost/thread.hpp>
-#include <boost/algorithm/string.hpp>
-#include <atlas_msgs/AtlasState.h>
-#include <atlas_msgs/AtlasCommand.h>
 
-ros::Publisher pubAtlasCommand;
-atlas_msgs::AtlasCommand ac;
-atlas_msgs::AtlasState as;
-boost::mutex mutex;
-ros::Time t0;
-unsigned int numJoints = 30;
+// Diagnostic/demo tool: same sine-wave joint trajectory as
+// pub_atlas_command.cpp, but computed and published synchronously inside
+// the AtlasState subscription callback itself instead of from a separate
+// worker thread -- a tighter, lower-latency response loop, useful for
+// round-trip-time testing against AtlasPlugin's atlas_command/atlas_state
+// topics.
+
+#include <chrono>
+#include <cmath>
+#include <memory>
+#include <mutex>
+#include <thread>
+
+#include <rclcpp/rclcpp.hpp>
+
+#include <atlas_msgs/msg/atlas_command.hpp>
+#include <atlas_msgs/msg/atlas_state.hpp>
+
+namespace
+{
+rclcpp::Node::SharedPtr g_node;
+rclcpp::Publisher<atlas_msgs::msg::AtlasCommand>::SharedPtr g_pubAtlasCommand;
+atlas_msgs::msg::AtlasCommand g_ac;
+atlas_msgs::msg::AtlasState g_as;
+std::mutex g_mutex;
+rclcpp::Time g_t0;
+unsigned int g_numJoints = 30;
 
 void UpdateControl()
 {
-  // simulated controller thread
   {
-    // lock to get data from AtlasState
-    {
-      boost::mutex::scoped_lock lock(mutex);
-      // for testing round trip time
-      ac.header.stamp = as.header.stamp;
-    }
-
-    // simulate working
-    usleep(500);
-
-    // assign arbitrary joint angle targets
-    for (unsigned int i = 0; i < numJoints; i++)
-    {
-      ac.position[i] = 3.2* sin((ros::Time::now() - t0).toSec());
-      ac.k_effort[i] = 255;
-    }
-
-    // Let AtlasPlugin driver know that a response over /atlas/atlas_command
-    // is expected every 5ms; and to wait for AtlasCommand if none has been
-    // received yet. Use up the delay budget if wait is needed.
-    ac.desired_controller_period_ms = 2;
-
-    pubAtlasCommand.publish(ac);
+    // for testing round trip time
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_ac.header.stamp = g_as.header.stamp;
   }
+
+  // simulate working
+  std::this_thread::sleep_for(std::chrono::microseconds(500));
+
+  // assign arbitrary joint angle targets
+  const double elapsed = (g_node->now() - g_t0).seconds();
+  for (unsigned int i = 0; i < g_numJoints; ++i) {
+    g_ac.position[i] = 3.2 * std::sin(elapsed);
+    g_ac.k_effort[i] = 255;
+  }
+
+  // Let AtlasPlugin know that a response over /atlas/atlas_command is
+  // expected every 2ms, and to wait for AtlasCommand if none has been
+  // received yet. Use up the delay budget if wait is needed.
+  g_ac.desired_controller_period_ms = 2;
+
+  g_pubAtlasCommand->publish(g_ac);
 }
 
-void SetAtlasState(const atlas_msgs::AtlasState::ConstPtr &_as)
+void SetAtlasState(const atlas_msgs::msg::AtlasState::SharedPtr _as)
 {
-  static ros::Time startTime = ros::Time::now();
-  t0 = startTime;
+  static const rclcpp::Time startTime = g_node->now();
+  g_t0 = startTime;
 
-  // lock to copy incoming AtlasState
   {
-    boost::mutex::scoped_lock lock(mutex);
-    as = *_as;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_as = *_as;
   }
   UpdateControl();
-
-  // uncomment to simulate state filtering
-  // usleep(1000);
 }
+}  // namespace
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
-  ros::init(argc, argv, "pub_atlas_command");
+  rclcpp::init(argc, argv);
+  g_node = std::make_shared<rclcpp::Node>("pub_atlas_command_fast");
 
-  ros::NodeHandle* rosnode = new ros::NodeHandle();
-
-  // this wait is needed to ensure this ros node has gotten
-  // simulation published /clock message, containing
-  // simulation time.
-  ros::Time last_ros_time_;
-  bool wait = true;
-  while (wait)
-  {
-    last_ros_time_ = ros::Time::now();
-    if (last_ros_time_.toSec() > 0)
-      wait = false;
+  // This wait is needed to ensure this node has gotten a simulation time
+  // update (requires use_sim_time:=true and a /clock bridge).
+  g_t0 = g_node->now();
+  while (rclcpp::ok() && g_node->now().seconds() <= 0) {
   }
 
-  ac.position.resize(numJoints);
-  ac.k_effort.resize(numJoints);
+  g_ac.position.assign(g_numJoints, 0.0);
+  g_ac.k_effort.assign(g_numJoints, 255);
 
-  // default values for AtlasCommand
-  for (unsigned int i = 0; i < numJoints; i++)
-    ac.k_effort[i]     = 255;
+  auto subAtlasState = g_node->create_subscription<atlas_msgs::msg::AtlasState>(
+    "/atlas/atlas_state", rclcpp::QoS(100), SetAtlasState);
 
-  // ros topic subscribtions
-  ros::SubscribeOptions atlasStateSo =
-    ros::SubscribeOptions::create<atlas_msgs::AtlasState>(
-    "/atlas/atlas_state", 100, SetAtlasState,
-    ros::VoidPtr(), rosnode->getCallbackQueue());
-  atlasStateSo.transport_hints =
-    ros::TransportHints().reliable().tcpNoDelay(true);
-  ros::Subscriber subAtlasState = rosnode->subscribe(atlasStateSo);
+  g_pubAtlasCommand = g_node->create_publisher<atlas_msgs::msg::AtlasCommand>(
+    "/atlas/atlas_command", rclcpp::QoS(100).transient_local());
 
-  // ros topic publisher
-  pubAtlasCommand = rosnode->advertise<atlas_msgs::AtlasCommand>(
-    "/atlas/atlas_command", 100, true);
-
-  ros::spin();
+  rclcpp::spin(g_node);
+  rclcpp::shutdown();
 
   return 0;
 }
