@@ -17,6 +17,8 @@
   <depend>gz-common5</depend>
   <depend>gz-math7</depend>
 
+  <depend>drcsim_gazebo_plugins</depend>
+
   <depend>rclcpp</depend>
   <depend>atlas_msgs</depend>
   <depend>osrf_msgs</depend>

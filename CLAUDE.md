@@ -780,13 +780,71 @@ not happen automatically.
      that looks up a sibling SDF model: never assume it exists yet inside
      `Configure()`, only from `PreUpdate` onward.**
 
+9. 🚧 `DRCVehicleROSPlugin` — written on `port/drc_vehicle_ros_plugin`, not
+   yet built/tested by the user. A thin ROS wrapper (~430 lines across
+   header + source, by far the smallest Tier 2 plugin) subclassing the
+   already-ported `drcsim_gazebo_plugins::DRCVehiclePlugin`: subscribes to
+   `<model>/{hand_wheel,hand_brake,gas_pedal,brake_pedal}/cmd` and
+   `<model>/{key,direction}/cmd`, calling straight into the base class's
+   existing setters, and periodically publishes the matching `.../state`
+   topics. Same `VRC_CHEATS_ENABLED` gate as the original: unset (default),
+   this class behaves exactly like a plain `DRCVehiclePlugin` — no ROS
+   node, no topics at all (directly commanding pedals/wheel over ROS,
+   bypassing physical actuation by the robot, is a "cheat").
+   - **First cross-package plugin subclassing in this migration** —
+     `DRCVehiclePlugin` lives in `drcsim_gazebo_plugins`, a different,
+     already-"done" package. Previously nothing needed to *link against*
+     a plugin package's library, only load its `.so` directly via
+     gz-sim, so `drcsim_gazebo_plugins/CMakeLists.txt` had no CMake
+     target export at all. Added one (`ament_export_targets`,
+     `install(... EXPORT ...)`, `target_include_directories(... PUBLIC
+     $<BUILD_INTERFACE:...> $<INSTALL_INTERFACE:include>)`) so
+     `drcsim_gazebo_ros_plugins` can `find_package(drcsim_gazebo_plugins)`
+     and link `drcsim_gazebo_plugins::DRCVehiclePlugin` properly. **Build
+     note for the next round**: since this changes an already-built
+     package's CMakeLists.txt/headers, `colcon build` needs to rebuild
+     `drcsim_gazebo_plugins` too, not just `drcsim_gazebo_ros_plugins` —
+     use `--packages-up-to drcsim_gazebo_ros_plugins` (or select both
+     packages explicitly) for this round, not a bare `--packages-select
+     drcsim_gazebo_ros_plugins`.
+   - **Added `DRCVehiclePlugin::IsValidConfig()`** (previously private,
+     no accessor) so this subclass can replicate the original's `try {
+     DRCVehiclePlugin::Load(...) } catch (...) { return; }` — skip
+     standing up the ROS interface entirely if the base plugin failed to
+     configure. gz-sim doesn't use exceptions for this class of failure
+     (logs via `gzerr` and returns instead — see `DRCVehiclePlugin`'s own
+     design notes), so a boolean getter is the direct equivalent.
+   - **Mutex added around the base class's plain cached command fields**
+     (`handWheelCmd`, `gasPedalCmd`, `directionState`, ...) that the
+     original left genuinely (if benignly) racy: ROS's callback-queue
+     thread wrote these `double`/enum members directly, Classic's physics
+     thread read them in `OnUpdate()`, no lock either side, tolerated
+     because a torn `double` read/write is harmless in practice. Rather
+     than preserve that race, every ROS callback and the `PreUpdate` call
+     into the base class are wrapped in one `cmdMutex` here, matching
+     this migration's established pattern (`AtlasPlugin`'s
+     `controlMutex`, etc.) — a case of "no pending-action queue needed,
+     but still worth a mutex" like `AtlasPlugin`, not because of any
+     ECM access (there is none in the callbacks) but because of plain
+     shared-state access, which the ECM-focused rule doesn't itself cover
+     but the same underlying hazard applies to.
+   - `ros::CallbackQueue` + polling thread replaced with the standard
+     `rclcpp::executors::SingleThreadedExecutor` on its own thread,
+     matching every other ROS-coupled plugin in this migration.
+   - Test coverage: reuses `drcsim_gazebo_plugins`' own `vehicle_test.sdf`
+     vehicle model (11 joints), swapping in `DRCVehicleROSPlugin` as the
+     model's plugin with `VRC_CHEATS_ENABLED=1`; publishes full gas via
+     `<model>/gas_pedal/cmd` and checks `<model>/gas_pedal/state`
+     approaches 1.0 (fully pressed) — this exercises the ROS command path
+     specifically, not the underlying PID (already covered by
+     `DRCVehiclePlugin`'s own test).
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
-the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
+The 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
 `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
-VRCScoringPlugin ✅.
+VRCScoringPlugin ✅, DRCVehicleROSPlugin 🚧 (written, awaiting build/test).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
@@ -826,12 +884,17 @@ riskiest file in this whole migration). Both now build.
   sufficient with the user.
 - `DRCVehiclePlugin`'s public API (`SetVehicleState`, `SetHandWheelState`,
   `GetKeyState`, etc.) is kept as **plain C++ methods**, not a gz-transport
-  interface. The only real consumer, `DRCVehicleROSPlugin` (Tier 2, not yet
-  ported), **subclasses** `DRCVehiclePlugin` (`class DRCVehicleROSPlugin: public
-  DRCVehiclePlugin`) and calls these methods directly via normal C++ inheritance —
-  confirmed via repo-wide grep before deciding this (an earlier assumption that a
-  *separate* plugin held a raw pointer to this one was wrong; don't reintroduce a
-  transport-based design for this).
+  interface. The only real consumer, `DRCVehicleROSPlugin` (Tier 2, ✅
+  ported — see its entry above), **subclasses** `DRCVehiclePlugin`
+  (`class DRCVehicleROSPlugin: public DRCVehiclePlugin`) and calls these
+  methods directly via normal C++ inheritance — confirmed via repo-wide
+  grep before deciding this (an earlier assumption that a *separate*
+  plugin held a raw pointer to this one was wrong; don't reintroduce a
+  transport-based design for this). That subclassing is cross-package
+  (`DRCVehicleROSPlugin` lives in `drcsim_gazebo_ros_plugins`), which
+  required adding a real CMake target export to this package — see
+  `DRCVehicleROSPlugin`'s entry for details — and a small
+  `IsValidConfig()` accessor.
 - `Set*Limits` methods now only update the plugin's *cached* limits, not physics
   joint limits (gz-sim has no well-supported runtime joint-limit mutation API, and
   grep confirmed nothing in the repo calls the Set*Limits methods anyway).
