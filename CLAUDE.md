@@ -697,12 +697,75 @@ not happen automatically.
      on `back_bkz` via `atlas/atlas_command` actually moves that joint
      there under real PID control.
 
+8. 🚧 `VRCScoringPlugin` — written on `port/vrc_scoring_plugin`, not yet
+   built/tested by the user. A `WorldPlugin` (~1300 lines across header +
+   source) that implements the VRC/qualifier scoring algorithms (gate
+   crossings, vehicle entry, drill-in-bin, fire hose docking/connection/
+   valve) and writes a running score log plus a latched `vrc_score` ROS
+   topic. By far the simplest Tier 2 plugin so far — it only ever *reads*
+   simulation state (poses, velocities, joint positions, collision
+   geometry) and publishes; it never mutates the ECM except once, to flip
+   on velocity checks for Atlas's head link.
+   - **No thread, no mutex, unlike every plugin since `VRCPlugin`.** The
+     original defers most setup to a background thread that polls for the
+     `atlas` model once a second and blocks until it appears. That
+     defensive wait-for-atlas behavior is preserved, but implemented by
+     retrying the lookup once per `ISystemPreUpdate` tick instead of a
+     sleeping thread — this plugin has no incoming ROS callbacks at all
+     (only an outgoing publisher), so there's no cross-thread ECM access
+     to guard against and no pending-action queue is needed, the first
+     time that's been true since `SandiaHandPlugin`/`MultiSenseSLPlugin`.
+     `ISystemPreUpdate` is used for exactly one thing (the one-time
+     atlas-found transition, which needs a mutable ECM for
+     `Link::EnableVelocityChecks`); the real per-tick scoring work is all
+     `ISystemPostUpdate`, against a `const EntityComponentManager`.
+   - **Bounding boxes computed by hand from box-shaped collision
+     geometry** (`components::CollisionElement`, the same component
+     `VRCPlugin::CheckThreadStart` reads for the fire hose coupler's
+     cylinder) rather than the newer `Link::WorldAxisAlignedBox`/
+     `EnableBoundingBoxChecks` API, which wasn't verified available in
+     this workspace's Harmonic-era gz-sim release. Every real caller here
+     (the VRC "gate" models, the qualifier-2 "bin" model) uses box
+     collisions exclusively, so this covers all actual usage.
+   - **Fire hose "aligned" detection**: the original checks
+     `standpipe->GetChildJointsLinks()` for a non-empty list, true once
+     `VRCPlugin` creates its Classic screw joint. Since `VRCPlugin`'s own
+     port replaces that screw joint with a `components::DetachableJoint`
+     (a fixed weld — see `VRCPlugin.hpp`'s design notes), this plugin
+     detects the same event by scanning the ECM for a `DetachableJoint`
+     whose `parentLink` is the standpipe link. Same downstream
+     consequence as noted for `VRCPlugin`: the connection can't be
+     "unscrewed", so `CheckHoseAligned` will never see a transition back
+     to unaligned in practice.
+   - **Vehicle seat link name changed on purpose**: the original looks up
+     `"polaris_ranger_ev::chassis"` — Classic's double-colon nested-model
+     deep-name lookup, which has no equivalent in gz-sim's ECS
+     (`Model::LinkByName` only searches immediate children). This port
+     looks up model `"drc_vehicle"` / link `"chassis"` instead, matching
+     the naming `VRCPlugin`'s own port already assumes for the same
+     vehicle — both plugins have to agree on how to find it, and only one
+     of the two naming schemes can work under gz-sim.
+   - `boost::filesystem`/`boost::lexical_cast`/`boost::algorithm::string`
+     replaced with `std::filesystem` and small hand-rolled string parsing
+     (gate names are a fixed, simple `"gate_<N>"`/`"vehiclegate_<N>"`
+     format, not worth a string-split library for).
+   - The original's `PubMultiQueue`/`PubQueue` machinery (to avoid
+     blocking Classic's single update thread on a ROS 1 publish call)
+     is dropped entirely — rclcpp publishers don't block the caller.
+   - Test coverage: a minimal two-gate `qual_task_1` world with gravity
+     zeroed out, driven through both gates by a `TestFixture::OnPreUpdate`
+     callback that teleports the stand-in "atlas" model via
+     `SetWorldPoseCmd` (no real dynamics involved), checking the latched
+     `vrc_score` topic reports `completion_score == 2` after crossing
+     both.
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-VRCScoringPlugin, DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` —
-see below), then the 8 CLI executables + `actionlib_server` +
-`gz_model_teleport` + `test_ros_plugin`.
+DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
+the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
+`test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅.
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
+VRCScoringPlugin 🚧 (written, awaiting build/test).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

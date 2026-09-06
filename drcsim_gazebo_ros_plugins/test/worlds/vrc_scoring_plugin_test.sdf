@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="qual_task_1">
+    <gravity>0 0 0</gravity>
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <!-- Minimal stand-in for atlas: a single free-floating "head" link
+         (gravity is zeroed out for this world so the test can drive it
+         around by hand via TestFixture::OnPreUpdate, rather than fighting
+         real dynamics). -->
+    <model name="atlas">
+      <pose>-1 0 0 0 0 0</pose>
+      <static>false</static>
+      <link name="head">
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+    </model>
+
+    <!-- Two VRC-style pedestrian gates, named per VRCScoringPlugin's
+         "gate_<N>" convention, each a single box collision wide enough
+         (2m in Y) for the test to walk straight through the middle. -->
+    <model name="gate_1">
+      <static>true</static>
+      <pose>0 0 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.2 2.0 2.0</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <model name="gate_2">
+      <static>true</static>
+      <pose>2 0 1 0 0 0</pose>
+      <link name="link">
+        <collision name="collision">
+          <geometry>
+            <box>
+              <size>0.2 2.0 2.0</size>
+            </box>
+          </geometry>
+        </collision>
+      </link>
+    </model>
+
+    <plugin filename="VRCScoringPlugin" name="drcsim_gazebo_ros_plugins::VRCScoringPlugin">
+      <score_file>/tmp/vrc_scoring_plugin_test.score</score_file>
+    </plugin>
+  </world>
+</sdf>
