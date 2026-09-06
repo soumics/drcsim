@@ -112,8 +112,8 @@ namespace drcsim_gazebo_ros_plugins
 ///   from any thread and don't block the caller, so that machinery is
 ///   dropped entirely -- `pubScore->publish(...)` is called straight from
 ///   `PostUpdate`.
-class VRCScoringPlugin :
-  public gz::sim::System,
+class VRCScoringPlugin
+  : public gz::sim::System,
   public gz::sim::ISystemConfigure,
   public gz::sim::ISystemPreUpdate,
   public gz::sim::ISystemPostUpdate

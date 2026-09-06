@@ -35,6 +35,8 @@
 #include <gz/sim/components/Collision.hh>
 #include <gz/sim/components/DetachableJoint.hh>
 
+#include <sdf/Box.hh>
+
 #include <builtin_interfaces/msg/time.hpp>
 
 using DoubleSeconds = std::chrono::duration<double>;
@@ -153,8 +155,8 @@ void VRCScoringPlugin::Configure(
   this->runStartTimeWall = std::chrono::system_clock::now();
   const std::time_t timeSec = std::chrono::system_clock::to_time_t(this->runStartTimeWall);
   this->scoreFileStream << "# Started at: " << std::fixed << std::setprecision(3)
-    << DoubleSeconds(this->runStartTimeWall.time_since_epoch()).count()
-    << "; " << std::ctime(&timeSec);
+                        << DoubleSeconds(this->runStartTimeWall.time_since_epoch()).count()
+                        << "; " << std::ctime(&timeSec);
   this->scoreFileStream << "# Format: " << std::endl;
   this->scoreFileStream << "# wallTime(sec),simTime(sec),"
     "wallTimeElapsed(sec),simTimeElapsed(sec),completionScore(count),"
@@ -701,12 +703,12 @@ void VRCScoringPlugin::WriteScore(
   const auto runElapsedTimeWall = _wallTime - this->runStartTimeWall;
 
   this->scoreFileStream << std::fixed << std::setprecision(3)
-    << DoubleSeconds(runElapsedTimeWall).count() << ","
-    << DoubleSeconds(_simTime).count() << ","
-    << DoubleSeconds(elapsedTimeWall).count() << ","
-    << DoubleSeconds(elapsedTimeSim).count() << ","
-    << this->completionScore << ","
-    << this->falls << ",\"" << _msg << "\"" << std::endl;
+                        << DoubleSeconds(runElapsedTimeWall).count() << ","
+                        << DoubleSeconds(_simTime).count() << ","
+                        << DoubleSeconds(elapsedTimeWall).count() << ","
+                        << DoubleSeconds(elapsedTimeSim).count() << ","
+                        << this->completionScore << ","
+                        << this->falls << ",\"" << _msg << "\"" << std::endl;
 
   // Also publish via ROS.
   if (this->pubScore) {
