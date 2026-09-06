@@ -60,6 +60,17 @@ namespace drcsim_gazebo_ros_plugins
 ///   no incoming ROS callbacks in this plugin (it only ever publishes),
 ///   so unlike `VRCPlugin`/`AtlasPlugin` there is no cross-thread ECM
 ///   access to guard against and no pending-action queue is needed.
+/// - **The arena-specific lookups (`FindGates`/`FindQual2Stuff`/
+///   `FindVRC1Stuff`/`FindVRC3Stuff`) need the same "retry every tick"
+///   treatment as atlas, and for the same underlying reason** -- confirmed
+///   empirically (a test world with the plugin and its gate models
+///   declared side-by-side in the same SDF file reliably found zero
+///   gates when this was first tried directly in `Configure()`). Unlike
+///   Classic, where `WorldPlugin::Load()` is only ever called once every
+///   `<model>` in the SDF file has been fully constructed, a world-scoped
+///   gz-sim system's `Configure()` runs before sibling models from the
+///   same SDF file are necessarily present in the ECM. See
+///   `FindArenaStuff`'s doc comment.
 /// - **`ISystemPreUpdate` is used for exactly one thing**: the one-time
 ///   transition from "atlas not found yet" to "atlas found", which needs
 ///   a mutable `EntityComponentManager` to call `Link::EnableVelocityChecks`
@@ -194,8 +205,19 @@ public:
     bool passed{false};
   };
 
+  /// \brief Dispatch to the right `Find*Stuff`/`FindGates` for `worldType`.
+  /// Unlike the original (where `WorldPlugin::Load()` is only ever called
+  /// once every model in the SDF world file already exists), this can't
+  /// be done once synchronously in `Configure()`: a world-scoped system's
+  /// `Configure()` runs before sibling `<model>` entities from the same
+  /// SDF file are necessarily constructed, so this is called from
+  /// `PreUpdate` and retried every tick until it succeeds.
+  /// \return true once everything the current worldType needs was found.
+  bool FindArenaStuff(gz::sim::EntityComponentManager & _ecm);
+
   /// \brief Try to find the `atlas` model and its `head` link. On success,
   /// enables velocity checks on the head link (needed by `CheckFall`).
+  /// Retried from `PreUpdate` for the same reason as `FindArenaStuff`.
   /// \return true once atlas has been found.
   bool FindAtlas(gz::sim::EntityComponentManager & _ecm);
 
@@ -286,9 +308,15 @@ public:
   /// \brief Which type of world we're scoring.
   WorldType worldType{WorldType::QUAL_1};
 
-  /// \brief True once Configure() has successfully found everything the
-  /// current worldType needs (other than atlas).
+  /// \brief True once Configure() has recognized the world name and
+  /// opened the score file. Does *not* mean the arena-specific entities
+  /// (gates, bin, vehicle, hose...) have been found yet -- see
+  /// `arenaReady`.
   bool validConfig{false};
+
+  /// \brief True once `FindArenaStuff` has succeeded (see its doc
+  /// comment for why this can't happen inside `Configure()`).
+  bool arenaReady{false};
 
   /// \brief True once atlas has been found and the score file/ROS
   /// publisher have been set up.

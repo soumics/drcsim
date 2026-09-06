@@ -98,34 +98,6 @@ void VRCScoringPlugin::Configure(
     return;
   }
 
-  bool found = false;
-  switch (this->worldType) {
-    case WorldType::QUAL_1:
-      found = this->FindGates(_ecm);
-      break;
-    case WorldType::QUAL_2:
-      found = this->FindQual2Stuff(_ecm);
-      break;
-    case WorldType::QUAL_3:
-      found = this->FindGates(_ecm);
-      break;
-    case WorldType::QUAL_4:
-      found = this->FindGates(_ecm);
-      break;
-    case WorldType::VRC_1:
-      found = this->FindVRC1Stuff(_ecm);
-      break;
-    case WorldType::VRC_2:
-      found = this->FindGates(_ecm);
-      break;
-    case WorldType::VRC_3:
-      found = this->FindVRC3Stuff(_ecm);
-      break;
-  }
-  if (!found) {
-    return;
-  }
-
   if (_sdf->HasElement("fall_accel_threshold")) {
     this->fallAccelThreshold = _sdf->Get<double>("fall_accel_threshold");
   }
@@ -164,13 +136,10 @@ void VRCScoringPlugin::Configure(
 
   this->validConfig = true;
 
-  // Atlas is usually already present by the time a WORLD plugin is
-  // configured, but may not be (e.g. spawned afterwards) -- PreUpdate
-  // keeps retrying this until it succeeds.
-  if (this->FindAtlas(_ecm)) {
-    this->CompleteDeferredLoad();
-    this->atlasReady = true;
-  }
+  // Sibling <model> entities declared in the same SDF world file (gates,
+  // atlas, ...) are not guaranteed to exist yet at this point -- see
+  // FindArenaStuff's doc comment. PreUpdate retries both that and the
+  // atlas lookup, every tick, until each succeeds.
 }
 
 /////////////////////////////////////////////////
@@ -180,9 +149,40 @@ void VRCScoringPlugin::PreUpdate(
   if (!this->validConfig || this->atlasReady) {
     return;
   }
+
+  if (!this->arenaReady) {
+    if (!this->FindArenaStuff(_ecm)) {
+      return;
+    }
+    this->arenaReady = true;
+  }
+
   if (this->FindAtlas(_ecm)) {
     this->CompleteDeferredLoad();
     this->atlasReady = true;
+  }
+}
+
+/////////////////////////////////////////////////
+bool VRCScoringPlugin::FindArenaStuff(gz::sim::EntityComponentManager & _ecm)
+{
+  switch (this->worldType) {
+    case WorldType::QUAL_1:
+      return this->FindGates(_ecm);
+    case WorldType::QUAL_2:
+      return this->FindQual2Stuff(_ecm);
+    case WorldType::QUAL_3:
+      return this->FindGates(_ecm);
+    case WorldType::QUAL_4:
+      return this->FindGates(_ecm);
+    case WorldType::VRC_1:
+      return this->FindVRC1Stuff(_ecm);
+    case WorldType::VRC_2:
+      return this->FindGates(_ecm);
+    case WorldType::VRC_3:
+      return this->FindVRC3Stuff(_ecm);
+    default:
+      return false;
   }
 }
 
