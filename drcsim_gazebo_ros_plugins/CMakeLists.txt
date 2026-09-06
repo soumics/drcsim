@@ -162,6 +162,25 @@ install(TARGETS AtlasPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(VRCScoringPlugin SHARED src/VRCScoringPlugin.cpp)
+target_link_libraries(VRCScoringPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-transport13::gz-transport13
+  gz-msgs10::gz-msgs10
+  gz-common5::gz-common5
+  gz-math7::gz-math7
+)
+ament_target_dependencies(VRCScoringPlugin
+  rclcpp
+  atlas_msgs
+)
+install(TARGETS VRCScoringPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -198,6 +217,8 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/AtlasPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/AtlasPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/VRCScoringPlugin.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCScoringPlugin.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
@@ -338,6 +359,21 @@ if(BUILD_TESTING)
     "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
   )
   add_dependencies(test_atlas_plugin AtlasPlugin)
+
+  ament_add_gtest(test_vrc_scoring_plugin
+    test/test_vrc_scoring_plugin.cpp)
+  target_link_libraries(test_vrc_scoring_plugin
+    gz-sim8::gz-sim8
+  )
+  ament_target_dependencies(test_vrc_scoring_plugin
+    rclcpp
+    atlas_msgs
+  )
+  target_compile_definitions(test_vrc_scoring_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:VRCScoringPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_vrc_scoring_plugin VRCScoringPlugin)
 endif()
 
 ament_package()
