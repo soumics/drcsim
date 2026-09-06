@@ -88,7 +88,7 @@ TEST(AtlasPluginTest, StandsUpRosInterfaceAndPidsJointToTarget)
     [&](const sensor_msgs::msg::JointState::SharedPtr _msg)
     {
       if (!_msg->name.empty() && _msg->name[0] == "back_bkz" &&
-        !_msg->position.empty())
+      !_msg->position.empty())
       {
         backBkzPosition = _msg->position[0];
         gotJointState = true;

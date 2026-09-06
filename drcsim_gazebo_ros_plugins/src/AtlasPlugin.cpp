@@ -326,7 +326,7 @@ void AtlasPlugin::Load(gz::sim::EntityComponentManager & _ecm)
   // Force-create ContactSensorData on foot collisions for the debug contact
   // topics (see the class-level design note).
   for (const auto & pair : std::vector<std::pair<std::string, std::vector<gz::sim::Entity> *>>{
-      {"l_foot", &this->lFootCollisions}, {"r_foot", &this->rFootCollisions}})
+    {"l_foot", &this->lFootCollisions}, {"r_foot", &this->rFootCollisions}})
   {
     const gz::sim::Entity footLink = this->model.LinkByName(_ecm, pair.first);
     if (footLink == gz::sim::kNullEntity) {
