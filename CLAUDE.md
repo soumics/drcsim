@@ -589,9 +589,11 @@ not happen automatically.
      `AtlasPlugin` given how much startup-parameter machinery it likely
      has too.
 
-7. 🔶 `AtlasPlugin` — **ported on `port/atlas_plugin`, not yet built/tested
-   by the user. The largest single file in this migration** (~3500 lines
-   across header + source, narrowly beating `VRCPlugin`) — the 1kHz joint
+7. ✅ `AtlasPlugin` — **done, 130/130 package checks passing on the first
+   real correction round (only 2 trivial uncrustify indentation nits, no
+   gtest failures at all), merged into `ros2-jazzy-harmonic`. The largest
+   single file in this migration** (~3500 lines across header + source,
+   narrowly beating `VRCPlugin`) — the 1kHz joint
    PID controller that actually holds the robot up, fed from
    `atlas/atlas_command`, plus a BDI-behavior-library ("AtlasSimInterface")
    integration fed from `atlas/atlas_sim_interface_command`, blended
@@ -700,10 +702,7 @@ VRCScoringPlugin, DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` —
 see below), then the 8 CLI executables + `actionlib_server` +
 `gz_model_teleport` + `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin 🔶
-(ported, awaiting first build/test round — expect several correction
-rounds given its size and how much speculative gz-sim API usage it
-needed).
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
