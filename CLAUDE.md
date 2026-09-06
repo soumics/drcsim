@@ -589,14 +589,121 @@ not happen automatically.
      `AtlasPlugin` given how much startup-parameter machinery it likely
      has too.
 
+7. 🔶 `AtlasPlugin` — **ported on `port/atlas_plugin`, not yet built/tested
+   by the user. The largest single file in this migration** (~3500 lines
+   across header + source, narrowly beating `VRCPlugin`) — the 1kHz joint
+   PID controller that actually holds the robot up, fed from
+   `atlas/atlas_command`, plus a BDI-behavior-library ("AtlasSimInterface")
+   integration fed from `atlas/atlas_sim_interface_command`, blended
+   per-joint by a `k_effort` weight. **This is what was missing the whole
+   time `VRCPlugin` existed without it** — VRCPlugin only ever *published*
+   `AtlasCommand`/pinned the pelvis; nothing consumed those messages or
+   drove the other ~28 joints, so a spawned Atlas had nothing holding it
+   up and collapsed exactly as the user observed.
+   - **The single biggest finding of this entire migration**: the
+     "proprietary AtlasSimInterface, likely won't link against a modern
+     toolchain" risk flagged in the very first planning pass **does not
+     exist**. All three bundled versions
+     (`drcsim_model_resources/AtlasSimInterface_{1.1.1,2.10.2,3.0.2}/src/
+     AtlasSimInterface.cc`) are byte-for-byte identical (confirmed via
+     `diff`), Apache-2.0-licensed OSRF stub code that prints `"Warning:
+     Using Atlas Shim interface. Atlas will be more or less
+     uncontrolled"` on load. Every "BDI behavior" function
+     (`set_desired_behavior`, `get_current_behavior`, walk/step/stand
+     param processing) is a no-op returning only `NO_ERRORS`;
+     `process_control_input()` — the one function that does anything — is
+     itself just a joint PID identical in shape to `AtlasPlugin`'s own
+     main controller. There is no real Boston Dynamics balance controller
+     anywhere in this codebase, no proprietary binary, no ABI risk. Dropped
+     the entire external-library integration (`create_atlas_sim_interface
+     ()`, the version-conditional `#include "AtlasSimInterface_X.Y.Z/
+     AtlasSimInterface.h"`, the `AtlasControlInput/AtlasControlOutput/
+     AtlasRobotState` C-struct plumbing) and inlined the shim's exact PID
+     formula as `UpdateAtlasSimInterface()`, operating directly on
+     `atlas_msgs` ROS types.
+   - **Two corollaries of that same discovery, both changing behavior
+     deliberately**: (1) the shim's `get_desired_behavior()`/
+     `get_current_behavior()` never write their output-string reference
+     parameter, so the original's `behaviorMap[behaviorStr]` lookup was
+     always against an empty key — `asiState.current_behavior` was
+     **always** silently reported as `NONE` in the original too,
+     regardless of what was requested. Not preserved: this port just sets
+     `current_behavior = desired_behavior` directly (same judgment already
+     applied once, to `RobotiqHandPlugin`'s copy-paste `VerifyCommand()`
+     bug — faithfully reproducing an always-wrong report serves no one).
+     (2) The shim's output struct's rich per-behavior feedback fields
+     (stand/step/walk/manipulate feedback) were only ever zero-initialized
+     and never subsequently written by the shim, so they were already
+     permanently inert in the original's real, shim-backed build — this
+     port leaves them at their message-default zeros rather than building
+     unused plumbing to compute values nothing upstream ever populated.
+   - **Joint damping mutation**: same gap as `DRCVehiclePlugin`/
+     `SandiaHandPlugin`/`RobotiqHandPlugin` — every `Joint::SetDamping()`
+     call (`SetAtlasCommand`, the `set_joint_damping` service,
+     `SetExperimentalDampingPID`, `UpdatePIDControl`'s cfm-damping
+     pass-through) now only updates a cached value; the surrounding
+     control-law math (the `kpVelocityDampingEffort` clamp-shift term)
+     is pure arithmetic, preserved exactly since it never depended on the
+     mutation reaching physics.
+   - **Wrist/ankle force-torque "sensors"**: Classic's `Joint::
+     GetForceTorque(0u)` gave a `body1`/`body2` two-body wrench pair;
+     gz-sim's `Joint::TransmittedWrench()` (needs `EnableTransmittedWrench
+     Check()`, same pattern as `EnablePositionCheck()`) gives only one
+     force/torque pair, in the **joint frame**, at the joint origin —
+     used directly as the `body2` analog without transforming back to the
+     child-link frame Classic used (an approximation, exact only when the
+     joint frame coincides with the child link's).
+   - **Foot contact sensors** (`atlas/debug/{l,r}_foot_contact`,
+     cheats-gated): the same force-created `components::
+     ContactSensorData` technique already established for
+     `ContactModelPlugin`/`SandiaHandPlugin`.
+   - **Controller synchronization delay** (a lockstep mechanism letting an
+     external controller ask the sim to wait, via a real-time delay
+     budget, for a fresh `AtlasCommand`): pure `boost::condition`/
+     `boost::mutex` logic with no gz-sim-specific dependency at all —
+     ported 1:1 onto `std::condition_variable`/`std::mutex`. Off by
+     default.
+   - **`jointCommands`/`ZeroJointCommands()` dropped**: dead state in the
+     original — `SetJointCommands()` (the `atlas/joint_commands` callback)
+     writes straight into `atlasCommand`/`atlasState` and never touches
+     the separately-declared `jointCommands` member, which only its own
+     zeroing function ever wrote.
+   - **Mutex discipline**: unlike every plugin before it, this one has
+     *two* mutexes (`controlMutex` for PID/command state, `asiMutex` for
+     the BDI-shim state) that some methods need data from both sides of.
+     Established a hard rule while writing this: **never hold both
+     mutexes at once** — where a value from the other side is needed
+     (e.g. `UpdateAtlasSimInterface()` needs `atlasState.k_effort`),
+     snapshot it under a short-lived, independent lock, release it, then
+     take the other mutex — rather than nesting, which would create a
+     lock-ordering deadlock risk against any other call site that happens
+     to acquire the same two mutexes in the opposite order (which,
+     mirroring the original's own already-non-nested structure in
+     `SetASICommand`/`ResetControls`, is exactly what a couple of ROS
+     callbacks do).
+   - Unlike `VRCPlugin`, **no pending-action queue was needed at all** —
+     every one of this plugin's ROS callbacks (`SetAtlasCommand`,
+     `SetJointCommands`, `SetASICommand`, `OnRobotMode`, `Tic`,
+     `SetExperimentalDampingPID`, and all four services) only ever updates
+     a mutex-protected cached value; none of them create/destroy entities
+     or teleport a model, so the same safe pattern `SandiaHandPlugin`'s
+     `SetJointCommands` already used sufficed everywhere here too.
+   - Test coverage: a 30-joint test world (leg/arm/spine kinematic chains
+     built with a small Python generator script, matching the pattern
+     already used for `IRobotHandPlugin`/`RobotiqHandPlugin`), confirming
+     the ROS interface stands up and that commanding a nonzero position
+     on `back_bkz` via `atlas/atlas_command` actually moves that joint
+     there under real PID control.
+
 **Remaining Tier 2 plugins** (each its own `port/<name>` branch):
-VRCScoringPlugin, AtlasPlugin/V3/V4/V5 (biggest/riskiest of what's left —
-ties into the AtlasSimInterface shim libs from `drcsim_model_resources`),
-DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` — see below), then
-the 8 CLI executables + `actionlib_server` + `gz_model_teleport` +
-`test_ros_plugin`.
+VRCScoringPlugin, DRCVehicleROSPlugin (**subclasses** `DRCVehiclePlugin` —
+see below), then the 8 CLI executables + `actionlib_server` +
+`gz_model_teleport` + `test_ros_plugin`.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
-RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅.
+RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin 🔶
+(ported, awaiting first build/test round — expect several correction
+rounds given its size and how much speculative gz-sim API usage it
+needed).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

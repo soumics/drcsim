@@ -1,0 +1,556 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="atlas_plugin_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <model name="atlas">
+      <pose>0 0 1 0 0 0</pose>
+      <static>false</static>
+
+      <link name="pelvis">
+        <inertial>
+          <mass>15.0</mass>
+          <inertia><ixx>0.3</ixx><iyy>0.3</iyy><izz>0.3</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="anchor" type="fixed">
+        <parent>world</parent>
+        <child>pelvis</child>
+      </joint>
+      <link name="back_bkz_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="back_bkz" type="revolute">
+        <parent>pelvis</parent>
+        <child>back_bkz_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="back_bky_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="back_bky" type="revolute">
+        <parent>back_bkz_link</parent>
+        <child>back_bky_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="back_bkx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="back_bkx" type="revolute">
+        <parent>back_bky_link</parent>
+        <child>back_bkx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="neck_ry_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="neck_ry" type="revolute">
+        <parent>back_bkx_link</parent>
+        <child>neck_ry_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_hpz_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_hpz" type="revolute">
+        <parent>pelvis</parent>
+        <child>l_leg_hpz_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_hpx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_hpx" type="revolute">
+        <parent>l_leg_hpz_link</parent>
+        <child>l_leg_hpx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_hpy_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_hpy" type="revolute">
+        <parent>l_leg_hpx_link</parent>
+        <child>l_leg_hpy_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_kny_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_kny" type="revolute">
+        <parent>l_leg_hpy_link</parent>
+        <child>l_leg_kny_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_aky_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_aky" type="revolute">
+        <parent>l_leg_kny_link</parent>
+        <child>l_leg_aky_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_leg_akx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_leg_akx" type="revolute">
+        <parent>l_leg_aky_link</parent>
+        <child>l_leg_akx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_foot">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+        <collision name="l_foot_collision">
+          <geometry><box><size>0.1 0.1 0.05</size></box></geometry>
+        </collision>
+      </link>
+      <joint name="l_foot_fixed" type="fixed">
+        <parent>l_leg_akx_link</parent>
+        <child>l_foot</child>
+      </joint>
+      <link name="l_foot_contact_sensor_col_holder"/>
+      <link name="r_leg_hpz_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_hpz" type="revolute">
+        <parent>pelvis</parent>
+        <child>r_leg_hpz_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_leg_hpx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_hpx" type="revolute">
+        <parent>r_leg_hpz_link</parent>
+        <child>r_leg_hpx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_leg_hpy_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_hpy" type="revolute">
+        <parent>r_leg_hpx_link</parent>
+        <child>r_leg_hpy_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_leg_kny_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_kny" type="revolute">
+        <parent>r_leg_hpy_link</parent>
+        <child>r_leg_kny_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_leg_aky_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_aky" type="revolute">
+        <parent>r_leg_kny_link</parent>
+        <child>r_leg_aky_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_leg_akx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_leg_akx" type="revolute">
+        <parent>r_leg_aky_link</parent>
+        <child>r_leg_akx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_foot">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+        <collision name="r_foot_collision">
+          <geometry><box><size>0.1 0.1 0.05</size></box></geometry>
+        </collision>
+      </link>
+      <joint name="r_foot_fixed" type="fixed">
+        <parent>r_leg_akx_link</parent>
+        <child>r_foot</child>
+      </joint>
+      <link name="l_arm_shz_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_shz" type="revolute">
+        <parent>pelvis</parent>
+        <child>l_arm_shz_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_shx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_shx" type="revolute">
+        <parent>l_arm_shz_link</parent>
+        <child>l_arm_shx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_ely_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_ely" type="revolute">
+        <parent>l_arm_shx_link</parent>
+        <child>l_arm_ely_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_elx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_elx" type="revolute">
+        <parent>l_arm_ely_link</parent>
+        <child>l_arm_elx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_wry_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_wry" type="revolute">
+        <parent>l_arm_elx_link</parent>
+        <child>l_arm_wry_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_wrx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_wrx" type="revolute">
+        <parent>l_arm_wry_link</parent>
+        <child>l_arm_wrx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_arm_wry2_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_arm_wry2" type="revolute">
+        <parent>l_arm_wrx_link</parent>
+        <child>l_arm_wry2_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="l_hand">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="l_hand_fixed" type="fixed">
+        <parent>l_arm_wry2_link</parent>
+        <child>l_hand</child>
+      </joint>
+      <link name="r_arm_shz_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_shz" type="revolute">
+        <parent>pelvis</parent>
+        <child>r_arm_shz_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_shx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_shx" type="revolute">
+        <parent>r_arm_shz_link</parent>
+        <child>r_arm_shx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_ely_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_ely" type="revolute">
+        <parent>r_arm_shx_link</parent>
+        <child>r_arm_ely_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_elx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_elx" type="revolute">
+        <parent>r_arm_ely_link</parent>
+        <child>r_arm_elx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_wry_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_wry" type="revolute">
+        <parent>r_arm_elx_link</parent>
+        <child>r_arm_wry_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_wrx_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_wrx" type="revolute">
+        <parent>r_arm_wry_link</parent>
+        <child>r_arm_wrx_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_arm_wry2_link">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_arm_wry2" type="revolute">
+        <parent>r_arm_wrx_link</parent>
+        <child>r_arm_wry2_link</child>
+        <axis>
+          <xyz>0 0 1</xyz>
+          <dynamics><damping>0.1</damping></dynamics>
+          <limit><lower>-1.57</lower><upper>1.57</upper><effort>100.0</effort>
+            <velocity>12.0</velocity></limit>
+        </axis>
+      </joint>
+      <link name="r_hand">
+        <inertial>
+          <mass>2.0</mass>
+          <inertia><ixx>0.01</ixx><iyy>0.01</iyy><izz>0.01</izz></inertia>
+        </inertial>
+      </link>
+      <joint name="r_hand_fixed" type="fixed">
+        <parent>r_arm_wry2_link</parent>
+        <child>r_hand</child>
+      </joint>
+
+      <plugin filename="AtlasPlugin"
+              name="drcsim_gazebo_ros_plugins::AtlasPlugin"/>
+    </model>
+  </world>
+</sdf>
