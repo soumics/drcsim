@@ -843,10 +843,14 @@ not happen automatically.
      specifically, not the underlying PID (already covered by
      `DRCVehiclePlugin`'s own test).
 
-10. ✅ CLI executables (`port/cli_executables`) — the last item in Tier 2.
-    Of the 9 remaining files, 6 were **dropped** after checking the whole
-    repo for any real dependency on them (none found), and 3 were ported
-    as plain ROS 2 nodes (`add_executable`, not gz-sim plugins).
+10. ✅ CLI executables (`port/cli_executables`) — **done, 519/519 package
+    checks passing on the first attempt (2 pre-existing, unrelated
+    errors in `drcsim_model_resources`'s cpplint/uncrustify result
+    files, not this package), merged into `ros2-jazzy-harmonic`.** The
+    last item in Tier 2. Of the 9 remaining files, 6 were **dropped**
+    after checking the whole repo for any real dependency on them (none
+    found), and 3 were ported as plain ROS 2 nodes (`add_executable`,
+    not gz-sim plugins).
     - **Dropped, no port**:
       - `pub_atlas_state.cpp` and `pub_joint_states.cpp` were **byte-for-
         byte identical files** — a latency-benchmark scratch tool full of
