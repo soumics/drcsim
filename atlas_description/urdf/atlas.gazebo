@@ -5,7 +5,7 @@
   </gazebo>
   <gazebo>
     <!-- Ported to gz-sim: the Classic per-version AtlasPlugin/AtlasV3Plugin/
-         AtlasV4Plugin split doesn't exist any more -- one AtlasPlugin class
+         AtlasV4Plugin split doesn't exist any more, one AtlasPlugin class
          handles every atlas_version via its own ROS parameter. The dead
          libgazebo_ros_joint_pose_trajectory.so (no gz-sim equivalent, no
          consumer in this repo) and the already-disabled Classic
