@@ -14,9 +14,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""End-to-end proof that atlas.launch.py actually wires real PID gains
-into AtlasPlugin, rather than the collapse-under-zero-gain symptom that
-motivated this whole Tier 3 branch (see CLAUDE.md).
+"""
+Prove atlas.launch.py wires real PID gains into AtlasPlugin, end to end.
+
+This is the collapse-under-zero-gain symptom that motivated this whole
+Tier 3 branch (see CLAUDE.md), now automated.
 
 This deliberately does not check world-frame pelvis height (no
 world->robot localization exists in this architecture -- robot_state_

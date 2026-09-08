@@ -17,8 +17,6 @@
 
 #include "drcsim_gazebo_ros_plugins/DRCVehicleROSPlugin.hpp"
 
-#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
-
 #include <algorithm>
 #include <cstdlib>
 #include <memory>
@@ -27,6 +25,8 @@
 #include <gz/common/Console.hh>
 #include <gz/plugin/Register.hh>
 #include <gz/sim/Model.hh>
+
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
 
 using drcsim_gazebo_ros_plugins::DRCVehicleROSPlugin;
 

@@ -16,8 +16,6 @@
 */
 #include "drcsim_gazebo_ros_plugins/AtlasPlugin.hpp"
 
-#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
-
 #include <gz/msgs/contacts.pb.h>
 
 #include <algorithm>
@@ -40,6 +38,8 @@
 #include <gz/sim/components/ContactSensorData.hh>
 #include <gz/sim/components/Name.hh>
 #include <sdf/JointAxis.hh>
+
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
 
 using drcsim_gazebo_ros_plugins::AtlasPlugin;
 

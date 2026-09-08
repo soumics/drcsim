@@ -16,8 +16,6 @@
 */
 #include "drcsim_gazebo_ros_plugins/VRCPlugin.hpp"
 
-#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
-
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -48,6 +46,8 @@
 #include <sdf/Root.hh>
 
 #include <atlas_msgs/msg/atlas_behavior_step_data.hpp>
+
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
 
 using drcsim_gazebo_ros_plugins::VRCPlugin;
 

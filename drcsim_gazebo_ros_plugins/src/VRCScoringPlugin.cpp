@@ -17,8 +17,6 @@
 
 #include "drcsim_gazebo_ros_plugins/VRCScoringPlugin.hpp"
 
-#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
-
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -40,6 +38,8 @@
 #include <sdf/Box.hh>
 
 #include <builtin_interfaces/msg/time.hpp>
+
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
 
 using DoubleSeconds = std::chrono::duration<double>;
 

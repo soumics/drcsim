@@ -14,7 +14,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Bring up Atlas (v5, no hands) in Gazebo Harmonic under VRCPlugin/AtlasPlugin.
+"""
+Bring up Atlas (v5, no hands) in Gazebo Harmonic under VRCPlugin/AtlasPlugin.
 
 Replaces the original drcsim's atlas.launch -> atlas_no_controllers.launch
 -> atlas_bringup.launch -> atlas_v5_bringup.launch roslaunch XML chain.
