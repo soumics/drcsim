@@ -20,17 +20,19 @@ Prove atlas.launch.py wires real PID gains into AtlasPlugin, end to end.
 This is the collapse-under-zero-gain symptom that motivated this whole
 Tier 3 branch (see CLAUDE.md), now automated.
 
-This deliberately does not check world-frame pelvis height (no
-world->robot localization exists in this architecture -- robot_state_
-publisher only knows the robot's own joint-driven TF tree, not where
-VRCPlugin spawned it in the world). Instead: with no atlas_command
-publisher running, AtlasPlugin's own default position target is 0.0 for
-every joint (ZeroAtlasCommand()). If the real gains from
-config/atlas_v5_gains.yaml made it through, every joint should hold near
-that 0.0 target against gravity; if DRCSIM_ROS_PARAMS_FILE/
-RosNodeOptionsFromEnv() were broken (gains still zero), heavily-loaded
-joints (hips, knees) would droop well past this test's tolerance within
-a few seconds.
+Earlier versions of this test tried to infer the gains were real by
+watching /atlas/joint_states stay near a 0.0 target -- that's wrong:
+VRCPlugin's own startup sequence (atlas.startup_mode=bdi_stand) actively
+publishes atlas_command itself, driving the robot through a real
+stand-up motion ("stand prep" -> "Nominal" -> "Dynamic Stand Behavior"),
+not leaving it at a fixed target. Whether that motion looks "right" is
+a much harder thing to assert against than the actual thing this test
+needs to prove: did DRCSIM_ROS_PARAMS_FILE/RosNodeOptionsFromEnv()
+actually deliver config/atlas_v5_gains.yaml's values into the
+atlas_plugin node's parameters at all. That's checked directly here,
+by querying a few of them over the node's own parameter service --
+completely decoupled from simulation dynamics, timing, or what a
+"correct" stand-up motion should look like.
 """
 
 import os
@@ -44,6 +46,7 @@ import launch_testing.actions
 import launch_testing.markers
 import pytest
 import rclpy
+from rcl_interfaces.srv import GetParameters
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
@@ -66,7 +69,19 @@ def generate_test_description():
     ])
 
 
-class TestAtlasStandsUnderRealGains(unittest.TestCase):
+# A handful of joints spanning config/atlas_v5_gains.yaml's range of
+# values (small and large P gains, legs/arms/back), so a mismatched or
+# silently-empty params file is very unlikely to pass by coincidence.
+EXPECTED_GAINS = {
+    'atlas_controller.gains.l_leg_hpz.p': 5.0,
+    'atlas_controller.gains.l_leg_aky.p': 2900.0,
+    'atlas_controller.gains.back_bkz.p': 5000.0,
+    'atlas_controller.gains.l_arm_wry2.d': 0.1,
+    'atlas_controller.gains.r_arm_shx.d': 20.0,
+}
+
+
+class TestAtlasPluginReceivesRealGains(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
@@ -78,44 +93,61 @@ class TestAtlasStandsUnderRealGains(unittest.TestCase):
 
     def setUp(self):
         self.node = Node('test_atlas_launch')
-        self.joint_positions = {}
-
-        def on_joint_states(msg: JointState):
-            for name, position in zip(msg.name, msg.position):
-                self.joint_positions[name] = position
-
-        self.sub = self.node.create_subscription(
-            JointState, '/atlas/joint_states', on_joint_states, 10)
 
     def tearDown(self):
         self.node.destroy_node()
 
-    def test_joints_hold_near_zero_target_under_real_gains(self):
-        # Generous timeout: gz-sim startup, ROS graph discovery, and
-        # VRCPlugin's own startup-sequence state machine (pin -> bdi_stand
-        # -> unpin) all have to complete first.
-        end_time = self.node.get_clock().now().nanoseconds + 60 * 1_000_000_000
-        max_deviation = 0.0
-        saw_joint_states = False
-        while self.node.get_clock().now().nanoseconds < end_time:
-            rclpy.spin_once(self.node, timeout_sec=0.5)
-            if self.joint_positions:
-                saw_joint_states = True
-                max_deviation = max(
-                    max_deviation, max(abs(p) for p in self.joint_positions.values()))
+    def test_atlas_plugin_node_has_real_gains(self):
+        client = self.node.create_client(GetParameters, '/atlas_plugin/get_parameters')
+        # Generous timeout: gz-sim startup, the plugin's own node/executor
+        # startup, and ROS graph discovery all have to complete first.
+        self.assertTrue(
+            client.wait_for_service(timeout_sec=60.0),
+            '/atlas_plugin/get_parameters service never appeared')
 
-        self.assertTrue(saw_joint_states, 'never received /atlas/joint_states')
-        # 0.5 rad (~29 deg) is well beyond PID tracking error under real
-        # gains holding a 0.0 target, but far short of where a
-        # zero-gain/gravity-collapsed joint would end up.
-        self.assertLess(
-            max_deviation, 0.5,
-            f'a joint drifted {max_deviation:.3f} rad from its 0.0 target -- '
-            'gains likely did not reach AtlasPlugin (DRCSIM_ROS_PARAMS_FILE?)')
+        request = GetParameters.Request()
+        request.names = list(EXPECTED_GAINS.keys())
+        future = client.call_async(request)
+        rclpy.spin_until_future_complete(self.node, future, timeout_sec=30.0)
+        self.assertIsNotNone(future.result(), 'get_parameters call timed out')
+
+        actual = {
+            name: value.double_value
+            for name, value in zip(EXPECTED_GAINS.keys(), future.result().values)
+        }
+        self.assertEqual(
+            actual, EXPECTED_GAINS,
+            'atlas_plugin is not seeing the real gains from '
+            'config/atlas_v5_gains.yaml -- DRCSIM_ROS_PARAMS_FILE/'
+            'RosNodeOptionsFromEnv() likely did not deliver the params file')
+
+    def test_joint_states_are_published(self):
+        # Cheap interface smoke test: AtlasPlugin is actually running its
+        # control loop and publishing, not just holding a loaded params
+        # file it never uses.
+        received = {}
+
+        def on_joint_states(msg: JointState):
+            received['msg'] = msg
+
+        sub = self.node.create_subscription(
+            JointState, '/atlas/joint_states', on_joint_states, 10)
+        end_time = self.node.get_clock().now().nanoseconds + 30 * 1_000_000_000
+        while 'msg' not in received and self.node.get_clock().now().nanoseconds < end_time:
+            rclpy.spin_once(self.node, timeout_sec=0.5)
+        self.node.destroy_subscription(sub)
+
+        self.assertIn('msg', received, 'never received /atlas/joint_states')
+        self.assertGreater(len(received['msg'].name), 0)
 
 
 @launch_testing.post_shutdown_test()
 class TestProcessExit(unittest.TestCase):
 
     def test_exit_codes(self, proc_info):
-        launch_testing.asserts.assertExitCodes(proc_info)
+        # gz sim (run through its own ruby wrapper script) doesn't always
+        # react to SIGINT within launch_testing's 5s grace period, so it
+        # gets escalated to SIGTERM (-15) -- that's shutdown latency of a
+        # slow subprocess under a forced test-harness shutdown, not a
+        # functional failure, so it's allowed here alongside a clean 0.
+        launch_testing.asserts.assertExitCodes(proc_info, allowable_exit_codes=[0, -15])

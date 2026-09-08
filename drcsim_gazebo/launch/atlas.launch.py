@@ -78,8 +78,7 @@ def generate_launch_description():
         DeclareLaunchArgument('gz_verbosity', default_value='3'),
         DeclareLaunchArgument(
             'headless', default_value='false',
-            description='Run gz-sim server-only (-s), no GUI -- for CI/test use, or any '
-                         'environment with no display.'),
+            description='Run gz-sim server-only (-s), no GUI -- for CI/test use.'),
     ]
 
     return LaunchDescription(declared_arguments + [OpaqueFunction(function=_launch_setup)])
