@@ -103,7 +103,28 @@
     <plugin filename="VRCPlugin" name="drcsim_gazebo_ros_plugins::VRCPlugin">
       <atlas>
         <model_name>atlas</model_name>
-        <pin_link>utorso</pin_link>
+        <!-- "utorso" was Classic's older pin_link convention; some of
+             the original repo's own later, VRC-Finals-era worlds
+             (vrc_final_task11-15, vrc_task_3*, qual_task_2) already
+             correctly use "pelvis" instead, matching the updated Atlas
+             v5 kinematic tree used here (pelvis -> back_bkz -> ltorso
+             -> back_bky -> mtorso -> back_bkx -> utorso, confirmed via
+             atlas_v5_simple_shapes.urdf's own joint list; pelvis is the
+             URDF's actual free-floating root, also confirmed by
+             robot_state_publisher's own "root link pelvis" message).
+             Pinning "utorso" here silently failed at spawn time (gz-sim
+             logged "child link already has a parent joint of type
+             [RevoluteJoint]"): the robot was never actually anchored
+             during its supposedly-pinned bdi_stand startup phase, so
+             VRCPlugin's stand-prep PID commands, with nothing to react
+             against, flung the whole free-floating body around instead
+             of holding it in place. The ~36 other Classic-era worlds
+             still using "utorso" (atlas_cpu_lidar.world, most
+             drc_practice_task_*/vrc_task_1*/vrc_task_2*/qual_task_1*/
+             qual_task_3*/qual_task_4/vrc_final_task1-10, ...) likely
+             have the same mismatch; left alone since none of them are
+             wired into a launch file yet; fix when one is. -->
+        <pin_link>pelvis</pin_link>
       </atlas>
       <drc_vehicle>
         <model_name>golf_cart</model_name>
