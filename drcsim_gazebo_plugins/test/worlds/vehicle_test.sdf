@@ -22,7 +22,7 @@
 
       <!-- Anchor the chassis to the world: without this the whole
            unconstrained model free-falls under gravity, and that
-           free-fall couples into the wheel joints as spurious spin --
+           free-fall couples into the wheel joints as spurious spin,
            confounding a test that's meant to check the PID/torque
            control loop, not rigid-body dynamics. -->
       <joint name="chassis_to_world" type="fixed">

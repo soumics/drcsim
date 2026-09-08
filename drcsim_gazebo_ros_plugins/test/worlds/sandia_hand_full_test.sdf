@@ -21,7 +21,7 @@
              top surface overlaps the dynamic "obstacle" box (below) from
              the very first step, and l_hand itself is world-anchored (see
              the "anchor" joint), so the obstacle rests on it under gravity
-             for the rest of the run -- a sustained, nonzero normal contact
+             for the rest of the run, a sustained, nonzero normal contact
              force, not just a single-step transient. -->
         <collision name="palm_mid_collision">
           <pose>0 0 -0.05 0 0 0</pose>
@@ -239,7 +239,7 @@
     <!-- Dynamic, not static: resting under gravity on the immovable
          (world-anchored) palm generates a real, sustained normal contact
          force (~= its own weight). A static-vs-fixed-joint pairing was
-         tried first and produced exactly zero contact force -- the fixed
+         tried first and produced exactly zero contact force: the fixed
          joint fully constrains l_hand, so there was nothing for the
          contact solver to resist, and FillTactileData()'s force-based
          scaling formula maps zero force to exactly minTactileOut, making

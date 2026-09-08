@@ -8,7 +8,7 @@
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
 
     <!-- No finger joints at all: unlike SandiaHandPlugin, IRobotHandPlugin
-         has no reduced-function "stumps" mode -- FindJoints() aborts the
+         has no reduced-function "stumps" mode; FindJoints() aborts the
          whole load the first time a joint by its expected name isn't found.
          This world exists to prove that failure path doesn't crash and
          doesn't stand up any ROS interface, not to exercise real control. -->

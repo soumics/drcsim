@@ -10,7 +10,7 @@
     <!-- Minimal stand-in for the real atlas_description model: a single
          free-floating "utorso" link (no joint to the world, so it's the
          model's free-floating root, matching a real floating-base robot's
-         pelvis/torso), plus l_foot/r_foot as simple fixed-joint children --
+         pelvis/torso), plus l_foot/r_foot as simple fixed-joint children,
          just enough for VRCPlugin's pin/gravity-mode/mode-switch logic to
          have something real to act on. -->
     <model name="atlas">

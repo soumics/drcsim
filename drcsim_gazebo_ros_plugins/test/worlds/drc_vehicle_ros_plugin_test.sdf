@@ -10,7 +10,7 @@
     <!-- Same minimal vehicle model as drcsim_gazebo_plugins' own
          vehicle_test.sdf (11 joints DRCVehiclePlugin::Configure requires),
          just with DRCVehicleROSPlugin (this package) as the plugin
-         instead of the plain DRCVehiclePlugin -- DRCVehicleROSPlugin
+         instead of the plain DRCVehiclePlugin; DRCVehicleROSPlugin
          subclasses it and calls its Configure()/PreUpdate() directly. -->
     <model name="vehicle_test_model">
       <pose>0 0 0.5 0 0 0</pose>

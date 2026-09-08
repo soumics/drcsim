@@ -76,6 +76,10 @@ def generate_launch_description():
             'startup_mode', default_value='bdi_stand',
             description='VRCPlugin atlas.startup_mode -- see its design notes.'),
         DeclareLaunchArgument('gz_verbosity', default_value='3'),
+        DeclareLaunchArgument(
+            'headless', default_value='false',
+            description='Run gz-sim server-only (-s), no GUI -- for CI/test use, or any '
+                         'environment with no display.'),
     ]
 
     return LaunchDescription(declared_arguments + [OpaqueFunction(function=_launch_setup)])
@@ -86,6 +90,7 @@ def _launch_setup(context, *args, **kwargs):
     robot_xacro = LaunchConfiguration('robot_xacro').perform(context)
     startup_mode = LaunchConfiguration('startup_mode').perform(context)
     gz_verbosity = LaunchConfiguration('gz_verbosity').perform(context)
+    headless = LaunchConfiguration('headless').perform(context).lower() in ('true', '1')
     pose = {
         axis: float(LaunchConfiguration(axis).perform(context))
         for axis in ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
@@ -118,11 +123,12 @@ def _launch_setup(context, *args, **kwargs):
     with os.fdopen(params_fd, 'w') as params_file:
         yaml.safe_dump(combined_params, params_file)
 
+    server_only_flag = '-s ' if headless else ''
     gz_sim_launch = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
                 get_package_share_directory('ros_gz_sim'), 'launch', 'gz_sim.launch.py')),
-        launch_arguments={'gz_args': f'-r -v {gz_verbosity} {world}'}.items())
+        launch_arguments={'gz_args': f'{server_only_flag}-r -v {gz_verbosity} {world}'}.items())
 
     return [
         # Must be set before gz-sim (and therefore every plugin loaded

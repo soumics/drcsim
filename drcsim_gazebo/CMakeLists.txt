@@ -31,18 +31,17 @@ if(BUILD_TESTING)
   ament_flake8(${AMENT_LINT_PORTED})
   ament_pep257(${AMENT_LINT_PORTED})
 
-  # test/CMakeLists.txt, test/CheckDisplayCapabilities.cmake, and
-  # scripts/CMakeLists.txt are all leftover ROS1/catkin build files for
-  # the not-yet-ported rostest suite -- not referenced by this
-  # CMakeLists.txt at all (no add_subdirectory), left in place
-  # untouched, excluded from lint the same way the un-ported C++ files
-  # are in drcsim_gazebo_ros_plugins/CMakeLists.txt.
-  ament_lint_cmake(
-    EXCLUDE
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/CMakeLists.txt"
-    "${CMAKE_CURRENT_SOURCE_DIR}/test/CheckDisplayCapabilities.cmake"
-    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/CMakeLists.txt"
-  )
+  # ament_lint_cmake takes a list of paths *to check*, not an EXCLUDE
+  # list (confirmed the hard way: passing EXCLUDE + paths just lints
+  # "EXCLUDE" -- silently skipped, it isn't a real path -- plus every
+  # path after it, the opposite of what was intended). Check only this
+  # package's own CMakeLists.txt; test/CMakeLists.txt, test/
+  # CheckDisplayCapabilities.cmake, and scripts/CMakeLists.txt are all
+  # leftover ROS1/catkin build files for the not-yet-ported rostest
+  # suite -- not referenced by this CMakeLists.txt at all (no
+  # add_subdirectory), left in place untouched, same as the un-ported
+  # C++ files in drcsim_gazebo_ros_plugins/CMakeLists.txt.
+  ament_lint_cmake("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
 
   find_package(launch_testing_ament_cmake REQUIRED)
   add_launch_test(test/test_atlas_launch.py TIMEOUT 180)

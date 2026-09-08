@@ -56,7 +56,9 @@ def generate_test_description():
     atlas_launch = launch.actions.IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory('drcsim_gazebo'), 'launch', 'atlas.launch.py')))
+                get_package_share_directory('drcsim_gazebo'), 'launch', 'atlas.launch.py')),
+        # No display in a launch_testing/CI environment -- server-only.
+        launch_arguments={'headless': 'true'}.items())
 
     return launch.LaunchDescription([
         atlas_launch,
