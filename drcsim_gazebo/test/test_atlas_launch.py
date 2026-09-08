@@ -45,8 +45,8 @@ import launch_testing
 import launch_testing.actions
 import launch_testing.markers
 import pytest
-import rclpy
 from rcl_interfaces.srv import GetParameters
+import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
