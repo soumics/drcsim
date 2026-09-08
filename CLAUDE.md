@@ -929,7 +929,15 @@ ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
 VRCScoringPlugin ✅, DRCVehicleROSPlugin ✅, CLI executables ✅.
 
-## Tier 3 — `drcsim_gazebo` (🚧 first branch written, `port/drcsim_gazebo`, not yet built/tested)
+## Tier 3 — `drcsim_gazebo` (✅ first deliverable done, 537/537 package checks
+passing across `atlas_description`, `drcsim_gazebo_plugins`,
+`drcsim_gazebo_ros_plugins`, `drcsim_model_resources`, `drcsim_gazebo`,
+merged into `ros2-jazzy-harmonic`. `ros2 launch drcsim_gazebo
+atlas.launch.py` brings up Atlas end to end: gz-sim starts, `VRCPlugin`
+spawns the robot from `robot_description`, and `AtlasPlugin` runs under
+the real per-joint PID gains — confirmed by querying `atlas_plugin`'s
+own ROS parameters directly in `test_atlas_launch.py`, not by trying to
+model what "correct" standing dynamics should look like.)
 
 The goal of this tier: prove the *whole* simulation actually comes up
 together (spawn Atlas, get it to hold a pose instead of collapsing —
@@ -1095,6 +1103,60 @@ anything but its own default.
   rewrite). All of this is stretch-phase follow-up, per the original
   top-level migration plan's own "Phase E (optional)" framing — noted
   here so it's a documented backlog, not a silent gap.
+- **Real bugs the build/test round actually caught** (several rounds,
+  first attempt was far from clean — this was the largest, most
+  cross-cutting branch in the migration, spanning 5 packages):
+  - **`--` inside an XML comment is illegal** (only allowed immediately
+    before the closing `-->`) — used as a prose dash in a design-note
+    comment added to `atlas.gazebo`, which broke `xacro`'s XML parser
+    specifically (`not well-formed (invalid token)`) while gz-sim's own
+    `sdformat` parser tolerates it silently. That asymmetry is exactly
+    why this had never surfaced before: **five other test worlds from
+    earlier plugins had the same bug sitting unnoticed** (found via a
+    repo-wide `xmllint --noout` sweep once the pattern was identified)
+    — `vrc_plugin_test.sdf`, `sandia_hand_full_test.sdf`,
+    `irobot_hand_missing_joints_test.sdf`,
+    `drc_vehicle_ros_plugin_test.sdf`, `vehicle_test.sdf`, all fixed.
+    **General lesson: never write `--` as a prose dash in an SDF/URDF/
+    XML comment** (or run new/edited SDF-family files through `xmllint
+    --noout` before considering them done) — the mistake is invisible
+    until something uses a strict parser on that exact file.
+  - `atlas.world` relied on `<include><uri>model://sun|ground_plane
+    ></uri></include>`, which needs Gazebo Fuel to resolve at load
+    time — fails with no internet access. Inlined both (content matches
+    gz-sim's own shipped `empty.sdf`). **General lesson: every
+    hand-authored/edited world in this migration needs to be fully
+    self-contained** (no Fuel-hosted `model://` includes), consistent
+    with the design already used everywhere else, but this file
+    predates that pattern being established.
+  - `ament_lint_cmake()` does **not** take an `EXCLUDE` keyword the way
+    `ament_copyright`/`ament_cpplint`/`ament_cppcheck`/
+    `ament_uncrustify` all do (confirmed the hard way — passing
+    `EXCLUDE <paths>` just lints "EXCLUDE", silently skipped as a
+    nonexistent path, plus every path after it, the opposite of what
+    was intended). It takes a plain list of paths *to check*; point it
+    at just the package's own `CMakeLists.txt` to scope it the same way
+    the other linters get scoped via `EXCLUDE`.
+  - The combined gz-sim server+GUI process (`gz sim` with no `-s`) can
+    die almost immediately with no display and no diagnostic beyond
+    "process has finished cleanly" — zero simulation ever ran, zero
+    topics ever published. Any `launch_testing` test that boots gz-sim
+    needs an explicit headless/server-only path; `atlas.launch.py` now
+    exposes this as a `headless` launch argument rather than hardcoding
+    either choice.
+  - `colcon test` **does not reconfigure/rebuild** — a `CMakeLists.txt`
+    fix doesn't take effect until the next `colcon build`. Cost two
+    redundant round-trips before the pattern was obvious; worth
+    remembering for any future CMake-only fix.
+  - Test flakiness under heavy combined load: running all 5 touched
+    packages' test suites together (several of which spin up real
+    `gz-sim` processes) intermittently produced a timing-sensitive
+    `AtlasPlugin` gtest failure and a `ros_gz_bridge parameter_bridge`
+    SIGABRT-on-shutdown race — both third-party/timing-sensitive, not
+    code bugs, confirmed by a clean rerun of just the two affected
+    packages immediately after. Worth knowing this environment can
+    produce this class of flake under contention, rather than assuming
+    a failure here is always a real regression.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
