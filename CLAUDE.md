@@ -1157,6 +1157,53 @@ anything but its own default.
     packages immediately after. Worth knowing this environment can
     produce this class of flake under contention, rather than assuming
     a failure here is always a real regression.
+  - **`atlas.world`'s `<pin_link>utorso</pin_link>` was simply wrong for
+    the v5 model it's paired with here**, found by actually watching the
+    robot in the GUI (not caught by any test): the user reported "flew
+    up and then fell down" on the first real interactive run. Root
+    cause, confirmed via the joint chain in `atlas_v5_simple_shapes.urdf`
+    and `robot_state_publisher`'s own "root link pelvis" message:
+    `pelvis` is the URDF's actual free-floating root; `utorso` is three
+    real revolute joints up the spine (`pelvis -> back_bkz -> ltorso ->
+    back_bky -> mtorso -> back_bkx -> utorso`), so gz-sim rejected the
+    pin-to-`utorso` request outright (logged: `child link already has a
+    parent joint of type [RevoluteJoint]`). With the pin silently never
+    taking hold, the robot spent its "pinned" phase weightless (gravity
+    compensation was still applied) but completely unconstrained, so
+    `VRCPlugin`'s stand-prep PID commands — with nothing to react
+    against — flung the whole free-floating body around. Fixed:
+    `<pin_link>pelvis</pin_link>`. Some of the original repo's own
+    later, VRC-Finals-era worlds (`vrc_final_task11-15`, `vrc_task_3*`,
+    `qual_task_2`) already correctly used `pelvis`; this is a
+    pre-existing inconsistency in the original repo (Classic's own
+    kinematic convention changed between early and later Atlas
+    versions), not something this port introduced. ~36 other
+    Classic-era worlds likely have the same stale `utorso` value —
+    deferred, since none of them are wired into a launch file yet.
+  - **`atlas.startup_mode=bdi_stand` (the launch's original default) is
+    not reliable yet, even with the pin fixed**: after fixing the
+    `pin_link` bug above, a second real run still ended with the robot
+    on the ground (not flying this time, just fallen over) partway
+    through the `stand prep -> Nominal -> Dynamic Stand Behavior`
+    sequence, alongside a `No joint named [pelvis_world_pin_joint] for
+    modelID [N]` warning of unclear significance (no accompanying hard
+    rejection error this time, unlike the `utorso` case, so possibly a
+    harmless one-tick creation/query race rather than a repeat of the
+    same bug — not yet root-caused). Given the user's immediate goal was
+    just seeing Atlas stand at all, **the launch's default
+    `startup_mode` was switched to `"pinned"` instead** — the simpler
+    pin/hold/auto-unpin path with no stand-prep choreography, exactly
+    what `VRCPlugin`'s own already-passing gtest exercises (its test
+    world never sets `atlas.startup_mode`, which defaults to `""`, also
+    routed to this same simple path — `atlas.startup_mode` only ever
+    branches on the literal string `"bdi_stand"`; anything else,
+    including `""`, takes the "pinned" branch). `bdi_stand` is still
+    selectable via the `startup_mode` launch argument for whoever wants
+    to debug it further, but **treat it as known-unreliable, not a
+    ready-to-use feature**, until someone actually root-causes the
+    stand-prep/dynamic-stand transition itself (a real, currently open
+    bug — worth a dedicated debugging session with the GUI actually
+    open and watched step by step, not just log-reading).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

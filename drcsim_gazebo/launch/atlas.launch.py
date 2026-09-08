@@ -72,9 +72,12 @@ def generate_launch_description():
         DeclareLaunchArgument('roll', default_value='0.0'),
         DeclareLaunchArgument('pitch', default_value='0.0'),
         DeclareLaunchArgument('yaw', default_value='0.0'),
-        DeclareLaunchArgument(
-            'startup_mode', default_value='bdi_stand',
-            description='VRCPlugin atlas.startup_mode -- see its design notes.'),
+        # VRCPlugin atlas.startup_mode. "pinned" (default): pin, hold, auto-unpin
+        # after time_to_unpin, then AtlasPlugin's real gains hold the zero pose
+        # against gravity -- the same simple path VRCPlugin's own gtest already
+        # exercises reliably. "bdi_stand": the fuller pin/stand-prep/unpin/
+        # dynamic-stand choreography -- currently unreliable, see CLAUDE.md.
+        DeclareLaunchArgument('startup_mode', default_value='pinned'),
         DeclareLaunchArgument('gz_verbosity', default_value='3'),
         DeclareLaunchArgument(
             'headless', default_value='false',
