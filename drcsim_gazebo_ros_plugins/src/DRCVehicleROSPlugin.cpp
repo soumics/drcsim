@@ -17,6 +17,8 @@
 
 #include "drcsim_gazebo_ros_plugins/DRCVehicleROSPlugin.hpp"
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 #include <algorithm>
 #include <cstdlib>
 #include <memory>
@@ -66,7 +68,8 @@ void DRCVehicleROSPlugin::Configure(
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("drc_vehicle_ros_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "drc_vehicle_ros_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   const std::string modelName = gz::sim::Model(_entity).Name(_ecm);
 

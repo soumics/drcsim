@@ -1,29 +1,36 @@
 <?xml version="1.0"?>
-<package>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
   <name>drcsim_gazebo</name>
   <version>3.1.0</version>
-  <description>DRC simulator Gazebo simulation</description>
+  <description>DRC simulator integration: launch files, control gains, tests.</description>
   <maintainer email="hsu@osrfoundation.org">John Hsu</maintainer>
   <license>Apache 2.0</license>
   <url type="website">http://gazebosim.org/wiki/DRC</url>
-  <buildtool_depend>catkin</buildtool_depend>
-  <build_depend>atlas_msgs</build_depend>
-  <build_depend>drcsim_gazebo_plugins</build_depend>
-  <build_depend>drcsim_gazebo_ros_plugins</build_depend>
-  <build_depend>drcsim_model_resources</build_depend>
-  <build_depend>atlas_description</build_depend>
-  <build_depend>irobot_hand_description</build_depend>
-  <build_depend>multisense_sl_description</build_depend>
-  <build_depend>sandia_hand_description</build_depend>
-  <run_depend>atlas_description</run_depend>
-  <run_depend>atlas_msgs</run_depend>
-  <run_depend>drcsim_gazebo_plugins</run_depend>
-  <run_depend>drcsim_gazebo_ros_plugins</run_depend>
-  <run_depend>drcsim_model_resources</run_depend>
-  <run_depend>irobot_hand_description</run_depend>
-  <run_depend>laser_assembler</run_depend>
-  <run_depend>multisense_sl_description</run_depend>
-  <run_depend>robot_state_publisher</run_depend>
-  <run_depend>sandia_hand_description</run_depend>
-  <run_depend>stereo_image_proc</run_depend>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>atlas_description</exec_depend>
+  <exec_depend>atlas_msgs</exec_depend>
+  <exec_depend>drcsim_gazebo_plugins</exec_depend>
+  <exec_depend>drcsim_gazebo_ros_plugins</exec_depend>
+  <exec_depend>drcsim_model_resources</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>launch_testing</test_depend>
+  <test_depend>launch_testing_ament_cmake</test_depend>
+  <test_depend>sensor_msgs</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
 </package>

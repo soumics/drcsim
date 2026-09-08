@@ -16,6 +16,8 @@
 */
 #include "drcsim_gazebo_ros_plugins/AtlasPlugin.hpp"
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 #include <gz/msgs/contacts.pb.h>
 
 #include <algorithm>
@@ -105,7 +107,8 @@ bool AtlasPlugin::GetAtlasVersion()
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("atlas_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "atlas_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   this->atlasVersion = this->rosNode->declare_parameter("atlas_version", 5);
   this->atlasSubVersion =

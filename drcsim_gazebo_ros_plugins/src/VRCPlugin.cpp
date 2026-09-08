@@ -16,6 +16,8 @@
 */
 #include "drcsim_gazebo_ros_plugins/VRCPlugin.hpp"
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 #include <cmath>
 #include <cstdlib>
 #include <functional>
@@ -121,7 +123,8 @@ void VRCPlugin::DeferredLoad(gz::sim::EntityComponentManager & _ecm)
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("vrc_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "vrc_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   this->LoadVRCROSAPI();
 

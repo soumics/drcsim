@@ -1,0 +1,167 @@
+# Per-joint PID gains for AtlasPlugin's whole-body position controller
+# (atlas_version 5, 30 joints including both wry2 wrist joints).
+#
+# Converted from the original drcsim's pr2_controller_manager-era
+# config/whole_body_trajectory_controller_v5.yaml -- same joints, same
+# gain values, just its `gains:` block reshaped into a ROS 2 params file
+# for the `atlas_plugin` node (see AtlasPlugin::LoadPIDGainsFromParameter,
+# which reads exactly "atlas_controller.gains.<joint>.{p,i,d,i_clamp}").
+# The original file's `joints:`/`type:`/`joint_trajectory_action_node:`
+# blocks configured a pr2_controller_manager JointTrajectoryActionController
+# that has no equivalent here -- AtlasPlugin is already the whole-body
+# controller, so only the gain values themselves carry over.
+#
+# Loaded via the DRCSIM_ROS_PARAMS_FILE mechanism (see
+# drcsim_gazebo_ros_plugins/include/drcsim_gazebo_ros_plugins/
+# RosNodeOptions.hpp) -- see launch/atlas.launch.py.
+atlas_plugin:
+  ros__parameters:
+    atlas_controller.gains.l_leg_hpz.p: 5.0
+    atlas_controller.gains.l_leg_hpz.d: 0.01
+    atlas_controller.gains.l_leg_hpz.i: 0.0
+    atlas_controller.gains.l_leg_hpz.i_clamp: 0.0
+
+    atlas_controller.gains.l_leg_hpx.p: 900.0
+    atlas_controller.gains.l_leg_hpx.d: 1.0
+    atlas_controller.gains.l_leg_hpx.i: 0.0
+    atlas_controller.gains.l_leg_hpx.i_clamp: 0.0
+
+    atlas_controller.gains.l_leg_hpy.p: 2000.0
+    atlas_controller.gains.l_leg_hpy.d: 10.0
+    atlas_controller.gains.l_leg_hpy.i: 0.0
+    atlas_controller.gains.l_leg_hpy.i_clamp: 0.0
+
+    atlas_controller.gains.l_leg_kny.p: 2000.0
+    atlas_controller.gains.l_leg_kny.d: 10.0
+    atlas_controller.gains.l_leg_kny.i: 0.0
+    atlas_controller.gains.l_leg_kny.i_clamp: 0.0
+
+    atlas_controller.gains.l_leg_aky.p: 2900.0
+    atlas_controller.gains.l_leg_aky.d: 2.0
+    atlas_controller.gains.l_leg_aky.i: 0.0
+    atlas_controller.gains.l_leg_aky.i_clamp: 0.0
+
+    atlas_controller.gains.l_leg_akx.p: 300.0
+    atlas_controller.gains.l_leg_akx.d: 1.0
+    atlas_controller.gains.l_leg_akx.i: 0.0
+    atlas_controller.gains.l_leg_akx.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_hpz.p: 5.0
+    atlas_controller.gains.r_leg_hpz.d: 0.01
+    atlas_controller.gains.r_leg_hpz.i: 0.0
+    atlas_controller.gains.r_leg_hpz.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_hpx.p: 900.0
+    atlas_controller.gains.r_leg_hpx.d: 1.0
+    atlas_controller.gains.r_leg_hpx.i: 0.0
+    atlas_controller.gains.r_leg_hpx.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_hpy.p: 2000.0
+    atlas_controller.gains.r_leg_hpy.d: 10.0
+    atlas_controller.gains.r_leg_hpy.i: 0.0
+    atlas_controller.gains.r_leg_hpy.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_kny.p: 2000.0
+    atlas_controller.gains.r_leg_kny.d: 10.0
+    atlas_controller.gains.r_leg_kny.i: 0.0
+    atlas_controller.gains.r_leg_kny.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_aky.p: 2900.0
+    atlas_controller.gains.r_leg_aky.d: 2.0
+    atlas_controller.gains.r_leg_aky.i: 0.0
+    atlas_controller.gains.r_leg_aky.i_clamp: 0.0
+
+    atlas_controller.gains.r_leg_akx.p: 300.0
+    atlas_controller.gains.r_leg_akx.d: 1.0
+    atlas_controller.gains.r_leg_akx.i: 0.0
+    atlas_controller.gains.r_leg_akx.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_shz.p: 2000.0
+    atlas_controller.gains.l_arm_shz.d: 3.0
+    atlas_controller.gains.l_arm_shz.i: 0.0
+    atlas_controller.gains.l_arm_shz.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_shx.p: 1000.0
+    atlas_controller.gains.l_arm_shx.d: 20.0
+    atlas_controller.gains.l_arm_shx.i: 0.0
+    atlas_controller.gains.l_arm_shx.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_ely.p: 200.0
+    atlas_controller.gains.l_arm_ely.d: 3.0
+    atlas_controller.gains.l_arm_ely.i: 0.0
+    atlas_controller.gains.l_arm_ely.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_elx.p: 200.0
+    atlas_controller.gains.l_arm_elx.d: 3.0
+    atlas_controller.gains.l_arm_elx.i: 0.0
+    atlas_controller.gains.l_arm_elx.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_wry.p: 50.0
+    atlas_controller.gains.l_arm_wry.d: 0.1
+    atlas_controller.gains.l_arm_wry.i: 0.0
+    atlas_controller.gains.l_arm_wry.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_wry2.p: 50.0
+    atlas_controller.gains.l_arm_wry2.d: 0.1
+    atlas_controller.gains.l_arm_wry2.i: 0.0
+    atlas_controller.gains.l_arm_wry2.i_clamp: 0.0
+
+    atlas_controller.gains.l_arm_wrx.p: 100.0
+    atlas_controller.gains.l_arm_wrx.d: 0.2
+    atlas_controller.gains.l_arm_wrx.i: 0.0
+    atlas_controller.gains.l_arm_wrx.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_shz.p: 2000.0
+    atlas_controller.gains.r_arm_shz.d: 3.0
+    atlas_controller.gains.r_arm_shz.i: 0.0
+    atlas_controller.gains.r_arm_shz.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_shx.p: 1000.0
+    atlas_controller.gains.r_arm_shx.d: 20.0
+    atlas_controller.gains.r_arm_shx.i: 0.0
+    atlas_controller.gains.r_arm_shx.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_ely.p: 200.0
+    atlas_controller.gains.r_arm_ely.d: 3.0
+    atlas_controller.gains.r_arm_ely.i: 0.0
+    atlas_controller.gains.r_arm_ely.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_elx.p: 200.0
+    atlas_controller.gains.r_arm_elx.d: 3.0
+    atlas_controller.gains.r_arm_elx.i: 0.0
+    atlas_controller.gains.r_arm_elx.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_wry.p: 50.0
+    atlas_controller.gains.r_arm_wry.d: 0.1
+    atlas_controller.gains.r_arm_wry.i: 0.0
+    atlas_controller.gains.r_arm_wry.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_wry2.p: 50.0
+    atlas_controller.gains.r_arm_wry2.d: 0.1
+    atlas_controller.gains.r_arm_wry2.i: 0.0
+    atlas_controller.gains.r_arm_wry2.i_clamp: 0.0
+
+    atlas_controller.gains.r_arm_wrx.p: 100.0
+    atlas_controller.gains.r_arm_wrx.d: 0.2
+    atlas_controller.gains.r_arm_wrx.i: 0.0
+    atlas_controller.gains.r_arm_wrx.i_clamp: 0.0
+
+    atlas_controller.gains.neck_ry.p: 20.0
+    atlas_controller.gains.neck_ry.d: 1.0
+    atlas_controller.gains.neck_ry.i: 0.0
+    atlas_controller.gains.neck_ry.i_clamp: 0.0
+
+    atlas_controller.gains.back_bkz.p: 5000.0
+    atlas_controller.gains.back_bkz.d: 0.1
+    atlas_controller.gains.back_bkz.i: 0.0
+    atlas_controller.gains.back_bkz.i_clamp: 0.0
+
+    atlas_controller.gains.back_bky.p: 5000.0
+    atlas_controller.gains.back_bky.d: 2.0
+    atlas_controller.gains.back_bky.i: 0.0
+    atlas_controller.gains.back_bky.i_clamp: 0.0
+
+    atlas_controller.gains.back_bkx.p: 5000.0
+    atlas_controller.gains.back_bkx.d: 1.0
+    atlas_controller.gains.back_bkx.i: 0.0
+    atlas_controller.gains.back_bkx.i_clamp: 0.0

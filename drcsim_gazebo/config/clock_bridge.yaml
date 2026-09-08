@@ -1,0 +1,11 @@
+# ros_gz_bridge parameter_bridge config: bridges gz-sim's simulation
+# clock to ROS 2's /clock topic, needed for any node run with
+# use_sim_time:=true (robot_state_publisher below, and the Tier 2
+# pub_atlas_command*/pub_joint_commands CLI tools' `now().seconds() > 0`
+# busy-waits) to actually see simulation time instead of blocking
+# forever / using wall time.
+- ros_topic_name: "/clock"
+  gz_topic_name: "/clock"
+  ros_type_name: "rosgraph_msgs/msg/Clock"
+  gz_type_name: "gz.msgs.Clock"
+  direction: GZ_TO_ROS
