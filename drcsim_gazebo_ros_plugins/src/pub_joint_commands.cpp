@@ -14,140 +14,117 @@
  * limitations under the License.
  *
 */
+
+// Diagnostic/demo tool: drives every Atlas joint through an arbitrary
+// sine-wave trajectory via the lower-level osrf_msgs/JointCommands
+// topic (AtlasPlugin::SetJointCommands), rather than atlas_command.
+// Per-joint PID gains are read from the same "atlas_controller.gains.
+// <joint>.{p,i,d,i_clamp}" parameters AtlasPlugin itself loads (see
+// LoadPIDGainsFromParameter()) -- pass a matching params file on the
+// command line (--ros-args --params-file ...) for these to be anything
+// other than zero.
+//
+// AtlasPlugin::SetJointCommands matches incoming arrays purely by
+// length, not by the message's `name` field (see its size-equality
+// guards), so the joint *order* below must match AtlasPlugin's own
+// (see AtlasPlugin::Load's jointNames construction) even though the
+// names themselves are only used here, for the parameter lookup.
+
+#include <cmath>
+#include <memory>
 #include <string>
 #include <vector>
-#include <math.h>
-#include <ros/ros.h>
-#include <ros/subscribe_options.h>
-#include <boost/thread.hpp>
-#include <boost/algorithm/string.hpp>
-#include <sensor_msgs/JointState.h>
-#include <osrf_msgs/JointCommands.h>
 
-ros::Publisher pub_joint_commands_;
-osrf_msgs::JointCommands jc;
+#include <rclcpp/rclcpp.hpp>
 
-void SetJointStates(const sensor_msgs::JointState::ConstPtr &_js)
+#include <osrf_msgs/msg/joint_commands.hpp>
+#include <sensor_msgs/msg/joint_state.hpp>
+
+namespace
 {
-  static ros::Time startTime = ros::Time::now();
-  {
-    // for testing round trip time
-    jc.header.stamp = _js->header.stamp;
+rclcpp::Node::SharedPtr g_node;
+rclcpp::Publisher<osrf_msgs::msg::JointCommands>::SharedPtr g_pubJointCommands;
+osrf_msgs::msg::JointCommands g_jc;
 
-    // assign arbitrary joint angle targets
-    for (unsigned int i = 0; i < jc.name.size(); i++)
-      jc.position[i] = 3.2* sin((ros::Time::now() - startTime).toSec());
+void SetJointStates(const sensor_msgs::msg::JointState::SharedPtr _js)
+{
+  static const rclcpp::Time startTime = g_node->now();
 
-    pub_joint_commands_.publish(jc);
+  // for testing round trip time
+  g_jc.header.stamp = _js->header.stamp;
+
+  // assign arbitrary joint angle targets
+  const double elapsed = (g_node->now() - startTime).seconds();
+  for (unsigned int i = 0; i < g_jc.name.size(); ++i) {
+    g_jc.position[i] = 3.2 * std::sin(elapsed);
   }
+
+  g_pubJointCommands->publish(g_jc);
 }
+}  // namespace
 
-int main(int argc, char** argv)
+int main(int argc, char ** argv)
 {
-  ros::init(argc, argv, "pub_joint_command_test");
+  rclcpp::init(argc, argv);
+  g_node = std::make_shared<rclcpp::Node>("pub_joint_commands");
 
-  ros::NodeHandle* rosnode = new ros::NodeHandle();
+  const int atlasVersion = g_node->declare_parameter("atlas_version", 5);
+  const int atlasSubVersion = g_node->declare_parameter("atlas_sub_version", 0);
+  const bool hasWry2 = (atlasVersion == 4 && atlasSubVersion == 0) || atlasVersion > 4;
 
-  ros::Time last_ros_time_;
-  bool wait = true;
-  while (wait)
-  {
-    last_ros_time_ = ros::Time::now();
-    if (last_ros_time_.toSec() > 0)
-      wait = false;
+  // Must match AtlasPlugin::Load's joint order (current canonical names;
+  // AtlasPlugin itself falls back to older per-joint names if these
+  // aren't found on the model, but that fallback is irrelevant here
+  // since these names are only used for the parameter lookup below).
+  g_jc.name = {
+    "back_bkz", "back_bky", "back_bkx", "neck_ry",
+    "l_leg_hpz", "l_leg_hpx", "l_leg_hpy", "l_leg_kny", "l_leg_aky", "l_leg_akx",
+    "r_leg_hpz", "r_leg_hpx", "r_leg_hpy", "r_leg_kny", "r_leg_aky", "r_leg_akx",
+    "l_arm_shz", "l_arm_shx", "l_arm_ely", "l_arm_elx", "l_arm_wry", "l_arm_wrx"};
+  if (hasWry2) {
+    g_jc.name.push_back("l_arm_wry2");
+  }
+  g_jc.name.insert(
+    g_jc.name.end(),
+    {"r_arm_shz", "r_arm_shx", "r_arm_ely", "r_arm_elx", "r_arm_wry", "r_arm_wrx"});
+  if (hasWry2) {
+    g_jc.name.push_back("r_arm_wry2");
   }
 
-  // must match those inside AtlasPlugin
-  jc.name.push_back("atlas::back_lbz");
-  jc.name.push_back("atlas::back_mby");
-  jc.name.push_back("atlas::back_ubx");
-  jc.name.push_back("atlas::neck_ay");
-  jc.name.push_back("atlas::l_leg_uhz");
-  jc.name.push_back("atlas::l_leg_mhx");
-  jc.name.push_back("atlas::l_leg_lhy");
-  jc.name.push_back("atlas::l_leg_kny");
-  jc.name.push_back("atlas::l_leg_uay");
-  jc.name.push_back("atlas::l_leg_lax");
-  jc.name.push_back("atlas::r_leg_uhz");
-  jc.name.push_back("atlas::r_leg_mhx");
-  jc.name.push_back("atlas::r_leg_lhy");
-  jc.name.push_back("atlas::r_leg_kny");
-  jc.name.push_back("atlas::r_leg_uay");
-  jc.name.push_back("atlas::r_leg_lax");
-  jc.name.push_back("atlas::l_arm_usy");
-  jc.name.push_back("atlas::l_arm_shx");
-  jc.name.push_back("atlas::l_arm_ely");
-  jc.name.push_back("atlas::l_arm_elx");
-  jc.name.push_back("atlas::l_arm_uwy");
-  jc.name.push_back("atlas::l_arm_mwx");
-  jc.name.push_back("atlas::r_arm_usy");
-  jc.name.push_back("atlas::r_arm_shx");
-  jc.name.push_back("atlas::r_arm_ely");
-  jc.name.push_back("atlas::r_arm_elx");
-  jc.name.push_back("atlas::r_arm_uwy");
-  jc.name.push_back("atlas::r_arm_mwx");
+  const unsigned int n = g_jc.name.size();
+  g_jc.position.assign(n, 0.0);
+  g_jc.velocity.assign(n, 0.0);
+  g_jc.effort.assign(n, 0.0);
+  g_jc.kp_position.assign(n, 0.0);
+  g_jc.ki_position.assign(n, 0.0);
+  g_jc.kd_position.assign(n, 0.0);
+  g_jc.kp_velocity.assign(n, 0.0);
+  g_jc.i_effort_min.assign(n, 0.0);
+  g_jc.i_effort_max.assign(n, 0.0);
 
-  unsigned int n = jc.name.size();
-  jc.position.resize(n);
-  jc.velocity.resize(n);
-  jc.effort.resize(n);
-  jc.kp_position.resize(n);
-  jc.ki_position.resize(n);
-  jc.kd_position.resize(n);
-  jc.kp_velocity.resize(n);
-  jc.i_effort_min.resize(n);
-  jc.i_effort_max.resize(n);
-
-  for (unsigned int i = 0; i < n; i++)
-  {
-    std::vector<std::string> pieces;
-    boost::split(pieces, jc.name[i], boost::is_any_of(":"));
-
-    rosnode->getParam("atlas_controller/gains/" + pieces[2] + "/p",
-      jc.kp_position[i]);
-
-    rosnode->getParam("atlas_controller/gains/" + pieces[2] + "/i",
-      jc.ki_position[i]);
-
-    rosnode->getParam("atlas_controller/gains/" + pieces[2] + "/d",
-      jc.kd_position[i]);
-
-    rosnode->getParam("atlas_controller/gains/" + pieces[2] + "/i_clamp",
-      jc.i_effort_min[i]);
-    jc.i_effort_min[i] = -jc.i_effort_min[i];
-
-    rosnode->getParam("atlas_controller/gains/" + pieces[2] + "/i_clamp",
-      jc.i_effort_max[i]);
-
-    jc.velocity[i]     = 0;
-    jc.effort[i]       = 0;
-    jc.kp_velocity[i]  = 0;
+  for (unsigned int i = 0; i < n; ++i) {
+    const std::string prefix = "atlas_controller.gains." + g_jc.name[i] + ".";
+    g_jc.kp_position[i] = g_node->declare_parameter(prefix + "p", 0.0);
+    g_jc.ki_position[i] = g_node->declare_parameter(prefix + "i", 0.0);
+    g_jc.kd_position[i] = g_node->declare_parameter(prefix + "d", 0.0);
+    const double iClamp = g_node->declare_parameter(prefix + "i_clamp", 0.0);
+    g_jc.i_effort_min[i] = -iClamp;
+    g_jc.i_effort_max[i] = iClamp;
   }
 
-  // ros topic subscribtions
-  ros::SubscribeOptions jointStatesSo =
-    ros::SubscribeOptions::create<sensor_msgs::JointState>(
-    "/atlas/joint_states", 1, SetJointStates,
-    ros::VoidPtr(), rosnode->getCallbackQueue());
+  // This wait is needed to ensure this node has gotten a simulation time
+  // update (requires use_sim_time:=true and a /clock bridge).
+  while (rclcpp::ok() && g_node->now().seconds() <= 0) {
+  }
 
-  // Because TCP causes bursty communication with high jitter,
-  // declare a preference on UDP connections for receiving
-  // joint states, which we want to get at a high rate.
-  // Note that we'll still accept TCP connections for this topic
-  // (e.g., from rospy nodes, which don't support UDP);
-  // we just prefer UDP.
-  jointStatesSo.transport_hints =
-    ros::TransportHints().unreliable().reliable().tcpNoDelay(true);
+  auto subJointStates = g_node->create_subscription<sensor_msgs::msg::JointState>(
+    "/atlas/joint_states", rclcpp::QoS(1), SetJointStates);
 
-  ros::Subscriber subJointStates = rosnode->subscribe(jointStatesSo);
-  // ros::Subscriber subJointStates =
-  //   rosnode->subscribe("/atlas/joint_states", 1000, SetJointStates);
+  g_pubJointCommands = g_node->create_publisher<osrf_msgs::msg::JointCommands>(
+    "/atlas/joint_commands", rclcpp::QoS(1).transient_local());
 
-  pub_joint_commands_ =
-    rosnode->advertise<osrf_msgs::JointCommands>(
-    "/atlas/joint_commands", 1, true);
-
-  ros::spin();
+  rclcpp::spin(g_node);
+  rclcpp::shutdown();
 
   return 0;
 }

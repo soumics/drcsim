@@ -200,6 +200,25 @@ install(TARGETS DRCVehicleROSPlugin
   RUNTIME DESTINATION bin
 )
 
+# Standalone diagnostic/demo CLI tools (plain ROS 2 nodes, not gz-sim
+# plugins) -- installed as ordinary executables, runnable via
+# `ros2 run drcsim_gazebo_ros_plugins <name>`.
+add_executable(pub_atlas_command src/pub_atlas_command.cpp)
+ament_target_dependencies(pub_atlas_command rclcpp atlas_msgs)
+
+add_executable(pub_atlas_command_fast src/pub_atlas_command_fast.cpp)
+ament_target_dependencies(pub_atlas_command_fast rclcpp atlas_msgs)
+
+add_executable(pub_joint_commands src/pub_joint_commands.cpp)
+ament_target_dependencies(pub_joint_commands rclcpp osrf_msgs sensor_msgs)
+
+install(TARGETS
+  pub_atlas_command
+  pub_atlas_command_fast
+  pub_joint_commands
+  RUNTIME DESTINATION lib/${PROJECT_NAME}
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -240,6 +259,9 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/VRCScoringPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/DRCVehicleROSPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/DRCVehicleROSPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_atlas_command.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_atlas_command_fast.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_joint_commands.cpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})
