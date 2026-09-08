@@ -1,81 +1,50 @@
-cmake_minimum_required(VERSION 2.8.3)
+cmake_minimum_required(VERSION 3.8)
 project(drcsim_gazebo)
-set(CMAKE_BUILD_TYPE "Debug")
 
+find_package(ament_cmake REQUIRED)
 
-# Used by test/ and script/
-set(ROS_PACKAGE_NAME drcsim_gazebo)
+# launch/, config/, test/, and scripts/ still hold most of the original
+# ROS1 roslaunch/rostest/rospy source (194 rostest files, 63 more launch
+# files, most of the old scripts) -- not yet ported, left in place
+# untouched rather than deleted (see CLAUDE.md for what's deferred vs.
+# what was confirmed dead and actually removed). Installing them
+# wholesale is harmless: nothing in a ROS 2 workspace will invoke a
+# ROS1-format .launch/rostest file.
+install(DIRECTORY launch DESTINATION share/${PROJECT_NAME})
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
-find_package(catkin REQUIRED COMPONENTS atlas_description drcsim_gazebo_plugins atlas_msgs drcsim_gazebo_ros_plugins drcsim_model_resources irobot_hand_description multisense_sl_description sandia_hand_description)
+if(BUILD_TESTING)
+  # Only lint what's actually been ported in this branch -- see the same
+  # rationale/pattern already established in
+  # drcsim_gazebo_ros_plugins/CMakeLists.txt for why not
+  # ament_lint_auto_find_test_dependencies() here.
+  find_package(ament_cmake_copyright REQUIRED)
+  find_package(ament_cmake_flake8 REQUIRED)
+  find_package(ament_cmake_pep257 REQUIRED)
+  find_package(ament_cmake_lint_cmake REQUIRED)
 
-include_directories(
-  ${catkin_INCLUDE_DIRS}
-)
+  set(AMENT_LINT_PORTED
+    "${CMAKE_CURRENT_SOURCE_DIR}/launch/atlas.launch.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_atlas_launch.py"
+  )
+  ament_copyright(${AMENT_LINT_PORTED})
+  ament_flake8(${AMENT_LINT_PORTED})
+  ament_pep257(${AMENT_LINT_PORTED})
 
-catkin_package(
-  CATKIN_DEPENDS atlas_description drcsim_gazebo_plugins atlas_msgs drcsim_gazebo_ros_plugins drcsim_model_resources irobot_hand_description multisense_sl_description sandia_hand_description
-)
+  # ament_lint_cmake takes a list of paths *to check*, not an EXCLUDE
+  # list (confirmed the hard way: passing EXCLUDE + paths just lints
+  # "EXCLUDE" -- silently skipped, it isn't a real path -- plus every
+  # path after it, the opposite of what was intended). Check only this
+  # package's own CMakeLists.txt; test/CMakeLists.txt, test/
+  # CheckDisplayCapabilities.cmake, and scripts/CMakeLists.txt are all
+  # leftover ROS1/catkin build files for the not-yet-ported rostest
+  # suite -- not referenced by this CMakeLists.txt at all (no
+  # add_subdirectory), left in place untouched, same as the un-ported
+  # C++ files in drcsim_gazebo_ros_plugins/CMakeLists.txt.
+  ament_lint_cmake("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
 
-install(DIRECTORY
-  launch config
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
-)
+  find_package(launch_testing_ament_cmake REQUIRED)
+  add_launch_test(test/test_atlas_launch.py TIMEOUT 180)
+endif()
 
-install(PROGRAMS
-  scripts/orientation_checker.py
-  scripts/test.py
-  scripts/keyboard_teleop.py
-  scripts/run_gzserver_gdb
-  scripts/CMakeLists.txt
-  scripts/gdbrun
-  scripts/nanokontrol.py
-  scripts/run_gzserver_cheats
-  scripts/run_gazebo
-  scripts/run_gzclient
-  scripts/atlas_commander.py
-  scripts/run_gazebo_paused
-  scripts/performance_test1.py
-  scripts/run_gzserver_perf
-  scripts/arm_teleop.py
-  scripts/run_gzserver_callgrind
-  scripts/reset_pose.py
-  scripts/leg_teleop.py
-  scripts/stand.py
-  scripts/run_gzserver
-  scripts/5steps.py
-  scripts/run_gzserver_memcheck
-  scripts/check_inertia_symmetry.bash
-  # DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
-  DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/scripts
-)
-
-# disabled build of bdiparser for now, pending updated version of urdfdom library?
-set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-include(SearchForTinyXML)
-include_directories(${tinyxml_include_dirs})
-link_directories(${tinyxml_library_dirs})
-add_definitions(${tinyxml_cflags})
-
-# needed by bdi_parser
-find_package(urdfdom REQUIRED)
-include_directories(SYSTEM ${urdfdom_INCLUDE_DIRS})
-link_directories(${urdfdom_LIBRARY_DIRS})
-
-find_package(urdfdom_headers REQUIRED)
-include_directories(SYSTEM ${urdfdom_headers_INCLUDE_DIRS})
-
-find_package(console_bridge REQUIRED)
-include_directories(SYSTEM ${console_bridge_INCLUDE_DIRS})
-link_directories(${console_bridge_LIBRARY_DIRS})
-
-find_package(Boost REQUIRED thread)
-include_directories(${Boost_INCLUDE_DIR})
-link_directories(${Boost_LIBRARY_DIRS})
-
-add_executable(bdi_parser src/bdi_parser.cpp)
-target_link_libraries(bdi_parser ${urdfdom_LIBRARIES} ${tinyxml_libraries} ${console_bridge_LIBRARIES} ${Boost_LIBRARIES})
-
-install(TARGETS bdi_parser DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}/bin/)
-
-# Include test subdirectory
-add_subdirectory(test)
+ament_package()

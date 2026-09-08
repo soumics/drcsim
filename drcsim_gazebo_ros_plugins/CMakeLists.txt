@@ -262,6 +262,7 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_atlas_command.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_atlas_command_fast.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/pub_joint_commands.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/RosNodeOptions.hpp"
   )
   set(AMENT_LINT_EXCLUDE ${AMENT_LINT_ALL_SOURCE})
   list(REMOVE_ITEM AMENT_LINT_EXCLUDE ${AMENT_LINT_PORTED})

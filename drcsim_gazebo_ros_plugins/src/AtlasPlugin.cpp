@@ -39,6 +39,8 @@
 #include <gz/sim/components/Name.hh>
 #include <sdf/JointAxis.hh>
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 using drcsim_gazebo_ros_plugins::AtlasPlugin;
 
 //////////////////////////////////////////////////
@@ -105,7 +107,8 @@ bool AtlasPlugin::GetAtlasVersion()
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("atlas_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "atlas_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   this->atlasVersion = this->rosNode->declare_parameter("atlas_version", 5);
   this->atlasSubVersion =

@@ -928,9 +928,173 @@ not happen automatically.
 ContactModelPlugin ✅, SandiaHandPlugin ✅, IRobotHandPlugin ✅,
 RobotiqHandPlugin ✅, MultiSenseSLPlugin ✅, VRCPlugin ✅, AtlasPlugin ✅,
 VRCScoringPlugin ✅, DRCVehicleROSPlugin ✅, CLI executables ✅.
-Next: Tier 3 (`drcsim_gazebo` — launch files, ros2_control config, and
-the real per-joint PID gains YAML that `AtlasPlugin`/`pub_joint_commands`
-both expect but that doesn't exist yet in this workspace).
+
+## Tier 3 — `drcsim_gazebo` (🚧 first branch written, `port/drcsim_gazebo`, not yet built/tested)
+
+The goal of this tier: prove the *whole* simulation actually comes up
+together (spawn Atlas, get it to hold a pose instead of collapsing —
+the user's original "will it fall?" question), not mechanically port
+all 64 launch files / 194 rostest files / 15 config YAMLs / 25 scripts
+in `drcsim_gazebo`. Two research agents surveyed the whole package
+first; see the plan file this branch was built from
+(`.claude/plans/i-have-forked-this-optimized-lobster.md` at the time,
+though that file gets reused for later plans too — this section is the
+durable record).
+
+**The root cause of "Atlas collapses even with `AtlasPlugin` fully
+working" turned out to be infrastructure, not `AtlasPlugin` itself.**
+Every ROS-coupled plugin (`VRCPlugin`, `AtlasPlugin`, `VRCScoringPlugin`,
+`DRCVehicleROSPlugin`) constructs its internal `rclcpp::Node` via
+`rclcpp::init(0, nullptr)` and default `NodeOptions()` — since none of
+them are started via `ros2 run` (they're gz-sim System plugins loaded
+as `.so`s into gzserver's single process, with no access to that
+process's real `argv`), **none of them could ever receive parameters
+from a launch file at all.** Not `robot_description` (already read by
+`VRCPlugin::Robot::InsertModel`, which spawns it via `LoadSdfString` +
+`CreateEntities` — already fully implemented, just never fed real
+input), not `robot_initial_pose.*`/`atlas.startup_mode` (also already
+read by `VRCPlugin`), and not
+`atlas_controller.gains.<joint>.{p,i,d,i_clamp}` (already read by
+`AtlasPlugin::LoadPIDGainsFromParameter`, silently defaulting to
+**zero** every time) — every one of these already-correct
+`declare_parameter(name, default)` calls was just never getting fed
+anything but its own default.
+
+- **Fix: `RosNodeOptionsFromEnv()`**
+  (`drcsim_gazebo_ros_plugins/include/drcsim_gazebo_ros_plugins/
+  RosNodeOptions.hpp`, new, ~15 lines). If the `DRCSIM_ROS_PARAMS_FILE`
+  environment variable is set (by a launch file, in gz-sim's own
+  environment, before it starts), every plugin's node is constructed
+  with `NodeOptions().arguments({"--ros-args", "--params-file", path})`
+  instead of default options. One shared YAML can hold a top-level
+  section per node name (`vrc_plugin`, `atlas_plugin`,
+  `vrc_scoring_plugin`, `drc_vehicle_ros_plugin`) simultaneously — each
+  node only picks up its own matching section. Env-var-based, not an
+  SDF element, matching the existing `VRC_CHEATS_ENABLED` precedent
+  (`VRCPlugin`/`DRCVehicleROSPlugin` already use an env var for
+  plugin-level config) rather than requiring the static world SDF to be
+  templated/regenerated per launch. Without the env var set (gtests, a
+  bare `gz sim world.sdf`), this is exactly the old default-constructed
+  `NodeOptions` — unchanged behavior. All four plugins' `.cpp` files get
+  the same ~2-line call-site change right before their
+  `std::make_shared<rclcpp::Node>(...)`.
+- **`atlas_description` fixes** (small, but nothing spawns without
+  them — this is the actual `AtlasPlugin` attachment point, since the
+  world file itself spawns no robot at all): `urdf/atlas{,_v3,_v4,
+  _v4_no_wry2,_v5}.gazebo` still had Classic-era
+  `<plugin name="atlas_plugin" filename="libAtlasPlugin.so"/>` (and
+  per-version `libAtlasV3Plugin.so`/`libAtlasV4Plugin.so` — the Classic
+  original had *separate* plugin classes per Atlas version; this port
+  unified them into one `AtlasPlugin` that reads `atlas_version` as a
+  parameter instead, so all five `.gazebo` files now point at the same
+  `filename="AtlasPlugin" name="drcsim_gazebo_ros_plugins::AtlasPlugin"`)
+  plus a dead `libgazebo_ros_joint_pose_trajectory.so` plugin reference
+  (no gz-sim equivalent, no consumer anywhere in this repo) and an
+  already-Classic-disabled commented-out `gazebo_ros_controller_manager`
+  block — both dropped, not ported. Also dropped: the `<xacro:include
+  .../atlas*.transmission" />` line from all 25 `robots/*.urdf.xacro`
+  variants, and the 5 `.transmission` files themselves — confirmed dead
+  `pr2_mechanism`-era transmission stubs; nothing in this port's
+  architecture (`AtlasPlugin` is the whole-body controller, not a
+  `ros2_control` hardware interface — confirmed via a research agent
+  that `gz_ros2_control` isn't even installed in this environment, and
+  nothing in `atlas_description` had any `<ros2_control>` tags to begin
+  with) consumes `ros2_control` transmissions.
+- **`drcsim_model_resources/worlds/atlas.world` fixes** (found during
+  this work, not originally scoped in the plan — but blocking, so fixed
+  anyway): this world predates Tier 2 (it was ported in Tier 0, before
+  the plugins it references existed), so it still had
+  `filename="libVRCPlugin.so" name="vrc_plugin"` /
+  `filename="libVRCScoringPlugin.so" name="vrc_scoring"` (Classic
+  names, not this port's `GZ_ADD_PLUGIN_ALIAS` names) — updated to
+  `filename="VRCPlugin" name="drcsim_gazebo_ros_plugins::VRCPlugin"`
+  and the `VRCScoringPlugin` equivalent, matching every hand-authored
+  test world elsewhere in this migration. It also had **zero gz-sim
+  system plugins at all** (confirmed: none of the 49 worlds in
+  `drcsim_model_resources` do — Tier 0 only touched SDF-version/URI-path
+  cleanliness, not this) — added explicit `Physics`,
+  `SceneBroadcaster`, `UserCommands`, `Sensors`, `Contact` system
+  plugin tags, matching what every test world elsewhere in this
+  migration already does explicitly rather than relying on gz-sim's own
+  default-server-config fallback. The pre-existing `<physics
+  type="ode">` block with nested `<simbody>` params (structurally
+  confused, but present since before this migration and not confirmed
+  to actually break parsing) was left alone — out of scope here.
+- **Real gains**: `drcsim_gazebo/config/atlas_v5_gains.yaml`, converted
+  from the original's `config/whole_body_trajectory_controller_v5.yaml`
+  `gains:` block (same 30 joints incl. both `wry2` wrists, same P/D
+  values) into a flat-dotted-key ROS 2 params file for the
+  `atlas_plugin` node (`atlas_controller.gains.<joint>.p: <value>`,
+  etc. — matches `LoadPIDGainsFromParameter`'s built parameter names
+  character-for-character; flat dotted keys chosen over nested YAML
+  purely to keep 120 values easy to eyeball-verify against the
+  original, not for any parsing reason). The original's `joints:`/
+  `type: robot_mechanism_controllers/JointTrajectoryActionController`/
+  `joint_trajectory_action_node:` machinery has no equivalent —
+  `AtlasPlugin` is already the whole-body controller, so only the gain
+  *values* carried over.
+- **`drcsim_gazebo/launch/atlas.launch.py`** (new): replaces the
+  original's `atlas.launch` → `atlas_no_controllers.launch` →
+  `atlas_bringup.launch` → `atlas_v5_bringup.launch` chain for the
+  default (v5, no hands) case. Renders `atlas_v5.urdf.xacro` via the
+  `xacro` Python API, merges the result plus `robot_initial_pose.*`/
+  `atlas.startup_mode`/delay-window params (as a `vrc_plugin` params
+  section) with `atlas_v5_gains.yaml`'s `atlas_plugin` section into one
+  combined YAML written to a temp file, sets `DRCSIM_ROS_PARAMS_FILE`
+  to that path *before* including `ros_gz_sim`'s `gz_sim.launch.py`
+  (env var must be set before gz-sim's process starts), and starts
+  `robot_state_publisher` (remapped `joint_states` →
+  `atlas/joint_states`, matching the original's own remap) plus a
+  `ros_gz_bridge parameter_bridge` for `/clock`
+  (`config/clock_bridge.yaml` — needed for `use_sim_time` and for the
+  Tier 2 CLI tools' `now().seconds() > 0` busy-waits to ever return).
+  No separate spawner node needed — `VRCPlugin` already spawns the
+  robot itself from the `robot_description` parameter.
+- **Test**: `test/test_atlas_launch.py`, a `launch_testing` test that
+  includes `atlas.launch.py` and — deliberately **not** checking
+  world-frame pelvis height (no world→robot localization exists in
+  this architecture; `robot_state_publisher` only knows the robot's own
+  joint-driven TF tree) — asserts every joint reported on
+  `/atlas/joint_states` stays within 0.5 rad of its 0.0 default target
+  over 60s. With no `atlas_command` publisher running,
+  `AtlasPlugin::ZeroAtlasCommand()`'s target is 0.0 for every joint; if
+  `DRCSIM_ROS_PARAMS_FILE` failed to deliver real gains, heavily-loaded
+  joints (hips, knees) would droop well past this tolerance under
+  gravity within a few seconds. This is the concrete, automated version
+  of "does it stand."
+- **Confirmed dead, deleted** (repo-wide dependency check, same bar as
+  Tier 2's CLI-executable triage): `src/bdi_parser.cpp` +
+  `cmake/SearchForTinyXML.cmake` (no `.cfg` input file exists anywhere
+  in the workspace, not invoked by any build path, its own comment
+  already claimed it was disabled); all 12 non-`whole_body_trajectory`
+  `config/*.yaml` files plus `whole_body_trajectory_controller{,_v3,
+  _v4,_v4_no_wry2,_v5}.yaml` (superseded `pr2_controller_manager`
+  control architecture, fully replaced in function by
+  `atlas_v5_gains.yaml` above); the 9 `run_gzserver*`/`run_gazebo*`
+  shell scripts (Classic-only `libgazebo_ros_api_plugin.so`, superseded
+  by `gz_sim.launch.py`'s own process management); `scripts/
+  reset_pose.py` (per-joint-controller topics, dead — see above);
+  `scripts/{keyboard_teleop,atlas_commander,qual_1_bridge,5steps,
+  stand}.py` (all depend on the `WalkDemoAction` actionlib server
+  already confirmed dropped in Tier 2 as an inert BDI shim).
+- **Deferred, left in place untouched** (not confirmed dead, just not
+  yet ported — same "leave it for its own turn" treatment every other
+  tier's un-ported files got): the other ~60 `launch/*.launch` files
+  (same template as `atlas.launch.py`, different `world`/pose/
+  hand-suffix/version args — trivial to add on top when needed, not
+  worth 60 near-duplicate ports now); the hand-variant bringups
+  (sandia/irobot/robotiq state publishers + per-hand stereo pipeline);
+  the 194-file rostest suite and its helper infra
+  (`ros_api_checker`, `multicamera_subscriber`, `scoring_checker`,
+  `gzlog_stop_checker.py`, `meanvar.py`, the per-task scoring-test
+  scripts); `scripts/{arm_teleop,leg_teleop,nanokontrol,
+  orientation_checker,performance_test1,eigen_arm,check_inertia_
+  symmetry,test}.{py,bash}` and `gdbrun` (none confirmed dead —
+  `arm_teleop.py`/`leg_teleop.py` in particular still target a real,
+  live topic, `osrf_msgs/JointCommands`, just need a `rospy`→`rclpy`
+  rewrite). All of this is stretch-phase follow-up, per the original
+  top-level migration plan's own "Phase E (optional)" framing — noted
+  here so it's a documented backlog, not a silent gap.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

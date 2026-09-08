@@ -39,6 +39,8 @@
 
 #include <builtin_interfaces/msg/time.hpp>
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 using DoubleSeconds = std::chrono::duration<double>;
 
 namespace
@@ -213,7 +215,8 @@ void VRCScoringPlugin::CompleteDeferredLoad()
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("vrc_scoring_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "vrc_scoring_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
   this->pubScore = this->rosNode->create_publisher<atlas_msgs::msg::VRCScore>(
     "vrc_score", rclcpp::QoS(1).transient_local());
 }

@@ -47,6 +47,8 @@
 
 #include <atlas_msgs/msg/atlas_behavior_step_data.hpp>
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 using drcsim_gazebo_ros_plugins::VRCPlugin;
 
 //////////////////////////////////////////////////
@@ -121,7 +123,8 @@ void VRCPlugin::DeferredLoad(gz::sim::EntityComponentManager & _ecm)
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("vrc_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "vrc_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   this->LoadVRCROSAPI();
 
