@@ -18,18 +18,19 @@
 Per-joint slider GUI publishing osrf_msgs/JointCommands to Atlas.
 
 Ported from the original drcsim joint_commands_gui tutorial, rewritten
-against three real problems found in the original while porting it (see
-CLAUDE.md): it used wxWidgets (not available in a stock ROS 2 Jazzy
-desktop-full image -- this uses Tkinter, stdlib, instead), it filtered
-joints by a stale "atlas::"-prefixed, 28-joint (v3/v4 Atlas) name list
-(updated to atlas_v5's real, unprefixed, 30-joint names), and its
+against several real problems found while porting it (see CLAUDE.md): it
+used wxWidgets (not available in a stock ROS 2 Jazzy desktop-full image --
+this uses Tkinter, stdlib, instead), it filtered joints by a stale
+"atlas::"-prefixed, 28-joint (v3/v4 Atlas) name list (updated to
+atlas_v5's real, unprefixed, 30-joint names), its
 `source_list`/`FollowJointTrajectoryActionGoal` remote-control code path
-referenced a message type it never imported -- dead on arrival in the
-original, dropped here rather than ported.
+referenced a message type it never imported (dead on arrival in the
+original, dropped here rather than ported), and it assumed
+`JointCommands` has a `k_effort` field the way `AtlasCommand` does --
+confirmed by an actual `AttributeError` at runtime that it does not.
 """
 
 from math import pi
-import threading
 import tkinter as tk
 import xml.dom.minidom
 
@@ -111,9 +112,10 @@ class JointCommandGuiNode(Node):
 
         self.free_joints = {}
         self.joint_order = []
-        # Slider-set target position per joint; read by the publish timer,
-        # written only from the Tk mainloop thread -- see the module
-        # docstring's note on why no lock is used for this.
+        # Slider-set target position per joint; only ever read and written
+        # from main() -- either directly (Tk callbacks) or via
+        # rclpy.spin_once() (the publish timer) -- see main()'s note on why
+        # GUI and ROS processing share one thread here.
         self.values = {}
 
         self.pub = self.create_publisher(JointCommands, '/atlas/joint_commands', 10)
@@ -121,7 +123,6 @@ class JointCommandGuiNode(Node):
             depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL)
         self.description_sub = self.create_subscription(
             String, 'robot_description', self._on_robot_description, transient_local_qos)
-        self.gui = None
         self.timer = None
 
     def _on_robot_description(self, msg):
@@ -133,11 +134,6 @@ class JointCommandGuiNode(Node):
         self.values = {n: self.free_joints[n]['zero'] for n in self.joint_order}
         self.get_logger().info(
             f'Got robot_description: {len(self.joint_order)} joint sliders.')
-
-        if self.use_gui:
-            self.gui = JointCommandGuiWindow(self)
-            threading.Thread(target=self.gui.mainloop, daemon=True).start()
-
         self.timer = self.create_timer(1.0 / self.rate_hz, self._publish_command)
 
     def _publish_command(self):
@@ -146,17 +142,16 @@ class JointCommandGuiNode(Node):
         command = JointCommands()
         command.name = list(self.joint_order)
         command.position = [self.values[n] for n in self.joint_order]
-        command.k_effort = [255] * len(self.joint_order)
         self.pub.publish(command)
 
     def set_value(self, name, value):
         self.values[name] = value
 
-    def center_all(self):
+    def center_all(self, gui=None):
         for name in self.joint_order:
             self.values[name] = self.free_joints[name]['zero']
-        if self.gui is not None:
-            self.gui.refresh_from_node()
+        if gui is not None:
+            gui.refresh_from_node()
 
 
 class JointCommandGuiWindow(tk.Tk):
@@ -194,7 +189,7 @@ class JointCommandGuiWindow(tk.Tk):
         value_label.config(text=f'{value:.2f}')
 
     def _on_center(self):
-        self.node.center_all()
+        self.node.center_all(gui=self)
 
     def refresh_from_node(self):
         for name, (slider, value_label) in self.sliders.items():
@@ -207,7 +202,31 @@ def main(args=None):
     rclpy.init(args=args)
     node = JointCommandGuiNode()
     try:
-        rclpy.spin(node)
+        # Block until robot_description arrives -- Tk isn't involved yet,
+        # so this is a plain single-threaded wait.
+        while rclpy.ok() and not node.joint_order:
+            rclpy.spin_once(node, timeout_sec=0.1)
+
+        if rclpy.ok() and node.use_gui:
+            # Tcl/Tk requires the thread that creates a Tk root to be the
+            # same one that runs its mainloop ("Calling Tcl from different
+            # apartment" otherwise, confirmed the hard way) -- so rather
+            # than run rclpy on a separate thread, pump it from inside
+            # Tk's own event loop via after(), keeping everything
+            # (widgets, mainloop, and rclpy callbacks) on this one thread.
+            window = JointCommandGuiWindow(node)
+
+            def pump_ros():
+                if rclpy.ok():
+                    rclpy.spin_once(node, timeout_sec=0)
+                    window.after(10, pump_ros)
+                else:
+                    window.destroy()
+
+            window.after(10, pump_ros)
+            window.mainloop()
+        elif rclpy.ok():
+            rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:

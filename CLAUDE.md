@@ -1571,6 +1571,26 @@ problems found while reading the original before deciding how to port it:
    entirely rather than fixed forward, since nothing in this migration
    ever populates that param anyway.
 
+Two more real bugs surfaced only by actually running it interactively
+(not caught by flake8/pep257/lint_cmake or the unit tests, none of which
+touch rclpy message construction or Tk's runtime threading model):
+4. **`JointCommands` has no `k_effort` field** — confirmed via an actual
+   `AttributeError` at runtime. The port had assumed symmetry with
+   `AtlasCommand` (which does have one); `osrf_msgs/JointCommands.msg`'s
+   real field list has no per-joint PID-vs-effort blend concept at all.
+   Fixed by simply not setting it.
+5. **`RuntimeError: Calling Tcl from different apartment`** — the first
+   version created the `Tk()` root window on the rclpy subscription
+   callback thread, then ran its `.mainloop()` on a separate spawned
+   thread (mirroring the original wx version's own thread split). Tcl/Tk
+   requires the *same* thread that creates a Tk interpreter to also drive
+   its event loop; this is a stricter requirement in this environment's
+   Tk build than wx apparently enforced. Fixed by removing the extra
+   thread entirely: `main()` now blocks on `rclpy.spin_once()` until
+   `robot_description` arrives, then builds the Tk window and pumps
+   `rclpy.spin_once(timeout_sec=0)` from inside Tk's own event loop via
+   `window.after()` — GUI and ROS callbacks all run on one thread.
+
 Also **redesigned how it gets `robot_description`**: the original read it
 via `rospy.get_param('robot_description')`, relying on ROS 1's global flat
 parameter server (any node can read any other node's params) — no ROS 2
@@ -1591,7 +1611,12 @@ import) that a purely mechanical rospy→rclpy translation would have
 carried forward silently. Cross-checking every topic/param name against
 the actual C++ plugin source (`grep`ing `AtlasPlugin.cpp`/
 `DRCVehicleROSPlugin.cpp` directly, not trusting the original tutorial's
-own comments) is what caught all four.
+own comments) is what caught all four. **But two more bugs (the missing
+`k_effort` field, the Tk threading crash) got through static review, unit
+tests, and every linter clean, and only showed up on the first actual
+interactive run** — a reminder that for anything touching real message
+types or a GUI event loop, "all lint/tests pass" is necessary but not
+sufficient; an actual `ros2 run` is the only thing that catches these.
 
 **Not ported / deferred**: nothing further remains in this tier's original
 five subpackages — three were dropped, two fully ported. Any additional
