@@ -82,6 +82,9 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'headless', default_value='false',
             description='Run gz-sim server-only (-s), no GUI -- for CI/test use.'),
+        # Sets VRC_CHEATS_ENABLED, gating VRCPlugin extras including the
+        # atlas/cmd_vel warp-move topic.
+        DeclareLaunchArgument('cheats_enabled', default_value='true'),
     ]
 
     return LaunchDescription(declared_arguments + [OpaqueFunction(function=_launch_setup)])
@@ -93,6 +96,8 @@ def _launch_setup(context, *args, **kwargs):
     startup_mode = LaunchConfiguration('startup_mode').perform(context)
     gz_verbosity = LaunchConfiguration('gz_verbosity').perform(context)
     headless = LaunchConfiguration('headless').perform(context).lower() in ('true', '1')
+    cheats_enabled = LaunchConfiguration('cheats_enabled').perform(context).lower() in (
+        'true', '1')
     pose = {
         axis: float(LaunchConfiguration(axis).perform(context))
         for axis in ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
@@ -136,6 +141,9 @@ def _launch_setup(context, *args, **kwargs):
         # Must be set before gz-sim (and therefore every plugin loaded
         # into its single process) starts -- see RosNodeOptionsFromEnv().
         SetEnvironmentVariable('DRCSIM_ROS_PARAMS_FILE', params_path),
+        # Also must be set before gz-sim starts -- VRCPlugin reads this at
+        # its own Configure() time, same as RosNodeOptionsFromEnv() above.
+        SetEnvironmentVariable('VRC_CHEATS_ENABLED', '1' if cheats_enabled else '0'),
         gz_sim_launch,
         Node(
             package='ros_gz_bridge',
