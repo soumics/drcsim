@@ -52,7 +52,7 @@ struct PluginPathSetter
       close(fd);
       std::ofstream paramsFile(paramsPath);
       paramsFile << "vrc_plugin:\n  ros__parameters:\n"
-                    "    atlas.time_to_unpin: 1.0\n";
+        "    atlas.time_to_unpin: 1.0\n";
       paramsFile.close();
       setenv("DRCSIM_ROS_PARAMS_FILE", paramsPath, 1);
     }
