@@ -1,30 +1,37 @@
-cmake_minimum_required(VERSION 2.4.6)
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
+cmake_minimum_required(VERSION 3.8)
+project(atlas_teleop)
 
-# Set the build type.  Options are:
-#  Coverage       : w/ debug symbols, w/o optimization, w/ code-coverage
-#  Debug          : w/ debug symbols, w/o optimization
-#  Release        : w/o debug symbols, w/ optimization
-#  RelWithDebInfo : w/ debug symbols, w/ optimization
-#  MinSizeRel     : w/o debug symbols, w/ optimization, stripped binaries
-#set(ROS_BUILD_TYPE RelWithDebInfo)
+find_package(ament_cmake REQUIRED)
 
-rosbuild_init()
+install(PROGRAMS
+  scripts/drc_vehicle_teleop.py
+  scripts/atlas_teleop.py
+  scripts/nanokontrol.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+install(DIRECTORY config DESTINATION share/${PROJECT_NAME})
 
-#set the default path for built executables to the "bin" directory
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/bin)
-#set the default path for built libraries to the "lib" directory
-set(LIBRARY_OUTPUT_PATH ${PROJECT_SOURCE_DIR}/lib)
+if(BUILD_TESTING)
+  find_package(ament_cmake_copyright REQUIRED)
+  find_package(ament_cmake_flake8 REQUIRED)
+  find_package(ament_cmake_pep257 REQUIRED)
+  find_package(ament_cmake_lint_cmake REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
 
-#uncomment if you have defined messages
-#rosbuild_genmsg()
-#uncomment if you have defined services
-#rosbuild_gensrv()
+  set(AMENT_LINT_PORTED
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/drc_vehicle_teleop.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/atlas_teleop.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/nanokontrol.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_blend_command.py"
+  )
+  ament_copyright(${AMENT_LINT_PORTED})
+  ament_flake8(${AMENT_LINT_PORTED})
+  ament_pep257(${AMENT_LINT_PORTED})
+  # See drcsim_gazebo/CMakeLists.txt's note on why this takes a path list,
+  # not an EXCLUDE keyword.
+  ament_lint_cmake("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
 
-#common commands for building c++ executables and libraries
-#rosbuild_add_library(${PROJECT_NAME} src/example.cpp)
-#target_link_libraries(${PROJECT_NAME} another_library)
-#rosbuild_add_boost_directories()
-#rosbuild_link_boost(${PROJECT_NAME} thread)
-#rosbuild_add_executable(example examples/example.cpp)
-#target_link_libraries(example ${PROJECT_NAME})
+  ament_add_pytest_test(test_blend_command test/test_blend_command.py)
+endif()
+
+ament_package()

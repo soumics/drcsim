@@ -1482,6 +1482,123 @@ fix applied (its workaround — avoiding `Component<T>()` via
 harmless as-is), but any *new* `.cc` file that needs an explicit template
 call should just be a `.cpp` file from the start.
 
+## Tier 4 — `drcsim_tutorials` (✅ scoped subset done)
+
+Five rosbuild (`manifest.xml`, no `package.xml` at all — one step further
+back than any tier before this) subpackages. Surveyed via an Explore agent
+before touching anything; scope below matches that survey's
+recommendation.
+
+**Dropped entirely** (no external references found anywhere in the repo
+before removal — confirmed via grep first):
+- `atlas_interface` — wraps Boston Dynamics' proprietary, closed-source
+  `AtlasRobotInterface` SDK (`$ATLAS_ROBOT_INTERFACE_ROOT`, not present
+  anywhere in this workspace) around `AtlasSimInterfaceCommand` — the same
+  BDI walk/behavior shim already confirmed inert in Tier 2 (`AtlasPlugin`'s
+  `WALK`/`STAND` behaviors are a no-op PID stand-in). Nothing real to port.
+- `atlas_interface_bridge` — a bridge for driving the *physical* Atlas
+  robot, not simulation; compiles in ~1600 lines of vendor example code
+  from that same missing SDK. Its own README admits it was never tested on
+  real hardware.
+- `control_mode_switch` — one demo script (`demo.py`) whose entire point is
+  a scripted BDI walk sequence, which cannot actually walk (same inert
+  shim). Its only working part (basic `AtlasCommand` pose sequencing)
+  duplicates the already-ported `pub_atlas_command`/`pub_joint_commands`
+  CLI tools (Tier 2).
+- The stray `drcsim_tutorials/CMakeLists.txt` at this directory's root —
+  leftover rosbuild-era top-level workspace glue (`ExternalProject_Add`
+  for `atlas_msgs`/`joint_commands_gui`/`atlas_teleop`), meaningless in an
+  ament workspace; not a real per-subpackage file.
+
+**Ported: `atlas_teleop`** (ament_cmake, Python scripts installed via
+`install(PROGRAMS ...)`, matching this repo's only established Python-heavy
+package precedent, `drcsim_gazebo` — no `ament_python` package exists
+anywhere else in this repo, so this doesn't introduce a second convention):
+- `drc_vehicle_teleop.py` — joystick → `DRCVehicleROSPlugin`/`VRCPlugin`
+  cheat topics. **Real bug found and fixed**: the original hardcoded
+  `drc_vehicle/...` as the topic prefix, but `DRCVehicleROSPlugin`
+  advertises every cmd/state topic under the spawned vehicle model's
+  actual gz-sim name (`Model(_entity).Name()`, confirmed by reading
+  `DRCVehicleROSPlugin.cpp`), which is `golf_cart` in `atlas.world` — the
+  original's hardcoded prefix would never have matched anything in this
+  migration. Now a `vehicle_model_name` ROS param, default `golf_cart`.
+  `drc_world/robot_enter_car`/`robot_exit_car` (fixed, non-model-scoped
+  `VRCPlugin` topics) were already correct as-is.
+- `atlas_teleop.py` — joystick-driven whole-body pose blending, publishing
+  `AtlasCommand`. **Real bug found and fixed**: the original targeted
+  Atlas v3/v4's 28-joint layout (no `wry2` wrist joint) with joint names
+  entirely commented out (`AtlasCommand` has no per-joint name field at
+  all, unlike `JointCommands` — position/effort/etc. arrays are matched to
+  joints purely by index) — mismatched with `atlas_v5`'s real 30-joint
+  layout this migration actually targets (confirmed exact order by reading
+  `AtlasPlugin.cpp`'s `jointNames.push_back()` calls directly, not
+  assumed). Also **simplified a design mistake in the original**: rather
+  than hardcoding its own separate `kp`/`kd` gain arrays (the original
+  did; this is exactly the class of problem `RosNodeOptionsFromEnv`/the
+  Tier 3 gains-file mechanism was built to avoid), this leaves
+  `AtlasCommand`'s gain fields empty entirely — `AtlasPlugin::
+  SetAtlasCommand` only ever applies a gain field when its array length
+  matches its own joint count, so an empty array is silently ignored and
+  the real, already-loaded `atlas_v5_gains.yaml` values are left alone.
+  The 4 bundled task-preset YAMLs (`drill`/`drive`/`firehose`/`pedal`)
+  were mechanically converted from 28- to 30-joint format (a `0.0`
+  inserted at both new `wry2` positions; every other value is the
+  original's real, hand-tuned data, unchanged) rather than dropped —
+  verified correct by diffing the conversion script's output against the
+  originals position-by-position before committing.
+- `nanokontrol.py` — MIDI-hardware-to-`Joy` driver, ported mechanically
+  (rospy→rclpy, Python 2→3 syntax) but **not functionally verified**: it
+  needs the `pygame` package and physical Korg nanoKONTROL hardware,
+  neither available here. Treat as unverified until someone with the
+  actual hardware tries it.
+- The pure blending/parsing logic (`blend_command()`, `load_pose_file()`)
+  was split out of the ROS callbacks specifically so it's unit-testable
+  without rclpy or a live joystick — see `test/test_blend_command.py`.
+
+**Ported, as a real rewrite: `joint_commands_gui`** — a per-joint slider
+GUI publishing `JointCommands` to `atlas/joint_commands`. Three real
+problems found while reading the original before deciding how to port it:
+1. **wxWidgets**, not available in a stock ROS 2 Jazzy desktop-full image.
+   Rewritten with Tkinter (stdlib, no new dependency).
+2. **Stale joint filtering**: hardcoded a 28-joint, `"atlas::"`-prefixed
+   name list (same class of bug as `atlas_teleop.py` above, and the same
+   class already fixed for Tier 2's CLI executables) to decide which URDF
+   joints get a slider. Updated to the real, unprefixed, 30-joint
+   `atlas_v5` list.
+3. **Dead code path**: `source_list` subscribed topics as
+   `FollowJointTrajectoryActionGoal`, a type the original **never actually
+   imported** — would `NameError` if `source_list` were ever set. Dropped
+   entirely rather than fixed forward, since nothing in this migration
+   ever populates that param anyway.
+
+Also **redesigned how it gets `robot_description`**: the original read it
+via `rospy.get_param('robot_description')`, relying on ROS 1's global flat
+parameter server (any node can read any other node's params) — no ROS 2
+equivalent exists (every node's parameters are private to it). Rather than
+invent a new param-passing mechanism, this subscribes to the
+`robot_description` topic `robot_state_publisher` already publishes by
+default with transient-local QoS in ROS 2 — the standard, idiomatic way
+other tools (e.g. RViz) already get it, and needs zero coordination with
+`atlas.launch.py`. Same gain-field-left-empty simplification as
+`atlas_teleop.py` above, for the same reason (`atlas_controller/gains/...`
+was read from the same now-nonexistent global param server in the
+original).
+
+**General lesson from this whole tier**: reading the *original* source
+carefully before porting caught four real, independent bugs (two stale
+28-vs-30-joint layouts, one hardcoded-vs-actual topic prefix, one dead
+import) that a purely mechanical rospy→rclpy translation would have
+carried forward silently. Cross-checking every topic/param name against
+the actual C++ plugin source (`grep`ing `AtlasPlugin.cpp`/
+`DRCVehicleROSPlugin.cpp` directly, not trusting the original tutorial's
+own comments) is what caught all four.
+
+**Not ported / deferred**: nothing further remains in this tier's original
+five subpackages — three were dropped, two fully ported. Any additional
+tutorial content (e.g. a custom keyboard-teleop walking demo) is planned
+as a new, separate package outside this migration's original-repo scope,
+not part of `drcsim_tutorials`.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

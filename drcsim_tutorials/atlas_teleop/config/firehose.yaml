@@ -1,0 +1,17 @@
+# Converted from the original drcsim atlas_teleop preset of the same name:
+# the original's 28-value-per-pose format (v3/v4 Atlas, no wry2 wrist
+# joint) has had a 0.0 inserted at both wry2 positions (after l_arm's 6th
+# value and after r_arm's 6th value) to match atlas_v5's 30-joint layout --
+# every other value is the original's real, hand-tuned data, unchanged. See
+# atlas_teleop.py's ATLAS_JOINT_NAMES for the exact resulting joint order.
+knobs: right_arm
+#  back       left leg      right leg      left arm      right arm                                     LH        RH
+0: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 0 0 0.0 cyl 0 cyl 0"
+1: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 3 0 0 0 0 0.0 cyl 0 cyl 0"
+2: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 1 0 0 0 0.0 cyl 0 cyl 0"
+3: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 4.0 0 0.0 cyl 0 cyl 0"
+4: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 -4.0 0 0.0 par 1 cyl 0"
+5: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 0.0 4.0 0.0 cyl 0 cyl 0"
+6: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 0.0 -4.0 0.0 cyl 0 cyl 0"
+7: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 0 0 0.0 cyl 1 cyl 1"
+8: "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.0 0 0 0 0 0 0 0.0 sph 1 sph 1"

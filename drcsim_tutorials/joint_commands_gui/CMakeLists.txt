@@ -1,17 +1,32 @@
-cmake_minimum_required(VERSION 2.4.6)
-
-set(ENV{ROS_ROOT} ${ROS_ROOT})
-set(ENV{ROS_PACKAGE_PATH} ${ROS_PACKAGE_PATH})
-# Push the PKG_CONFIG_PATH we were passed up into the environment, to allow us to find gazebo
-set(ENV{PKG_CONFIG_PATH} ${PKG_CONFIG_PATH}:$ENV{PKG_CONFIG_PATH})
-
-include($ENV{ROS_ROOT}/core/rosbuild/rosbuild.cmake)
-
+cmake_minimum_required(VERSION 3.8)
 project(joint_commands_gui)
-rosbuild_init()
 
-set (CMAKE_INSTALL_RPATH_USE_LINK_PATH 1)
+find_package(ament_cmake REQUIRED)
 
-install(FILES manifest.xml DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${DRC_SIM_PROJECT_NAME}-${DRC_SIM_VERSION}/ros/${PROJECT_NAME})
-install(FILES joint_command_gui.py DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${DRC_SIM_PROJECT_NAME}-${DRC_SIM_VERSION}/ros/${PROJECT_NAME})
-install(FILES joint_command_gui.png DESTINATION ${CMAKE_INSTALL_PREFIX}/share/${DRC_SIM_PROJECT_NAME}-${DRC_SIM_VERSION}/ros/${PROJECT_NAME})
+install(PROGRAMS
+  scripts/joint_command_gui.py
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+if(BUILD_TESTING)
+  find_package(ament_cmake_copyright REQUIRED)
+  find_package(ament_cmake_flake8 REQUIRED)
+  find_package(ament_cmake_pep257 REQUIRED)
+  find_package(ament_cmake_lint_cmake REQUIRED)
+  find_package(ament_cmake_pytest REQUIRED)
+
+  set(AMENT_LINT_PORTED
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/joint_command_gui.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_parse_free_joints.py"
+  )
+  ament_copyright(${AMENT_LINT_PORTED})
+  ament_flake8(${AMENT_LINT_PORTED})
+  ament_pep257(${AMENT_LINT_PORTED})
+  # See drcsim_gazebo/CMakeLists.txt's note on why this takes a path list,
+  # not an EXCLUDE keyword.
+  ament_lint_cmake("${CMAKE_CURRENT_SOURCE_DIR}/CMakeLists.txt")
+
+  ament_add_pytest_test(test_parse_free_joints test/test_parse_free_joints.py)
+endif()
+
+ament_package()
