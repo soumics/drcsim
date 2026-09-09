@@ -28,6 +28,8 @@
 
 #include <gz/common/Console.hh>
 #include <gz/math/Angle.hh>
+#include <gz/math/Inertial.hh>
+#include <gz/math/MassMatrix3.hh>
 #include <gz/math/Quaternion.hh>
 #include <gz/plugin/Register.hh>
 #include <gz/sim/Joint.hh>
@@ -41,7 +43,7 @@
 #include <gz/sim/components/Name.hh>
 #include <sdf/Cylinder.hh>
 #include <sdf/Geometry.hh>
-#include <sdf/Joint.hh>
+#include <sdf/Link.hh>
 #include <sdf/Model.hh>
 #include <sdf/Root.hh>
 
@@ -150,33 +152,59 @@ void VRCPlugin::DeferredLoad(gz::sim::EntityComponentManager & _ecm)
 }
 
 //////////////////////////////////////////////////
+gz::sim::Entity VRCPlugin::EnsureWorldPinAnchor(
+  gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr)
+{
+  if (this->worldPinAnchorLinkEntity != gz::sim::kNullEntity) {
+    return this->worldPinAnchorLinkEntity;
+  }
+
+  sdf::Link linkSdf;
+  linkSdf.SetName("anchor_link");
+  const gz::math::MassMatrix3d massMatrix(
+    1.0, gz::math::Vector3d(1.0, 1.0, 1.0), gz::math::Vector3d::Zero);
+  linkSdf.SetInertial(gz::math::Inertiald(massMatrix, gz::math::Pose3d::Zero));
+
+  sdf::Model modelSdf;
+  modelSdf.SetName("vrc_plugin_world_pin_anchor");
+  modelSdf.SetStatic(true);
+  modelSdf.AddLink(linkSdf);
+
+  gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
+  const gz::sim::Entity anchorModelEntity = creator.CreateEntities(&modelSdf);
+  if (anchorModelEntity == gz::sim::kNullEntity) {
+    gzerr << "EnsureWorldPinAnchor: failed to spawn the anchor model." << std::endl;
+    return gz::sim::kNullEntity;
+  }
+
+  this->worldPinAnchorLinkEntity =
+    gz::sim::Model(anchorModelEntity).LinkByName(_ecm, "anchor_link");
+  return this->worldPinAnchorLinkEntity;
+}
+
+//////////////////////////////////////////////////
 gz::sim::Entity VRCPlugin::AddJoint(
   gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr,
   gz::sim::Entity _modelEntity, gz::sim::Entity _link1, gz::sim::Entity _link2)
 {
+  // No longer used now that the world-pin case (see below) also welds to
+  // a real link via DetachableJoint, same as every other case -- kept in
+  // the signature to avoid a wider diff across every call site.
+  static_cast<void>(_modelEntity);
+
   if (_link1 == gz::sim::kNullEntity) {
-    // Pin _link2 to the world via a real SDF fixed joint, parented under
-    // the same model as _link2 (see the class-level design note).
-    const auto * nameComponent = _ecm.Component<gz::sim::components::Name>(_link2);
-    if (!nameComponent) {
-      gzerr << "AddJoint: pin target link has no Name component." << std::endl;
+    // Pin _link2 to the world -- see the class-level design note for why
+    // this welds to a small static anchor model instead of a directly
+    // world-parented SDF fixed joint.
+    _link1 = this->EnsureWorldPinAnchor(_ecm, _eventMgr);
+    if (_link1 == gz::sim::kNullEntity) {
+      gzerr << "AddJoint: no world-pin anchor link available." << std::endl;
       return gz::sim::kNullEntity;
     }
-    const std::string * childName = &nameComponent->Data();
-
-    sdf::Joint jointSdf;
-    jointSdf.SetName(*childName + "_world_pin_joint");
-    jointSdf.SetType(sdf::JointType::FIXED);
-    jointSdf.SetParentName("world");
-    jointSdf.SetChildName(*childName);
-
-    gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
-    const gz::sim::Entity jointEntity = creator.CreateEntities(&jointSdf, true);
-    creator.SetParent(jointEntity, _modelEntity);
-    return jointEntity;
   }
 
-  // Cross-model (or same-model) rigid weld between two existing links.
+  // Cross-model (or same-model, or now anchor-model) rigid weld between
+  // two existing links.
   const gz::sim::Entity jointEntity = _ecm.CreateEntity();
   _ecm.CreateComponent(
     jointEntity,

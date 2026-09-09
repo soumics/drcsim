@@ -1206,13 +1206,50 @@ anything but its own default.
     dynamic-stand transition itself (a real, currently open bug — worth
     a dedicated debugging session with the GUI actually open and watched
     step by step, not just log-reading).
-  - The `No joint named [pelvis_world_pin_joint] for modelID [N]`
-    warning that appears during every pin (both the `bdi_stand` and
-    `pinned` runs above) is **confirmed harmless** — it's present in the
-    successful `pinned` run too, with no ill effect, so it's a one-tick
-    creation/query race (something queries the joint the same tick it's
-    created, before the physics engine has caught up), not a repeat of
-    the real `utorso` rejection bug. Safe to ignore.
+  - **Correction to the note above**: the `No joint named
+    [pelvis_world_pin_joint] for modelID [N]` warning was *not* harmless
+    — it was the actual bug, just not visually obvious from a passive
+    "is it standing" check. Running `pub_atlas_command` (the sine-wave
+    diagnostic tool from Tier 2) against the "successfully standing"
+    `pinned` run made it unmistakable: **the pelvis never moved at all**
+    while every other joint flailed under the tool's aggressive
+    commands — exactly what "still welded to the world" looks like, not
+    "standing freely." Root cause, confirmed by watching it happen:
+    `RemoveJoint()`'s `_ecm.RequestRemoveEntity(jointEntity)` erases the
+    *ECS* entity for the world-pin joint, but gz-physics's dartsim
+    plugin never actually detaches the underlying physics constraint —
+    that warning is dartsim logging that it can't find a joint by that
+    name to remove, and silently leaving the real weld in place forever.
+    Near-certainly because "weld link to world" is normally a
+    Skeleton-construction-time operation in dartsim; a *dynamically
+    added* world joint (via `SdfEntityCreator::CreateEntities(&jointSdf,
+    true)`, added to a model that already exists) apparently doesn't get
+    registered as a normal, later-removable joint object, even though it
+    *does* successfully constrain the body at creation time. This had
+    never been caught before because no test in this migration ever
+    exercised the *removal* path — `VRCPlugin`'s own gtest only checks
+    that pinning holds, never unpins.
+
+    **Fixed** by no longer creating that kind of joint at all:
+    `VRCPlugin::EnsureWorldPinAnchor()` spawns one small, permanent,
+    static "anchor" model the same way `Robot::InsertModel()` already
+    spawns the robot itself (programmatic SDF + `SdfEntityCreator`, no
+    world-file changes needed), and "pin to world" now welds to *that
+    real link* via the same `gz::sim::components::DetachableJoint`
+    mechanism already proven reliable — both to create *and to
+    remove* — for every cross-model weld elsewhere in this plugin
+    (fire hose docking, vehicle-seat, hand-grabs-fire-hose). `AddJoint()`
+    no longer has two different code paths at all; both branches build
+    a `DetachableJoint` now, differing only in which entity serves as
+    the parent link. **General lesson**: dynamically creating a joint
+    with parent name `"world"` via `SdfEntityCreator` after a model
+    already exists in gz-sim/dartsim (Harmonic, gz-sim8) may create a
+    joint that physically holds but can never be cleanly removed again
+    — prefer `DetachableJoint` against a real (even trivial/static)
+    anchor link for anything that needs to be un-pinned later, and
+    reserve the `SdfEntityCreator`-fixed-joint-to-`"world"` approach (if
+    used at all) for cases that are genuinely permanent for the life of
+    the simulation.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
