@@ -16,9 +16,11 @@
 */
 
 #include <gtest/gtest.h>
+#include <unistd.h>
 
 #include <chrono>
 #include <cstdlib>
+#include <fstream>
 #include <memory>
 #include <string>
 #include <thread>
@@ -30,15 +32,30 @@
 
 #include <rclcpp/rclcpp.hpp>
 
-// Point gz-sim at the just-built plugin .so, and enable VRCPlugin's cheats
-// (off by default, gated by this env var, matching the original), before
-// any TestFixture is constructed.
+// Point gz-sim at the just-built plugin .so, enable VRCPlugin's cheats (off
+// by default, gated by this env var, matching the original), and shorten
+// atlas.time_to_unpin (default 5s -- too slow for a unit test) via the same
+// DRCSIM_ROS_PARAMS_FILE mechanism a real launch file uses (see
+// RosNodeOptions.hpp), all before any TestFixture is constructed. 1.0s
+// safely exceeds StandsUpRosInterfaceAndAutoPinsOnStartup's 300-iteration
+// (300ms) window below, so it stays unaffected by this global override.
 struct PluginPathSetter
 {
   PluginPathSetter()
   {
     setenv("GZ_SIM_SYSTEM_PLUGIN_PATH", PLUGIN_BUILD_DIR, 1);
     setenv("VRC_CHEATS_ENABLED", "1", 1);
+
+    char paramsPath[] = "/tmp/drcsim_vrc_plugin_test_params.XXXXXX";
+    const int fd = mkstemp(paramsPath);
+    if (fd >= 0) {
+      close(fd);
+      std::ofstream paramsFile(paramsPath);
+      paramsFile << "vrc_plugin:\n  ros__parameters:\n"
+                    "    atlas.time_to_unpin: 1.0\n";
+      paramsFile.close();
+      setenv("DRCSIM_ROS_PARAMS_FILE", paramsPath, 1);
+    }
   }
 };
 static PluginPathSetter g_pluginPathSetter;
@@ -111,6 +128,59 @@ TEST(VRCPluginTest, StandsUpRosInterfaceAndAutoPinsOnStartup)
   // centimeters under gravity in that time.
   EXPECT_TRUE(sawUtorso);
   EXPECT_NEAR(lastUtorsoZ, 1.0, 0.01);
+}
+
+TEST(VRCPluginTest, UnpinActuallyReleasesUtorsoToFallUnderGravity)
+{
+  // Regression test for a bug that survived unnoticed through three
+  // different pin-to-world mechanisms (see VRCPlugin.hpp's class-level
+  // design note): each one held the pin correctly, but silently failed to
+  // ever truly release the link again once unpinned -- invisible to the
+  // test above, which only ever checks that the pin holds, never that
+  // unpinning actually works. This asserts the release itself.
+  gz::sim::TestFixture fixture(
+    std::string(TEST_WORLD_DIR) + "/vrc_plugin_test.sdf");
+
+  double lastUtorsoZ = 0.0;
+  double zJustAfterUnpin = -1.0;
+  bool sawUtorso = false;
+  fixture.OnPostUpdate(
+    [&](const gz::sim::UpdateInfo & _info, const gz::sim::EntityComponentManager & _ecm)
+    {
+      gz::sim::World world(gz::sim::worldEntity(_ecm));
+      const gz::sim::Entity atlasModel = world.ModelByName(_ecm, "atlas");
+      if (atlasModel == gz::sim::kNullEntity) {
+        return;
+      }
+      const gz::sim::Entity utorso =
+      gz::sim::Model(atlasModel).LinkByName(_ecm, "utorso");
+      if (utorso == gz::sim::kNullEntity) {
+        return;
+      }
+      lastUtorsoZ = gz::sim::worldPose(utorso, _ecm).Pos().Z();
+      sawUtorso = true;
+
+      // atlas.time_to_unpin is overridden to 1.0s (see PluginPathSetter);
+      // capture a baseline Z shortly after that point, once, as the
+      // "released, but gravity hasn't had time to move it much yet" mark.
+      const double simTimeSec = std::chrono::duration<double>(_info.simTime).count();
+      if (zJustAfterUnpin < 0.0 && simTimeSec >= 1.2) {
+        zJustAfterUnpin = lastUtorsoZ;
+      }
+    });
+
+  fixture.Finalize();
+  // 2.5s of sim time at the test world's 1ms step size: well past the 1.0s
+  // auto-unpin point, with 1.3+ more seconds for gravity to visibly move a
+  // freely-falling body (there is no ground plane in this test world, and
+  // nothing else supports utorso once its own pin/gravity-compensation
+  // release, so a still-frozen link -- the exact bug this guards against
+  // -- would keep lastUtorsoZ pinned at its spawn height instead).
+  fixture.Server()->Run(true /*blocking*/, 2500 /*iterations*/, false /*paused*/);
+
+  EXPECT_TRUE(sawUtorso);
+  ASSERT_GE(zJustAfterUnpin, 0.0) << "never observed the post-unpin moment";
+  EXPECT_LT(lastUtorsoZ, zJustAfterUnpin - 0.05);
 }
 
 int main(int argc, char ** argv)
