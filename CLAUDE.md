@@ -1684,14 +1684,34 @@ effort terms (tuned for the crouch, not this pose) were dropped for the
 same reason — plain `k_effort=255` PID with zero effort feedforward,
 matching what's already proven to hold Atlas up on its own.
 
-**General lesson (both bugs, same root shape)**: any new controller
-publishing a fixed "assumed" pose or reusing an existing "known-good"
-pose, without confirming what it was *actually* proven good for, risks
-exactly this — check both *where the robot really is* (bug #1) and
-*under what conditions a reused pose was actually validated* (bug #2)
-before trusting either. Same root-cause shape as the `atlas.world`
-pin-link mismatch from Tier 3, just one (or two) layers higher up the
-stack.
+**Real bug #3, third interactive run**: with `neutral_pose` now sourced
+from the real `atlas/joint_states` topic (bug #2's fix), Atlas *still*
+fell straight backward — this time with no gait phase ever requested at
+all (no `w` pressed), just from the node existing and republishing
+whatever it read. Root cause: the fix trusted the very *first*
+`atlas/joint_states` message unconditionally as `neutral_pose`, with no
+check that it was actually a steady-state reading rather than a snapshot
+taken while Atlas was still mid-transient right after unpinning (still
+actively moving under `AtlasPlugin`'s PID as it settles) — freezing a
+still-moving snapshot as a fixed PID target is not the same thing as
+freezing a genuinely at-rest one. **Fixed** by waiting for real stability
+before locking in `neutral_pose` at all: `walk_keyboard.py` now buffers
+recent `atlas/joint_states` readings and only accepts one once the
+max per-joint change across a full second of history drops below 0.01
+rad, logging the captured leg-joint values alongside the "ready" message
+specifically so the *next* round (if there is one) has something to
+inspect immediately rather than needing another back-and-forth just to
+get a data point.
+
+**General lesson (all three bugs, same root shape)**: any new controller
+publishing a fixed "assumed" pose, reusing an existing "known-good" pose,
+or trusting a single live reading as if it represented steady state,
+without confirming what it was *actually* proven/measured to be, risks
+exactly this — check *where the robot really is* (bug #1), *under what
+conditions a reused pose was actually validated* (bug #2), and *whether
+a live reading is actually settled, not mid-transient* (bug #3) before
+trusting any of them. Same root-cause shape as the `atlas.world` pin-link
+mismatch from Tier 3, just further up the stack each time.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

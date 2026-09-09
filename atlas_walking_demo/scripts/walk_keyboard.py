@@ -23,13 +23,18 @@ AtlasCommand, the same live topic AtlasCommandController::SetPIDStand()
 and drcsim_tutorials/atlas_teleop.py already use; it makes no changes to
 any plugin or launch file.
 
-Waits for one atlas/joint_states message (AtlasPlugin's real, current
-joint positions) before publishing anything at all, and hands that in as
-GaitController's neutral_pose -- the only pose ever actually proven
-stable free-standing this whole session. See gait_controller.py's
-GaitController docstring for the full story of why (an earlier version
-of this instead assumed a separately-designed standing pose, and fell
-over -- twice, for two different reasons).
+Waits for atlas/joint_states (AtlasPlugin's real, current joint
+positions) to actually settle -- not just arrive once -- before
+publishing anything at all, and hands that in as GaitController's
+neutral_pose: the only pose ever actually proven stable free-standing
+this whole session. Locking in the very *first* joint_states message
+unconditionally still fell, straight backward, even with no gait phase
+ever requested -- consistent with grabbing a snapshot while Atlas was
+still mid-transient right after unpinning (still actively moving, not at
+its real steady state yet) and then commanding that transient snapshot
+as a fixed PID target forever after. See gait_controller.py's
+GaitController docstring for the fuller history of this pose's
+back-and-forth (two earlier, different bugs, both interactively caught).
 
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
@@ -50,10 +55,17 @@ import tty
 from atlas_msgs.msg import AtlasCommand
 from gait_controller import ATLAS_JOINT_NAMES, GaitController
 import rclpy
+from rclpy.duration import Duration
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
 
 PUBLISH_RATE_HZ = 30.0
+
+# How settled atlas/joint_states must be, over how long a window, before
+# trusting a snapshot of it as a fixed PID target -- see the module
+# docstring on why the very first message alone isn't good enough.
+STABILITY_WINDOW_SEC = 1.0
+STABILITY_THRESHOLD_RAD = 0.01
 
 INSTRUCTIONS = """
 atlas_walking_demo: keyboard-controlled stepping
@@ -67,7 +79,8 @@ class WalkKeyboardNode(Node):
 
     def __init__(self):
         super().__init__('atlas_walk_keyboard')
-        self.gait = None  # constructed once a real starting pose is known
+        self.gait = None  # constructed once a real, settled starting pose is known
+        self._recent_poses = []  # [(Time, {name: position}), ...], newest last
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
         self.joint_states_sub = self.create_subscription(
@@ -75,13 +88,32 @@ class WalkKeyboardNode(Node):
 
     def _on_joint_states(self, msg):
         if self.gait is not None:
-            return  # already initialized from a first joint_states message
-        neutral_pose = dict(zip(msg.name, msg.position))
-        if not all(name in neutral_pose for name in ATLAS_JOINT_NAMES):
+            return  # already initialized from a settled starting pose
+        pose = dict(zip(msg.name, msg.position))
+        if not all(name in pose for name in ATLAS_JOINT_NAMES):
             return  # not a full report yet (e.g. mid-spawn); wait for one that is
-        self.gait = GaitController(neutral_pose)
+
+        now = self.get_clock().now()
+        self._recent_poses.append((now, pose))
+        cutoff = now - Duration(seconds=STABILITY_WINDOW_SEC)
+        self._recent_poses = [(t, p) for t, p in self._recent_poses if t >= cutoff]
+        if (now - self._recent_poses[0][0]) < Duration(seconds=STABILITY_WINDOW_SEC):
+            return  # not enough history yet to judge stability
+
+        oldest_pose = self._recent_poses[0][1]
+        max_change = max(
+            abs(pose[name] - oldest_pose[name]) for name in ATLAS_JOINT_NAMES)
+        if max_change > STABILITY_THRESHOLD_RAD:
+            return  # still moving -- e.g. mid-transient right after unpinning
+
+        self.gait = GaitController(pose)
+        leg_joints = (
+            'l_leg_hpx', 'l_leg_hpy', 'l_leg_kny', 'l_leg_aky', 'l_leg_akx',
+            'r_leg_hpx', 'r_leg_hpy', 'r_leg_kny', 'r_leg_aky', 'r_leg_akx')
+        leg_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in leg_joints)
         self.get_logger().info(
-            'Got a real starting pose -- ready. Press w to walk.')
+            f'Atlas has settled into a real, stable starting pose -- ready. '
+            f'Press w to walk. Captured leg joints: {leg_summary}')
 
     def _tick(self):
         if self.gait is None:
