@@ -1427,6 +1427,35 @@ anything but its own default.
     "drcsim_gazebo_ros_plugins::MultiSenseSLPlugin")` name (fixed to
     `filename="MultiSenseSLPlugin"
     name="drcsim_gazebo_ros_plugins::MultiSenseSLPlugin"`).
+  - **Regression test added** for the pin/unpin release bug specifically
+    (`test_vrc_plugin.cpp`'s new `UnpinActuallyReleasesUtorsoToFallUnder
+    Gravity`): shortens `atlas.time_to_unpin` to 1.0s via the
+    `DRCSIM_ROS_PARAMS_FILE` mechanism and asserts `utorso` actually falls
+    under gravity after auto-unpin, in a world with nothing else to
+    support it. The existing test only ever checked that pinning holds —
+    never that unpinning releases it, which is exactly the gap that let
+    three broken pin-release mechanisms pass automated testing in a row.
+  - **`atlas.launch.py` now sets `VRC_CHEATS_ENABLED=1`** (new
+    `cheats_enabled` launch arg, default `true`) — it never set this
+    before, so `VRCPlugin`'s `atlas/cmd_vel` subscriber (and its other
+    cheat-gated extras) were silently unreachable through this launch
+    file even though `atlas_v5_gains.yaml`'s gains and `pub_atlas_command`
+    worked fine (a separate, non-cheat-gated path via `AtlasPlugin`).
+  - **`atlas/cmd_vel` is a kinematic slide/warp, not a walking gait — by
+    design, matching the original.** Publishing to it moves Atlas's whole
+    body to a new position each tick, standing posture unchanged, no leg
+    motion at all. This is not a regression or a bug: **no real dynamic
+    walking controller has ever existed in this codebase, including in
+    the original Gazebo Classic `drcsim`** — the genuine DRC-era Atlas
+    walking behavior ran on Boston Dynamics' proprietary
+    `AtlasSimInterface`/BDI software on external hardware, under NDA to
+    competing teams, and was never open-sourced or part of this repo.
+    `atlas/cmd_vel` was the original's own substitute: a course-navigation
+    cheat for quickly repositioning Atlas during VRC scoring tests, not a
+    physics-based gait. `atlas.startup_mode=bdi_stand` (separately
+    documented above as unreliable) is a *stand-up* choreography, not
+    walking, either. A real walking controller would be new functionality
+    outside this port's scope, not something to "fix" here.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
