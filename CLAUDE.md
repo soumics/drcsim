@@ -1386,10 +1386,28 @@ anything but its own default.
     override is a legitimate, often more robust substitute for "rigidly
     hold this link in place," and this plugin already had the exact
     primitive needed (`SetLinkWorldPose`) sitting right there, proven, the
-    whole time. **Awaiting interactive re-confirmation**: does the pin
-    still hold correctly, and — the actual point of this whole change —
-    does the pelvis genuinely move again after unpin, verified with
-    `pub_atlas_command` same as before.
+    whole time. **Interactively confirmed working**: pin holds correctly
+    (stands, small forward/backward PID oscillation, does not fall),
+    unpin genuinely releases it -- `pub_atlas_command` (a `3.2 *
+    sin(...)`, ~183°, uniform-amplitude command to *every* joint
+    including hips/knees/ankles, with no balance controller involved) now
+    makes it topple, which is the *correct*, expected physical result of
+    that command on a freed biped, not a bug -- the old bug was that nothing
+    happened at all because the pelvis stayed permanently welded. Learn
+    from the last false "confirmed harmless" mistake in this same section:
+    this conclusion is based on the pelvis visibly reacting under load,
+    not merely on the absence of log errors.
+    One cosmetic-only artifact observed on this same interactive check: a
+    brief flash, right around spawn, of what looks like multiple Atlas
+    instances in different poses/positions before settling to the single
+    correct one. Consistent with a software-rendering (`llvmpipe`, no GPU
+    passthrough in this container -- confirmed via the `libEGL warning:
+    egl: failed to create dri2 screen` lines already present in every log
+    this whole session) GUI-side stale-frame artifact during the
+    server-to-GUI scene sync at spawn time, not a physics/duplicate-entity
+    bug -- physics itself only ever has one Atlas model, confirmed by it
+    correctly and singularly standing afterward. Not investigated further;
+    flag here in case it recurs or worsens.
   - **Also cleaned up in this same round** (found via the same interactive
     log, unrelated to the pin bug but real, unfixed leftovers from the
     Tier 3 `atlas_description` pass): `atlas.gazebo`/`atlas_v3`/`atlas_v4`/
