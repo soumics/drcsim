@@ -29,30 +29,36 @@ publishing anything at all, and hands that in as GaitController's
 neutral_pose: the only pose ever actually proven stable free-standing
 this whole session.
 
-The very first command is sent through the atlas/reset_controls
-*service*, not the atlas/atlas_command topic -- confirmed the hard way
-that going straight to the topic isn't safe here. AtlasPlugin::
-ZeroAtlasCommand() (called once at startup, before any AtlasCommand
-message ever arrives) sets k_effort=0 for every joint, meaning Atlas has
-been standing this entire session on the AtlasSimInterface/BDI
-feedforward path, not real user-PID at all. AtlasPlugin::
-UpdatePIDControl()'s integral term accumulates every tick *regardless of
-k_effort*, even while that path contributes nothing to the output -- so
-with atlasCommand.position stuck at 0.0 the whole time while the real
-position drifted a little under the BDI path, that integral term had
-likely been quietly winding up (clamped, but still substantial) for the
-entire session. The instant k_effort flips to 255 for the first time,
-that pent-up integral applies all at once as a torque spike -- which is
-exactly what a straight-to-topic first command did, immediately, with no
-gait phase ever requested and joint values that were otherwise
-completely sane (confirmed interactively). atlas/reset_controls's
-reset_pid_controller flag zeroes AtlasPlugin's error terms (integral
-included), and can atomically apply the new AtlasCommand in the same
-call -- a clean, bumpless handoff onto the user-PID path instead.
+The handoff onto real PID control happens carefully, in two parts, both
+found necessary the hard way:
 
-See gait_controller.py's GaitController docstring for the fuller history
-of this pose's back-and-forth (two earlier, different bugs, both
-interactively caught, before this one).
+1. The very first command goes through the atlas/reset_controls
+   *service* (reset_pid_controller=true), not straight to the
+   atlas/atlas_command topic -- it zeroes AtlasPlugin's PID error terms
+   (integral included) and atomically applies a matching position target
+   in the same call, with k_effort left at 0 (its existing value) at this
+   point, not yet 255.
+2. k_effort is then ramped from 0 to 255 over KEFFORT_RAMP_SEC, not
+   switched instantly. This turned out to matter even with the integral
+   freshly zeroed and the position target exactly matched: AtlasPlugin::
+   ZeroAtlasCommand() (called once at startup, before any AtlasCommand
+   ever arrives) sets k_effort=0 for every joint, and nothing in
+   atlas.launch.py's default flow ever publishes an
+   AtlasSimInterfaceCommand either -- so AtlasSimInterfaceState::f_out
+   (the k_effort=0 path's own output) has been computing to exactly zero
+   the whole time too (its gains are only ever set by such a message).
+   Meaning: **Atlas has been standing this entire session under zero
+   active control torque**, held up by passive joint dynamics near its
+   resting pose, not by the real, loaded PID gains at all. Switching
+   k_effort straight to 255 -- even bumpless in every other respect -- is
+   the first moment any nonzero gain has ever actually been applied to a
+   joint, an inherent shock to a system that had been running torque-free
+   the whole time. A gradual ramp is the standard fix for exactly this
+   kind of control-mode handoff.
+
+See gait_controller.py's GaitController docstring and src/drcsim/
+CLAUDE.md for the fuller history of this pose's back-and-forth (four
+earlier, different bugs, all interactively caught, before this one).
 
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
@@ -91,6 +97,14 @@ PUBLISH_RATE_HZ = 30.0
 # by then is the same kind already long since confirmed harmless.
 SETTLE_DELAY_SEC = 5.0
 
+# How long to linearly ramp k_effort from 0 to 255 once the handoff
+# starts, instead of switching instantly -- see the module docstring on
+# why an instant switch, even with position matched and the PID integral
+# freshly reset, still isn't bumpless here: k_effort has been 0 for the
+# entire rest of this session, so this is the first moment any nonzero
+# gain -- real or otherwise -- has ever actually been applied to a joint.
+KEFFORT_RAMP_SEC = 3.0
+
 INSTRUCTIONS = """
 atlas_walking_demo: keyboard-controlled stepping
   w      - start/continue walking forward
@@ -106,6 +120,7 @@ class WalkKeyboardNode(Node):
         self.gait = None  # constructed once the reset_controls handoff succeeds
         self._first_joint_states_time = None
         self._reset_requested = False
+        self._ramp_start_time = None  # set once the handoff succeeds
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.reset_controls_client = self.create_client(
             ResetControls, 'atlas/reset_controls')
@@ -134,7 +149,11 @@ class WalkKeyboardNode(Node):
         command = AtlasCommand()
         command.position = [pose[name] for name in ATLAS_JOINT_NAMES]
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
-        command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
+        # k_effort=0 here, matching its current (default, never-yet-changed)
+        # value exactly -- this call's job is only to reset the integral
+        # term and set a matching position target, truly bumpless at this
+        # instant. _tick() ramps k_effort up from here; see KEFFORT_RAMP_SEC.
+        command.k_effort = [0] * len(ATLAS_JOINT_NAMES)
         request = ResetControls.Request()
         request.reset_pid_controller = True
         request.reset_bdi_controller = False
@@ -151,15 +170,21 @@ class WalkKeyboardNode(Node):
                 'starting the walk controller.')
             self._reset_requested = False  # allow another attempt on the next reading
             return
+        self._ramp_start_time = self.get_clock().now()
         self.gait = GaitController(pose)
         # Log every joint, not just legs, while this is still being
         # diagnosed interactively -- a bad capture in an arm/back/neck
         # joint would be invisible if only legs were ever printed.
         full_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in ATLAS_JOINT_NAMES)
         self.get_logger().info(
-            f'Atlas has settled into a real, stable starting pose, and the PID '
-            f'handoff succeeded -- ready. Press w to walk. Captured pose: '
-            f'{full_summary}')
+            f'Atlas has settled into a real, stable starting pose; PID handoff '
+            f'started, ramping up over {KEFFORT_RAMP_SEC:.0f}s -- ready once that '
+            f'finishes. Press w to walk. Captured pose: {full_summary}')
+
+    def _current_k_effort(self):
+        """Return the current 0-255 k_effort value, ramping up from the handoff."""
+        elapsed = (self.get_clock().now() - self._ramp_start_time).nanoseconds / 1e9
+        return round(255 * min(1.0, elapsed / KEFFORT_RAMP_SEC))
 
     def _tick(self):
         if self.gait is None:
@@ -173,7 +198,7 @@ class WalkKeyboardNode(Node):
         # gait_controller.py's module docstring), which itself already
         # holds under plain PID with no feedforward at all.
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
-        command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
+        command.k_effort = [self._current_k_effort()] * len(ATLAS_JOINT_NAMES)
         self.pub.publish(command)
 
     def handle_key(self, key):

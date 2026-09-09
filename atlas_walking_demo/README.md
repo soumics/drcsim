@@ -30,26 +30,31 @@ trusting a later one as the neutral reference every gait phase
 leans/lifts/swings away from -- letting the post-unpin settling
 transient pass.
 
-The very first command then goes through the `atlas/reset_controls`
-*service*, not the `atlas/atlas_command` topic. `AtlasPlugin` starts up
-with `k_effort=0` for every joint (real user-PID control is *never*
-active by default -- Atlas has been standing all session on the
-AtlasSimInterface/BDI feedforward path instead), but its PID integral
-term accumulates every tick regardless of `k_effort`, so it had likely
-been quietly winding up, unapplied, for the entire time Atlas stood. A
-version of this node that published straight to the topic as the very
-first command (`k_effort=255`, otherwise identical, sane joint values)
-made Atlas fall immediately, before any key was even pressed -- almost
-certainly that pent-up integral suddenly applying the instant the
-user-PID path activated for the first time. `atlas/reset_controls`'s
-`reset_pid_controller` flag zeroes that state and applies the new command
-atomically in the same call, for a clean handoff.
+The handoff onto real PID control then happens in two careful steps.
+First, the very first command goes through the `atlas/reset_controls`
+*service*, not the `atlas/atlas_command` topic: it resets `AtlasPlugin`'s
+PID integral state and applies a matching position target atomically,
+with `k_effort` left at `0` (unchanged) at this point. Second,
+`k_effort` is ramped from `0` to `255` over `KEFFORT_RAMP_SEC` (3s), not
+switched instantly. The ramp turned out to be necessary even with the
+integral freshly reset and the position matched exactly: `AtlasPlugin`
+starts up with `k_effort=0` for every joint, and nothing in
+`atlas.launch.py`'s default flow ever sends an `AtlasSimInterfaceCommand`
+either -- so **Atlas has been standing this entire session under zero
+active control torque**, held up by passive joint dynamics near its
+resting pose, not by the real, loaded PID gains at all. Switching
+`k_effort` straight to `255` is the first moment any nonzero gain has
+ever actually been applied to a joint -- an inherent shock to a system
+that had been running torque-free the whole time, regardless of how
+cleanly everything else about the handoff is done. A gradual ramp is the
+standard fix.
 
-You should see three log lines: the first `atlas/joint_states` message
-arriving, then (5s later) `Atlas has settled into a real, stable
-starting pose, and the PID handoff succeeded -- ready. Press w to walk.`
-with the full captured pose printed alongside it. Nothing should move at
-all until you press `w`.
+You should see two log lines a few seconds apart: the first
+`atlas/joint_states` message arriving, then (5s later) `Atlas has settled
+into a real, stable starting pose; PID handoff started, ramping up over
+3s -- ready once that finishes.` with the full captured pose printed
+alongside it. Give it a few more seconds after that for the ramp itself,
+then press `w`.
 
 This pose (and the mechanism for setting it) went through four earlier,
 different interactively-caught bugs before this one -- see

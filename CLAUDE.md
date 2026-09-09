@@ -941,6 +941,20 @@ not by trying to model what "correct" standing dynamics should look
 like) and by hand: **the user watched Atlas actually stand in the
 gz-sim GUI** on 2026-09-09, after two real bugs found via that same
 interactive testing got fixed — see below.)
+>
+> **Correction, found much later (`atlas_walking_demo`'s bug #6 below)**:
+> "runs under the real per-joint PID gains" is misleading as written.
+> `test_atlas_launch.py` correctly confirms those gains reach
+> `atlas_plugin`'s ROS *parameters* — that part is true and still stands.
+> What's **not** true: that they were ever actually being *applied* to
+> any joint by the default launch flow. `AtlasPlugin` only blends real
+> PID into its output when a joint's `k_effort > 0`, and `k_effort`
+> defaults to `0` for every joint and is never set otherwise by anything
+> in `atlas.launch.py`'s default flow — meaning Atlas's confirmed stable
+> standing this entire session (this entry included) was actually held up
+> by **passive joint dynamics under zero active control torque**, not by
+> these gains. See the `atlas_walking_demo` section for the full story of
+> how this was discovered.
 
 The goal of this tier: prove the *whole* simulation actually comes up
 together (spawn Atlas, get it to hold a pose instead of collapsing —
@@ -1198,8 +1212,12 @@ anything but its own default.
     literal string `"bdi_stand"`; anything else, including `""`, takes
     the "pinned" branch). **Confirmed working**: with `startup_mode=
     pinned`, Atlas spawns, holds pinned for `atlas.time_to_unpin`
-    seconds, auto-unpins, and stands under `AtlasPlugin`'s real gains —
-    watched directly in the gz-sim GUI. `bdi_stand` is still selectable
+    seconds, auto-unpins, and stands — watched directly in the gz-sim GUI
+    (the "under `AtlasPlugin`'s real gains" part of this claim was wrong;
+    see the correction two paragraphs up and the `atlas_walking_demo`
+    section's bug #6 — it's actually passive joint dynamics under zero
+    active control torque, gains never applied by anything in this
+    flow). `bdi_stand` is still selectable
     via the `startup_mode` launch argument for whoever wants to debug it
     further, but **treat it as known-unreliable, not a ready-to-use
     feature**, until someone actually root-causes the stand-prep/
@@ -1720,55 +1738,79 @@ oscillation remains 5 seconds after the first reading is the same kind
 already long confirmed harmless, not the one-time, larger post-unpin
 settling transient bugs #2/#3 were actually guarding against.
 
-**Real bug #5, fifth interactive run — the actual root cause**: bug #4's
-fixed-delay fix produced a fully sane, symmetric captured pose (logged in
-full this time: every joint near-zero, legs and arms mirrored) — and
-Atlas *still* fell immediately the instant the "ready" message printed,
-before any key was pressed. With the pose data itself finally cleared of
-suspicion, the remaining candidate was the *act* of publishing itself.
-Checked `AtlasPlugin.cpp` directly rather than guessing again:
-`ZeroAtlasCommand()` (called once at `Configure()`, before any
-`AtlasCommand` message is ever received) sets `k_effort=0` for every
-joint — meaning **Atlas has been standing this entire session on the
-AtlasSimInterface/BDI feedforward path, not real user-PID control at
-all**, despite `atlas_v5_gains.yaml`'s real gains being loaded the whole
-time (they're simply never blended in while `k_effort=0`). Worse,
-`UpdatePIDControl()`'s integral term (`errorTerms[i].kIqI`) accumulates
-*every tick regardless of `k_effort`*, even while contributing nothing to
-the output — so with `atlasCommand.position` stuck at its `0.0` default
-the entire time while Atlas's real position drifted slightly under the
-BDI path, that integral term had almost certainly been quietly winding
-up (clamped, but substantial) for the whole session. `walk_keyboard.py`
-publishing `k_effort=255` for the first time ever, even with a
-position target matching exactly where Atlas already was, was the first
-moment that pent-up integral ever got a chance to apply to the
-output — all at once, as a torque spike. Classic PID "bumpless transfer"
-problem: switching control paths without resetting the inactive path's
-internal state first. **Fixed** by routing the very first command through
-the `atlas/reset_controls` *service* (already ported in Tier 2, unused by
-anything until now) instead of the plain topic:
-`reset_pid_controller=true` zeroes `errorTerms` (integral included), and
-the same service call atomically applies the new `AtlasCommand` in one
-step — a clean handoff with no window for stale state to fire.
+**Real bug #5, fifth interactive run**: bug #4's fixed-delay fix produced
+a fully sane, symmetric captured pose (logged in full this time: every
+joint near-zero, legs and arms mirrored) — and Atlas *still* fell
+immediately the instant the "ready" message printed, before any key was
+pressed. With the pose data itself finally cleared of suspicion, the
+remaining candidate was the *act* of publishing itself. Checked
+`AtlasPlugin.cpp` directly rather than guessing again: `ZeroAtlasCommand()`
+(called once at `Configure()`, before any `AtlasCommand` message is ever
+received) sets `k_effort=0` for every joint, and `UpdatePIDControl()`'s
+integral term (`errorTerms[i].kIqI`) accumulates *every tick regardless
+of `k_effort`*, even while contributing nothing to the output — with
+`atlasCommand.position` stuck at its `0.0` default the entire time while
+Atlas's real position drifted slightly, that integral term looked likely
+to have been quietly winding up (clamped, but substantial) all session.
+**Tried**: route the first command through the `atlas/reset_controls`
+*service* (`reset_pid_controller=true`, already ported in Tier 2, unused
+by anything until now) instead of the plain topic — zeroes `errorTerms`
+and atomically applies the new `AtlasCommand` in one call.
 
-**General lesson (all five bugs, same root shape, getting deeper each
+**This theory was also wrong** — the service call reported success
+(logged explicitly: "the PID handoff succeeded"), and Atlas fell anyway,
+ruling out stale integral state as the (sole) cause.
+
+**Real bug #6, sixth interactive run — the actual root cause**: with
+state-based explanations exhausted, checked what `k_effort=0`'s *own*
+output path actually computes, rather than assuming "some other
+reasonable control keeps it up." `UpdateAtlasSimInterface()`'s
+`asiState.f_out[i]` is computed entirely from `asiCommand`'s gains
+(`kp_position`/`ki_position`/`kp_velocity`/`effort`) — and those fields
+are *only* ever populated by an incoming `AtlasSimInterfaceCommand`
+message (`SetASICommand`), which nothing in `atlas.launch.py`'s default
+flow ever sends. They sit at their post-`resize()` default of `0.0`
+forever. So `f_out[i]` has been computing to exactly zero this entire
+session. With `k_effort=0`, the blended output is `1.0 * f_out[i] = 0`.
+**Atlas has been standing this whole session under zero active control
+torque** — held up by passive joint dynamics near its resting pose, not
+by the real, loaded `atlas_v5_gains.yaml` PID gains at all, despite
+multiple earlier entries in this very doc (before this was discovered)
+describing it as standing "under `AtlasPlugin`'s real gains." Switching
+`k_effort` to `255` for the first time — even with the position matched
+exactly and the integral freshly zeroed — is the first moment *any*
+nonzero gain has ever actually been applied to a joint: an inherent shock
+to a system that had been running torque-free the whole time, not a
+side-effect of stale state. **Fixed** by ramping `k_effort` from `0` to
+`255` over `KEFFORT_RAMP_SEC` (3s) instead of switching it instantly —
+the `reset_controls` call from bug #5 is kept (still needed, sets
+`k_effort=0` explicitly and the matching position target atomically,
+genuinely bumpless at that instant) but now only as the ramp's starting
+point, not the whole fix.
+
+**General lesson (all six bugs, same root shape, getting deeper each
 time)**: any new controller publishing a fixed "assumed" pose, reusing an
 existing "known-good" pose, trusting a single live reading as if it
 represented steady state, waiting on a condition that may never actually
-be satisfied, or switching a robot onto a control path that's never been
-active before without resetting that path's accumulated internal state
-first, risks exactly this — check *where the robot really is* (bug #1),
-*under what conditions a reused pose was actually validated* (bug #2),
-*whether a live reading is actually settled, not mid-transient* (bug #3),
-*whether "settled" is even a condition this system will ever satisfy*
-(bug #4), and *what invisible state a newly-activated control path may
-already be carrying* (bug #5) before trusting any of them. Same
-root-cause shape as the `atlas.world` pin-link mismatch from Tier 3, just
-further up the stack each time — and bug #5 specifically is the same
-*class* of lesson as the VRCPlugin world-pin saga earlier in this
-session: a physics/controls subsystem accumulating state that only
-becomes visible the moment something finally exercises the path that
-reads it.
+be satisfied, resetting a control path's internal state without checking
+whether *that path was ever actually active in the first place*, or
+switching a system straight to full-strength active control without
+verifying it was under any active control at all before, risks exactly
+this — check *where the robot really is* (bug #1), *under what
+conditions a reused pose was actually validated* (bug #2), *whether a
+live reading is actually settled, not mid-transient* (bug #3), *whether
+"settled" is even a condition this system will ever satisfy* (bug #4),
+*what invisible state a newly-activated control path may already be
+carrying* (bug #5), and *whether that control path — or any active
+control at all — was ever actually the thing holding the system up in
+the first place* (bug #6) before trusting any of them. Same root-cause
+shape as the `atlas.world` pin-link mismatch from Tier 3, just further up
+the stack each time — and bugs #5/#6 specifically are the same *class* of
+lesson as the VRCPlugin world-pin saga earlier in this session: a
+physics/controls subsystem's real behavior only becomes visible the
+moment something finally exercises the path that reveals it, and
+"confirmed stable" observations made before that moment don't actually
+validate what they were assumed to.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
