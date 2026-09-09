@@ -26,56 +26,61 @@ gait_controller_script = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(gait_controller_script)
 
 
-def test_neutral_stand_has_all_30_joints():
-    assert len(gait_controller_script.NEUTRAL_STAND) == 30
-    assert set(gait_controller_script.NEUTRAL_STAND) == set(
-        gait_controller_script.ATLAS_JOINT_NAMES)
+def _zero_pose():
+    return {name: 0.0 for name in gait_controller_script.ATLAS_JOINT_NAMES}
 
 
-def test_idle_controller_samples_neutral_stand():
-    gait = gait_controller_script.GaitController()
+def test_idle_controller_samples_neutral_pose_unchanged():
+    neutral = _zero_pose()
+    neutral['back_bky'] = 0.05  # an arbitrary real-looking starting value
+    gait = gait_controller_script.GaitController(neutral)
 
     position = gait.sample(0.1)
 
-    expected = [
-        gait_controller_script.NEUTRAL_STAND[name]
-        for name in gait_controller_script.ATLAS_JOINT_NAMES]
+    expected = [neutral[name] for name in gait_controller_script.ATLAS_JOINT_NAMES]
     assert position == expected
     assert gait.walking is False
 
 
-def test_start_walking_begins_shift_left_and_leans_toward_left_foot():
-    gait = gait_controller_script.GaitController()
+def test_start_walking_begins_immediately_leaning_toward_left_foot():
+    # Regression test: the controller must never ask Atlas to move away
+    # from its real starting pose before a walk is even requested (the
+    # second interactive failure -- see the module docstring) -- pressing
+    # 'w' should lean *from* the neutral pose right away, not after some
+    # separate settle into a different pose first.
+    neutral = _zero_pose()
+    gait = gait_controller_script.GaitController(neutral)
 
     gait.start_walking()
-    # A single small step should be partway through SHIFT_LEFT, not yet at
-    # its target -- interpolating, not snapping (see the module docstring
-    # on why AtlasPlugin has no rate limiter of its own).
+    # A small step should be partway through SHIFT_LEFT, not yet at its
+    # target -- interpolating, not snapping (AtlasPlugin has no rate
+    # limiter of its own).
     position = gait.sample(0.01)
 
     assert gait.walking is True
     hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
-    neutral_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx']
-    assert position[hpx_index] > neutral_hpx  # leaning toward the support (left) foot
-    assert position[hpx_index] < neutral_hpx + gait_controller_script.LEAN_HPX  # not there yet
+    assert position[hpx_index] > neutral['l_leg_hpx']  # leaning toward the support (left) foot
+    assert position[hpx_index] < neutral['l_leg_hpx'] + gait_controller_script.LEAN_HPX
 
 
-def test_full_shift_left_reaches_lean_target_without_lifting():
-    gait = gait_controller_script.GaitController()
+def test_full_shift_left_reaches_lean_target_relative_to_neutral():
+    neutral = _zero_pose()
+    neutral['l_leg_hpx'] = 0.069  # a nonzero starting value, as real joint_states would give
+    neutral['r_leg_kny'] = 0.2
+    gait = gait_controller_script.GaitController(neutral)
     gait.start_walking()
 
     position = gait.sample(gait_controller_script.SHIFT_DURATION)
 
     hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
-    expected_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx'] + (
-        gait_controller_script.LEAN_HPX)
-    assert position[hpx_index] == expected_hpx
+    assert position[hpx_index] == neutral['l_leg_hpx'] + gait_controller_script.LEAN_HPX
     r_kny_index = gait_controller_script.ATLAS_JOINT_NAMES.index('r_leg_kny')
-    assert position[r_kny_index] == gait_controller_script.NEUTRAL_STAND['r_leg_kny']
+    assert position[r_kny_index] == neutral['r_leg_kny']  # untouched by a pure weight shift
 
 
 def test_swing_right_lifts_and_flexes_only_the_right_leg():
-    gait = gait_controller_script.GaitController()
+    neutral = _zero_pose()
+    gait = gait_controller_script.GaitController(neutral)
     gait.start_walking()
     gait.sample(gait_controller_script.SHIFT_DURATION)  # -> LIFT_RIGHT begins
     gait.sample(gait_controller_script.LIFT_DURATION)  # -> SWING_RIGHT begins
@@ -83,17 +88,16 @@ def test_swing_right_lifts_and_flexes_only_the_right_leg():
     position = gait.sample(gait_controller_script.SWING_DURATION)  # SWING_RIGHT completes
 
     names = gait_controller_script.ATLAS_JOINT_NAMES
-    stand = gait_controller_script.NEUTRAL_STAND
-    assert position[names.index('r_leg_kny')] == stand['r_leg_kny'] + (
-        gait_controller_script.LIFT_KNY)
-    assert position[names.index('r_leg_hpy')] == stand['r_leg_hpy'] + (
-        gait_controller_script.SWING_HPY)
+    assert position[names.index('r_leg_kny')] == (
+        neutral['r_leg_kny'] + gait_controller_script.LIFT_KNY)
+    assert position[names.index('r_leg_hpy')] == (
+        neutral['r_leg_hpy'] + gait_controller_script.SWING_HPY)
     # Left (support) leg's own hip pitch is untouched by the right leg's swing.
-    assert position[names.index('l_leg_hpy')] == stand['l_leg_hpy']
+    assert position[names.index('l_leg_hpy')] == neutral['l_leg_hpy']
 
 
 def test_stop_walking_returns_to_idle_only_at_a_shift_boundary():
-    gait = gait_controller_script.GaitController()
+    gait = gait_controller_script.GaitController(_zero_pose())
     gait.start_walking()
     gait.sample(gait_controller_script.SHIFT_DURATION)  # completes SHIFT_LEFT
     gait.stop_walking()
@@ -109,57 +113,6 @@ def test_stop_walking_returns_to_idle_only_at_a_shift_boundary():
     gait.sample(gait_controller_script.SHIFT_DURATION)  # completes SHIFT_RIGHT
 
     assert gait.walking is False
-
-
-def test_no_initial_pose_is_immediately_settled_and_walks_right_away():
-    # Regression test: the very first interactive run fell before any key
-    # was even pressed, because the original code always started a fresh
-    # GaitController assuming Atlas was already standing in NEUTRAL_STAND
-    # -- publishing that pose as the first command was itself an instant,
-    # unguarded jump from wherever Atlas actually was. With no
-    # initial_pose given at all (as in every other test above), there is
-    # no real gap to close, so this must stay immediate, not wait
-    # IDLE_DURATION for no reason.
-    gait = gait_controller_script.GaitController()
-    assert gait.is_settled is True
-
-    gait.start_walking()
-    position = gait.sample(0.01)
-
-    hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
-    neutral_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx']
-    assert position[hpx_index] > neutral_hpx  # already leaning -- SHIFT_LEFT began right away
-
-
-def test_real_initial_pose_settles_before_the_walk_cycle_can_start():
-    # The actual bug: construct as if Atlas is standing upright (all
-    # zeros) rather than in NEUTRAL_STAND's deep crouch, matching what
-    # atlas.launch.py's default startup really leaves it in.
-    upright_pose = {name: 0.0 for name in gait_controller_script.ATLAS_JOINT_NAMES}
-    gait = gait_controller_script.GaitController(initial_pose=upright_pose)
-    assert gait.is_settled is False
-
-    gait.start_walking()  # pressing 'w' immediately -- must not jump or snap
-    position = gait.sample(0.01)
-
-    # Still mid-settle: nowhere near NEUTRAL_STAND's crouch yet, and the
-    # walk cycle must not have started (no lean applied on top of this).
-    kny_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_kny')
-    assert position[kny_index] < 0.1  # nowhere near NEUTRAL_STAND's 0.933 yet
-    assert gait.is_settled is False
-
-    # Finish the settle (IDLE_DURATION total): this call's own returned
-    # pose is still exactly NEUTRAL_STAND (alpha reaches 1.0 *within*
-    # this call), but it also completes the settle and starts the queued
-    # walk request internally -- the next sample() call is what shows it.
-    position = gait.sample(gait_controller_script.IDLE_DURATION)
-    assert gait.is_settled is True
-    hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
-    neutral_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx']
-    assert position[hpx_index] == neutral_hpx  # exactly settled, not leaning yet
-
-    position = gait.sample(0.01)
-    assert position[hpx_index] > neutral_hpx  # SHIFT_LEFT has now begun
 
 
 def test_walk_cycle_is_a_valid_alternating_sequence():

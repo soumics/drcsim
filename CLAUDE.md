@@ -1646,27 +1646,51 @@ v5's real leg geometry (also pulled from the URDF directly, not guessed),
 expected to need empirical retuning; being plain Python, that only needs
 `ros2 run` again, not a rebuild.
 
-**Real bug from the first interactive run, caught immediately**: Atlas
-fell over *before any key was even pressed*. `walk_keyboard.py`'s publish
+**Real bug #1, first interactive run, caught immediately**: Atlas fell
+over *before any key was even pressed*. `walk_keyboard.py`'s publish
 timer starts the instant the node comes up, and `GaitController`
-originally assumed Atlas was already standing in `NEUTRAL_STAND`'s pose
-(`SetPIDStand()`'s deep crouch) — but `atlas.launch.py`'s default startup
-leaves it standing closer to upright (near-zero joints), not crouched. So
-the very first published command was itself an instant, unguarded jump
-from Atlas's real pose to a deep crouch — exactly the "no rate limiter,
-don't snap" trap the module docstring already warned about, just not
-actually guarded against in code. **Fixed** by subscribing to
-`atlas/joint_states` (`AtlasPlugin`'s real current positions, same
-30-joint order confirmed via `jointStates.name = this->jointNames` in
-`AtlasPlugin.cpp`) and feeding that in as `GaitController(initial_pose=
-...)`: the controller's first output now smoothly interpolates from
-Atlas's *actual* pose into `NEUTRAL_STAND` over `IDLE_DURATION` (bumped
-to 3.0s), and a `w` pressed before that settle finishes is queued rather
-than acted on immediately, so it can't cause the same kind of jump.
-**General lesson**: any new controller node that publishes a fixed
-"assumed" pose as its first command, rather than reading where the robot
-actually is first, risks exactly this — same root-cause shape as the
-`atlas.world` pin-link mismatch from Tier 3, just one layer higher up the
+originally assumed Atlas was already standing in a hardcoded
+`NEUTRAL_STAND` pose (`SetPIDStand()`'s deep crouch) — but
+`atlas.launch.py`'s default startup leaves it standing closer to upright
+(near-zero joints), not crouched. So the very first published command was
+itself an instant, unguarded jump from Atlas's real pose to a deep crouch
+— exactly the "no rate limiter, don't snap" trap the module docstring
+already warned about, just not actually guarded against in code.
+First attempted fix: subscribe to `atlas/joint_states` (`AtlasPlugin`'s
+real current positions, same 30-joint order confirmed via `jointStates.
+name = this->jointNames` in `AtlasPlugin.cpp`) and smoothly interpolate
+*from* that real pose *into* `NEUTRAL_STAND` over a few seconds before
+allowing any walk request.
+
+**Real bug #2, second interactive run**: that fix's own settle —
+slow, smooth, no instant jump — still made Atlas fall, straight backward,
+partway through. The real problem wasn't the transition speed, it was the
+*destination*: `NEUTRAL_STAND` (`SetPIDStand()`'s pose) had been assumed
+to be a generally safe, "already-tuned" standing pose worth reusing, but
+every actual call site of `SetPIDStand()` in `VRCPlugin.cpp` either
+re-pins the robot immediately (`"pid_stand"` mode) or runs during vehicle
+entry/exit with the base already rigidly held — it was **never once
+proven stable for a fully free-standing robot**, because it was never
+used that way in the original code either. Commanding a deep crouch with
+nothing holding the pelvis in place let the center of mass walk out from
+under it. **Fixed** by dropping the idea of a separately-designed
+"neutral" pose entirely: `GaitController` now takes Atlas's real starting
+pose (from `atlas/joint_states`) as `neutral_pose` directly and never
+asks it to move away from that pose before a walk is requested — it's the
+only pose actually proven stable free-standing this whole session, so
+every gait phase's lean/lift/swing deltas are computed relative to *it*,
+not a hardcoded alternative. The mismatched `SetPIDStand()` feedforward
+effort terms (tuned for the crouch, not this pose) were dropped for the
+same reason — plain `k_effort=255` PID with zero effort feedforward,
+matching what's already proven to hold Atlas up on its own.
+
+**General lesson (both bugs, same root shape)**: any new controller
+publishing a fixed "assumed" pose or reusing an existing "known-good"
+pose, without confirming what it was *actually* proven good for, risks
+exactly this — check both *where the robot really is* (bug #1) and
+*under what conditions a reused pose was actually validated* (bug #2)
+before trusting either. Same root-cause shape as the `atlas.world`
+pin-link mismatch from Tier 3, just one (or two) layers higher up the
 stack.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)

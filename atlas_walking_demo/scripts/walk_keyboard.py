@@ -25,10 +25,11 @@ any plugin or launch file.
 
 Waits for one atlas/joint_states message (AtlasPlugin's real, current
 joint positions) before publishing anything at all, and hands that in as
-GaitController's initial_pose -- confirmed the hard way that skipping this
-and just assuming Atlas already stood in NEUTRAL_STAND's pose made it fall
-before any key was even pressed. See gait_controller.py's GaitController
-docstring for the full story.
+GaitController's neutral_pose -- the only pose ever actually proven
+stable free-standing this whole session. See gait_controller.py's
+GaitController docstring for the full story of why (an earlier version
+of this instead assumed a separately-designed standing pose, and fell
+over -- twice, for two different reasons).
 
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
@@ -47,7 +48,7 @@ import termios
 import tty
 
 from atlas_msgs.msg import AtlasCommand
-from gait_controller import ATLAS_JOINT_NAMES, GaitController, NEUTRAL_STAND_EFFORT
+from gait_controller import ATLAS_JOINT_NAMES, GaitController
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
@@ -75,13 +76,12 @@ class WalkKeyboardNode(Node):
     def _on_joint_states(self, msg):
         if self.gait is not None:
             return  # already initialized from a first joint_states message
-        initial_pose = dict(zip(msg.name, msg.position))
-        if not all(name in initial_pose for name in ATLAS_JOINT_NAMES):
+        neutral_pose = dict(zip(msg.name, msg.position))
+        if not all(name in neutral_pose for name in ATLAS_JOINT_NAMES):
             return  # not a full report yet (e.g. mid-spawn); wait for one that is
-        self.gait = GaitController(initial_pose=initial_pose)
+        self.gait = GaitController(neutral_pose)
         self.get_logger().info(
-            'Got a real starting pose; settling into a neutral stand before any '
-            'walk request can begin.')
+            'Got a real starting pose -- ready. Press w to walk.')
 
     def _tick(self):
         if self.gait is None:
@@ -90,7 +90,11 @@ class WalkKeyboardNode(Node):
         command = AtlasCommand()
         command.header.stamp = self.get_clock().now().to_msg()
         command.position = position
-        command.effort = [NEUTRAL_STAND_EFFORT.get(name, 0.0) for name in ATLAS_JOINT_NAMES]
+        # No effort feedforward: this pose is only ever a delta away from
+        # Atlas's own already-proven-stable neutral pose (see
+        # gait_controller.py's module docstring), which itself already
+        # holds under plain PID with no feedforward at all.
+        command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
         command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
         self.pub.publish(command)
 

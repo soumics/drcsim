@@ -24,14 +24,15 @@ Then, in a second terminal:
 ros2 run atlas_walking_demo walk_keyboard.py
 ```
 
-On startup this node waits for one `atlas/joint_states` message, then
-spends a few seconds (`IDLE_DURATION` in `gait_controller.py`) smoothly
-settling from Atlas's *actual* current pose into `NEUTRAL_STAND` before a
-`w` press can do anything -- publishing `NEUTRAL_STAND` (a deep crouch)
-as the very first command with no real starting pose to interpolate from
-was an instant, unguarded jump, confirmed the hard way: Atlas fell before
-any key was even pressed. Wait for that settle to finish (Atlas visibly
-crouches slightly) before pressing `w`.
+On startup this node waits for one `atlas/joint_states` message and uses
+*that* -- Atlas's real, currently-standing pose -- as the neutral
+reference every gait phase leans/lifts/swings away from. It does **not**
+move Atlas into any different standing pose first: an earlier version
+tried that (a separately-designed "ideal" standing pose) and Atlas fell
+over, because that pose had only ever been used while pinned in the
+original code, never proven for free standing. You should see a log line
+(`Got a real starting pose -- ready.`) and then nothing should move at
+all until you press `w`.
 
 Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
