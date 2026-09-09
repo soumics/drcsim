@@ -1646,6 +1646,29 @@ v5's real leg geometry (also pulled from the URDF directly, not guessed),
 expected to need empirical retuning; being plain Python, that only needs
 `ros2 run` again, not a rebuild.
 
+**Real bug from the first interactive run, caught immediately**: Atlas
+fell over *before any key was even pressed*. `walk_keyboard.py`'s publish
+timer starts the instant the node comes up, and `GaitController`
+originally assumed Atlas was already standing in `NEUTRAL_STAND`'s pose
+(`SetPIDStand()`'s deep crouch) — but `atlas.launch.py`'s default startup
+leaves it standing closer to upright (near-zero joints), not crouched. So
+the very first published command was itself an instant, unguarded jump
+from Atlas's real pose to a deep crouch — exactly the "no rate limiter,
+don't snap" trap the module docstring already warned about, just not
+actually guarded against in code. **Fixed** by subscribing to
+`atlas/joint_states` (`AtlasPlugin`'s real current positions, same
+30-joint order confirmed via `jointStates.name = this->jointNames` in
+`AtlasPlugin.cpp`) and feeding that in as `GaitController(initial_pose=
+...)`: the controller's first output now smoothly interpolates from
+Atlas's *actual* pose into `NEUTRAL_STAND` over `IDLE_DURATION` (bumped
+to 3.0s), and a `w` pressed before that settle finishes is queued rather
+than acted on immediately, so it can't cause the same kind of jump.
+**General lesson**: any new controller node that publishes a fixed
+"assumed" pose as its first command, rather than reading where the robot
+actually is first, risks exactly this — same root-cause shape as the
+`atlas.world` pin-link mismatch from Tier 3, just one layer higher up the
+stack.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

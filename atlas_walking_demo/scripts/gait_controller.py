@@ -126,8 +126,12 @@ SWING_DURATION = 0.5
 PLANT_DURATION = 0.5
 
 # How long a settle-to-neutral takes when entering/already in IDLE --
-# arbitrary (no gait phase involved), just needs to be > 0.
-IDLE_DURATION = 1.0
+# covers both the initial settle from Atlas's real starting pose into
+# NEUTRAL_STAND (potentially a large gap, see GaitController's docstring)
+# and returning to NEUTRAL_STAND after a stop request (normally a small
+# gap, already near-neutral at a SHIFT boundary) -- kept slow/uniform for
+# both since the initial-settle case is the one that must never be fast.
+IDLE_DURATION = 3.0
 
 
 class GaitPhase:
@@ -214,21 +218,57 @@ class GaitController:
     Usage: call start_walking()/stop_walking() from keyboard input, and
     sample(dt) once per publish tick (dt = seconds since the last call) to
     get the current 30-element position list, in ATLAS_JOINT_NAMES order.
+
+    `initial_pose`, if given, is Atlas's *real* current joint positions
+    (e.g. from the last `atlas/joint_states` message) -- the controller's
+    very first output smoothly settles from there into NEUTRAL_STAND over
+    IDLE_DURATION, rather than assuming Atlas is already standing in
+    NEUTRAL_STAND's pose. Getting this wrong is exactly the "AtlasPlugin
+    has no rate limiter, don't snap" trap the module docstring warns
+    about: NEUTRAL_STAND is SetPIDStand()'s deep crouch, but
+    atlas.launch.py's default startup leaves Atlas standing closer to
+    upright (near-zero joints) -- publishing NEUTRAL_STAND as the very
+    first command with no real starting pose to interpolate from is an
+    instant, large position jump, confirmed the hard way: Atlas fell
+    before any gait phase even began.
     """
 
-    def __init__(self):
+    def __init__(self, initial_pose=None):
         self.walking = False
         self._stop_requested = False
+        self._start_requested = False
         self._phase_index = None  # None means idle (not in WALK_CYCLE)
         self._elapsed = 0.0
-        self._prev_pose = dict(NEUTRAL_STAND)
+        self._prev_pose = dict(initial_pose) if initial_pose is not None else dict(
+            NEUTRAL_STAND)
         self._target_pose = dict(NEUTRAL_STAND)
+        # No initial_pose means no real gap to close (matches every
+        # existing caller/test that never had a real starting pose to
+        # worry about) -- settled immediately, same as before this fix.
+        self._settled = initial_pose is None
+
+    @property
+    def is_settled(self):
+        """Return True once idle and fully interpolated into NEUTRAL_STAND."""
+        return self._settled
 
     def start_walking(self):
+        """
+        Request the walk cycle begin.
+
+        If still mid-settle (see `initial_pose` above) this only queues
+        the request -- `sample()` starts the actual first gait phase once
+        the settle-into-NEUTRAL_STAND interpolation has actually
+        completed, never before, so a `w` pressed too early can't cause
+        the same kind of unguarded jump `initial_pose` itself guards
+        against.
+        """
         self._stop_requested = False
         self.walking = True
-        if self._phase_index is None:
+        if self._settled and self._phase_index is None:
             self._begin_phase(0)
+        else:
+            self._start_requested = True
 
     def stop_walking(self):
         self._stop_requested = True
@@ -242,6 +282,8 @@ class GaitController:
         alpha = min(1.0, self._elapsed / duration)
         pose = _lerp_pose(self._prev_pose, self._target_pose, alpha)
         if alpha >= 1.0:
+            if self._phase_index is None:
+                self._settled = True
             self._advance()
         return [pose[name] for name in ATLAS_JOINT_NAMES]
 
@@ -256,11 +298,19 @@ class GaitController:
         self._elapsed = 0.0
         self._prev_pose = dict(self._target_pose)
         self._target_pose = dict(NEUTRAL_STAND)
+        self._settled = False  # a real interpolation gap again -- wait for it
         self.walking = False
 
     def _advance(self):
         if self._phase_index is None:
-            return  # already idle and settled; nothing to advance
+            # Reached here only once self._settled just became True this
+            # same sample() call. Safe to start the walk cycle now if one
+            # was requested, whether that's the very first settle
+            # finishing or a later stop-then-restart.
+            if self._start_requested:
+                self._start_requested = False
+                self._begin_phase(0)
+            return
         finished_name = WALK_CYCLE[self._phase_index].name
         if self._stop_requested and finished_name.startswith('SHIFT'):
             self._begin_idle()

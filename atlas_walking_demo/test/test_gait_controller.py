@@ -111,6 +111,57 @@ def test_stop_walking_returns_to_idle_only_at_a_shift_boundary():
     assert gait.walking is False
 
 
+def test_no_initial_pose_is_immediately_settled_and_walks_right_away():
+    # Regression test: the very first interactive run fell before any key
+    # was even pressed, because the original code always started a fresh
+    # GaitController assuming Atlas was already standing in NEUTRAL_STAND
+    # -- publishing that pose as the first command was itself an instant,
+    # unguarded jump from wherever Atlas actually was. With no
+    # initial_pose given at all (as in every other test above), there is
+    # no real gap to close, so this must stay immediate, not wait
+    # IDLE_DURATION for no reason.
+    gait = gait_controller_script.GaitController()
+    assert gait.is_settled is True
+
+    gait.start_walking()
+    position = gait.sample(0.01)
+
+    hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
+    neutral_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx']
+    assert position[hpx_index] > neutral_hpx  # already leaning -- SHIFT_LEFT began right away
+
+
+def test_real_initial_pose_settles_before_the_walk_cycle_can_start():
+    # The actual bug: construct as if Atlas is standing upright (all
+    # zeros) rather than in NEUTRAL_STAND's deep crouch, matching what
+    # atlas.launch.py's default startup really leaves it in.
+    upright_pose = {name: 0.0 for name in gait_controller_script.ATLAS_JOINT_NAMES}
+    gait = gait_controller_script.GaitController(initial_pose=upright_pose)
+    assert gait.is_settled is False
+
+    gait.start_walking()  # pressing 'w' immediately -- must not jump or snap
+    position = gait.sample(0.01)
+
+    # Still mid-settle: nowhere near NEUTRAL_STAND's crouch yet, and the
+    # walk cycle must not have started (no lean applied on top of this).
+    kny_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_kny')
+    assert position[kny_index] < 0.1  # nowhere near NEUTRAL_STAND's 0.933 yet
+    assert gait.is_settled is False
+
+    # Finish the settle (IDLE_DURATION total): this call's own returned
+    # pose is still exactly NEUTRAL_STAND (alpha reaches 1.0 *within*
+    # this call), but it also completes the settle and starts the queued
+    # walk request internally -- the next sample() call is what shows it.
+    position = gait.sample(gait_controller_script.IDLE_DURATION)
+    assert gait.is_settled is True
+    hpx_index = gait_controller_script.ATLAS_JOINT_NAMES.index('l_leg_hpx')
+    neutral_hpx = gait_controller_script.NEUTRAL_STAND['l_leg_hpx']
+    assert position[hpx_index] == neutral_hpx  # exactly settled, not leaning yet
+
+    position = gait.sample(0.01)
+    assert position[hpx_index] > neutral_hpx  # SHIFT_LEFT has now begun
+
+
 def test_walk_cycle_is_a_valid_alternating_sequence():
     names = [phase.name for phase in gait_controller_script.WALK_CYCLE]
     assert names == [

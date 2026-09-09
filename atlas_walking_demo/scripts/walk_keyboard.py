@@ -23,6 +23,13 @@ AtlasCommand, the same live topic AtlasCommandController::SetPIDStand()
 and drcsim_tutorials/atlas_teleop.py already use; it makes no changes to
 any plugin or launch file.
 
+Waits for one atlas/joint_states message (AtlasPlugin's real, current
+joint positions) before publishing anything at all, and hands that in as
+GaitController's initial_pose -- confirmed the hard way that skipping this
+and just assuming Atlas already stood in NEUTRAL_STAND's pose made it fall
+before any key was even pressed. See gait_controller.py's GaitController
+docstring for the full story.
+
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
 Turning is not implemented in this first version.
@@ -43,6 +50,7 @@ from atlas_msgs.msg import AtlasCommand
 from gait_controller import ATLAS_JOINT_NAMES, GaitController, NEUTRAL_STAND_EFFORT
 import rclpy
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 
 PUBLISH_RATE_HZ = 30.0
 
@@ -58,11 +66,26 @@ class WalkKeyboardNode(Node):
 
     def __init__(self):
         super().__init__('atlas_walk_keyboard')
-        self.gait = GaitController()
+        self.gait = None  # constructed once a real starting pose is known
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
+        self.joint_states_sub = self.create_subscription(
+            JointState, 'atlas/joint_states', self._on_joint_states, 10)
+
+    def _on_joint_states(self, msg):
+        if self.gait is not None:
+            return  # already initialized from a first joint_states message
+        initial_pose = dict(zip(msg.name, msg.position))
+        if not all(name in initial_pose for name in ATLAS_JOINT_NAMES):
+            return  # not a full report yet (e.g. mid-spawn); wait for one that is
+        self.gait = GaitController(initial_pose=initial_pose)
+        self.get_logger().info(
+            'Got a real starting pose; settling into a neutral stand before any '
+            'walk request can begin.')
 
     def _tick(self):
+        if self.gait is None:
+            return  # still waiting on the first atlas/joint_states message
         position = self.gait.sample(1.0 / PUBLISH_RATE_HZ)
         command = AtlasCommand()
         command.header.stamp = self.get_clock().now().to_msg()
@@ -72,6 +95,8 @@ class WalkKeyboardNode(Node):
         self.pub.publish(command)
 
     def handle_key(self, key):
+        if self.gait is None:
+            return  # still waiting on the first atlas/joint_states message
         if key == 'w':
             if not self.gait.walking:
                 self.get_logger().info('Walking forward.')
