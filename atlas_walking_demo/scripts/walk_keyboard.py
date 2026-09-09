@@ -121,6 +121,8 @@ class WalkKeyboardNode(Node):
         self._first_joint_states_time = None
         self._reset_requested = False
         self._ramp_start_time = None  # set once the handoff succeeds
+        self._neutral_pose = None  # set alongside _reset_requested
+        self._last_diag_log_time = None
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.reset_controls_client = self.create_client(
             ResetControls, 'atlas/reset_controls')
@@ -129,9 +131,10 @@ class WalkKeyboardNode(Node):
             JointState, 'atlas/joint_states', self._on_joint_states, 10)
 
     def _on_joint_states(self, msg):
+        pose = dict(zip(msg.name, msg.position))
+        self._log_ramp_diagnostics(pose)
         if self.gait is not None or self._reset_requested:
             return  # already initialized, or the handoff is already in flight
-        pose = dict(zip(msg.name, msg.position))
         if not all(name in pose for name in ATLAS_JOINT_NAMES):
             return  # not a full report yet (e.g. mid-spawn); wait for one that is
 
@@ -146,6 +149,7 @@ class WalkKeyboardNode(Node):
             return  # still within the fixed settle delay
 
         self._reset_requested = True
+        self._neutral_pose = pose
         command = AtlasCommand()
         command.position = [pose[name] for name in ATLAS_JOINT_NAMES]
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
@@ -185,6 +189,37 @@ class WalkKeyboardNode(Node):
         """Return the current 0-255 k_effort value, ramping up from the handoff."""
         elapsed = (self.get_clock().now() - self._ramp_start_time).nanoseconds / 1e9
         return round(255 * min(1.0, elapsed / KEFFORT_RAMP_SEC))
+
+    def _log_ramp_diagnostics(self, pose):
+        """
+        Print measured-vs-target for the leg pitch joints during the ramp.
+
+        Diagnostic only, throttled to ~3Hz, active only from the moment
+        the handoff starts until a few seconds past the end of the ramp --
+        several earlier fixes here (integral reset, then a k_effort ramp)
+        turned out wrong or incomplete only once tried interactively, so
+        this exists to show the *actual* trajectory (a slow buckle looks
+        very different from a sudden spike) instead of guessing at a next
+        mechanism blind.
+        """
+        if self._ramp_start_time is None:
+            return
+        now = self.get_clock().now()
+        elapsed = (now - self._ramp_start_time).nanoseconds / 1e9
+        if elapsed > KEFFORT_RAMP_SEC + 3.0:
+            return  # done diagnosing; the ramp finished a while ago
+        if (self._last_diag_log_time is not None and
+                (now - self._last_diag_log_time).nanoseconds / 1e9 < 0.3):
+            return
+        self._last_diag_log_time = now
+
+        joints = ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky', 'r_leg_hpy', 'r_leg_kny', 'r_leg_aky')
+        target = self._neutral_pose or pose
+        deltas = ', '.join(
+            f'{name}: measured={pose[name]:.3f} target={target[name]:.3f} '
+            f'err={pose[name] - target[name]:+.3f}' for name in joints)
+        self.get_logger().info(
+            f'[ramp diag] t={elapsed:.1f}s k_effort={self._current_k_effort()} {deltas}')
 
     def _tick(self):
         if self.gait is None:
