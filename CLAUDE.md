@@ -1619,10 +1619,32 @@ types or a GUI event loop, "all lint/tests pass" is necessary but not
 sufficient; an actual `ros2 run` is the only thing that catches these.
 
 **Not ported / deferred**: nothing further remains in this tier's original
-five subpackages — three were dropped, two fully ported. Any additional
-tutorial content (e.g. a custom keyboard-teleop walking demo) is planned
-as a new, separate package outside this migration's original-repo scope,
-not part of `drcsim_tutorials`.
+five subpackages — three were dropped, two fully ported.
+
+## Beyond the migration: `atlas_walking_demo` (new original content, not a port)
+
+First of an open-ended series of *new* tutorials the user is building on
+top of the finished migration — deliberately kept out of `drcsim_tutorials`
+(which is specifically the ported original content) as its own package.
+Statically-stable, keyboard-controlled stepping (`w`=walk, `space`/`s`=stop,
+no turning yet) — explicitly not real dynamic/balance-controlled walking,
+since no CoM/ZMP controller exists anywhere in this codebase (confirmed via
+a repo-wide grep before designing this). `gait_controller.py`'s neutral
+standing pose and feedforward efforts are transcribed directly from
+`VRCPlugin::AtlasCommandController::SetPIDStand()`'s real, already-tuned
+v5 values (`VRCPlugin.cpp` ~line 1634) rather than reinvented; every gait
+phase is a target pose composed from that baseline (stance lean + swing-leg
+lift/flex deltas) and linearly interpolated to over time, since
+`AtlasPlugin` has no velocity/rate limiter of its own — snapping between
+poses would yank joints as hard as their effort limit allows. See the
+package's own `README.md` for the run command and a milestone-by-milestone
+tuning guide (using `AtlasPlugin`'s already-live, cheats-gated
+`atlas/debug/{l,r}_foot_contact` topics as a numeric verification signal,
+not just visual judgment) — full design rationale lives in the plan this
+was built from. All tuning constants are starting estimates from Atlas
+v5's real leg geometry (also pulled from the URDF directly, not guessed),
+expected to need empirical retuning; being plain Python, that only needs
+`ros2 run` again, not a rebuild.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
