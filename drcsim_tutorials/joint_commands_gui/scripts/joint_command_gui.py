@@ -157,23 +157,48 @@ class JointCommandGuiNode(Node):
 class JointCommandGuiWindow(tk.Tk):
     """One label+slider row per joint, plus a Center button."""
 
+    #: Window is capped at this height and scrolls -- with 30 joints, one
+    #: row each does not fit on a typical screen, and rows were silently
+    #: clipped off the bottom before this (reported the hard way: "not all
+    #: joints sliders appear").
+    MAX_WINDOW_HEIGHT = 700
+
     def __init__(self, node):
         super().__init__()
         self.node = node
         self.title('Joint Command GUI')
         self.sliders = {}
 
+        tk.Button(self, text='Center', command=self._on_center).pack(
+            side=tk.BOTTOM, fill=tk.X, pady=4)
+
+        canvas = tk.Canvas(self, borderwidth=0)
+        scrollbar = tk.Scrollbar(self, orient=tk.VERTICAL, command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        rows_frame = tk.Frame(canvas)
+        canvas.create_window((0, 0), window=rows_frame, anchor='nw')
+        rows_frame.bind(
+            '<Configure>', lambda e: canvas.configure(scrollregion=canvas.bbox('all')))
+        canvas.bind(
+            '<Enter>',
+            lambda e: canvas.bind_all(
+                '<MouseWheel>', lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), 'units')))
+        canvas.bind('<Leave>', lambda e: canvas.unbind_all('<MouseWheel>'))
+
         for name in node.joint_order:
             joint = node.free_joints[name]
             if joint['min'] == joint['max']:
                 continue
-            row = tk.Frame(self)
+            row = tk.Frame(rows_frame)
             row.pack(fill=tk.X, padx=4, pady=1)
             tk.Label(row, text=name, width=16, anchor='w').pack(side=tk.LEFT)
             value_label = tk.Label(row, text=f'{joint["zero"]:.2f}', width=8)
             value_label.pack(side=tk.RIGHT)
             slider = tk.Scale(
-                self, from_=joint['min'], to=joint['max'], resolution=(
+                rows_frame, from_=joint['min'], to=joint['max'], resolution=(
                     (joint['max'] - joint['min']) / SLIDER_STEPS),
                 orient=tk.HORIZONTAL,
                 command=lambda v, n=name, lbl=value_label: self._on_slider(n, v, lbl))
@@ -181,7 +206,10 @@ class JointCommandGuiWindow(tk.Tk):
             slider.pack(fill=tk.X, padx=4)
             self.sliders[name] = (slider, value_label)
 
-        tk.Button(self, text='Center', command=self._on_center).pack(fill=tk.X, pady=4)
+        self.update_idletasks()
+        width = rows_frame.winfo_reqwidth() + scrollbar.winfo_reqwidth() + 20
+        height = min(self.MAX_WINDOW_HEIGHT, rows_frame.winfo_reqheight() + 40)
+        self.geometry(f'{width}x{height}')
 
     def _on_slider(self, name, value_str, value_label):
         value = float(value_str)
