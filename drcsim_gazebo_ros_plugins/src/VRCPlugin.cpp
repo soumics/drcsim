@@ -41,7 +41,6 @@
 #include <gz/sim/components/Name.hh>
 #include <sdf/Cylinder.hh>
 #include <sdf/Geometry.hh>
-#include <sdf/Joint.hh>
 #include <sdf/Root.hh>
 
 #include <atlas_msgs/msg/atlas_behavior_step_data.hpp>
@@ -153,35 +152,20 @@ gz::sim::Entity VRCPlugin::AddJoint(
   gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr,
   gz::sim::Entity _modelEntity, gz::sim::Entity _link1, gz::sim::Entity _link2)
 {
+  static_cast<void>(_modelEntity);
+  static_cast<void>(_eventMgr);
   if (_link1 == gz::sim::kNullEntity) {
-    // Pin _link2 to the world via a real SDF fixed joint, parented under
-    // the same model as _link2 (see the class-level design note). This is
-    // the only mechanism ever interactively confirmed to hold Atlas
-    // correctly: three separate attempts to replace it with a
-    // DetachableJoint-based weld (to a runtime-spawned "static" anchor,
-    // then to the world file's own ground_plane link) each made real
-    // in-GUI behavior *worse* -- flying/teleporting/spinning instability
-    // from the moment of pinning -- for reasons not fully root-caused (see
-    // the class-level design note history). Reverted back to this,
-    // deliberately, rather than stacking a fourth unverified theory.
-    const auto * nameComponent =
-      _ecm.Component<gz::sim::components::Name>(_link2);
-    if (!nameComponent) {
-      gzerr << "AddJoint: pin target link has no Name component." << std::endl;
-      return gz::sim::kNullEntity;
-    }
-    const std::string * childName = &nameComponent->Data();
-
-    sdf::Joint jointSdf;
-    jointSdf.SetName(*childName + "_world_pin_joint");
-    jointSdf.SetType(sdf::JointType::FIXED);
-    jointSdf.SetParentName("world");
-    jointSdf.SetChildName(*childName);
-
-    gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
-    const gz::sim::Entity jointEntity = creator.CreateEntities(&jointSdf, true);
-    creator.SetParent(jointEntity, _modelEntity);
-    return jointEntity;
+    // Pin _link2 to the world -- no physics joint at all; see the
+    // class-level design note for why (three different joint-based
+    // mechanisms were each tried and found to either not detach on
+    // removal, or to actively destabilize the robot). The actual "hold in
+    // place" behavior is a per-tick kinematic pose override in
+    // UpdateStates(), driven by atlas.pinHoldPose, for as long as
+    // pinJointEntity != kNullEntity. This placeholder entity carries no
+    // components at all -- it exists purely so pinJointEntity's existing
+    // "!= kNullEntity means pinned" contract, and RemoveJoint()'s existing
+    // RequestRemoveEntity() call, keep working unchanged.
+    return _ecm.CreateEntity();
   }
 
   // Cross-model (or same-model) rigid weld between two existing links.
@@ -237,6 +221,11 @@ void VRCPlugin::Teleport(
   this->SetLinkWorldPose(_ecm, modelEntity, _pinLink, _pose);
   _pinJoint = this->AddJoint(
     _ecm, _eventMgr, modelEntity, gz::sim::kNullEntity, _pinLink);
+  // Teleport() is only ever called for atlas.pinLinkEntity/pinJointEntity
+  // (the cmd_vel warp-while-pinned path) -- keep the per-tick kinematic
+  // hold (see the class-level design note) targeting the new pose too,
+  // not the original pin pose.
+  this->atlas.pinHoldPose = _pose;
 }
 
 //////////////////////////////////////////////////
@@ -301,6 +290,7 @@ void VRCPlugin::PinAtlas(
       this->atlas.pinLinkEntity);
   }
   this->atlas.initialPose = gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
+  this->atlas.pinHoldPose = this->atlas.initialPose;
 
   this->SetModelGravityMode(_ecm, this->atlas.modelEntity, _withGravity);
   this->SetFeetCollide("none");
@@ -383,11 +373,16 @@ void VRCPlugin::DoSetRobotMode(
       _ecm, _eventMgr, this->atlas.modelEntity, gz::sim::kNullEntity,
       this->atlas.pinLinkEntity);
     this->atlas.initialPose = gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
+    this->atlas.pinHoldPose = atlasPose;
     this->SetModelGravityMode(_ecm, this->atlas.modelEntity, false);
   } else if (_str == "pid_stand") {
     // Robot is PID controlled in BDI stand Pose and PINNED.
     this->RemoveJoint(_ecm, this->atlas.pinJointEntity);
     this->RemoveJoint(_ecm, this->vehicleRobotJoint);
+    // Capture before AddJoint(): the per-tick kinematic hold (see the
+    // class-level design note) needs the pose to hold set before it can
+    // start being applied, same as PinAtlas()/the "harnessed" branch above.
+    this->atlas.pinHoldPose = gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
     this->atlas.pinJointEntity = this->AddJoint(
       _ecm, _eventMgr, this->atlas.modelEntity, gz::sim::kNullEntity,
       this->atlas.pinLinkEntity);
@@ -846,6 +841,20 @@ void VRCPlugin::UpdateStates(
   }
 
   const double curTime = std::chrono::duration<double>(_info.simTime).count();
+
+  // Kinematically hold the pin link in place every tick while pinned --
+  // see the class-level design note on why this replaced a physics joint
+  // entirely. Runs unconditionally, every tick, ahead of the state
+  // machine below, so it applies regardless of which state currently has
+  // atlas pinned (startup pinning, "pinned"/"pinned_with_gravity"/
+  // "pid_stand"/"harnessed" modes, or the cmd_vel warp-while-pinned path).
+  if (this->atlas.pinJointEntity != gz::sim::kNullEntity &&
+    this->atlas.pinLinkEntity != gz::sim::kNullEntity)
+  {
+    this->SetLinkWorldPose(
+      _ecm, this->atlas.modelEntity, this->atlas.pinLinkEntity,
+      this->atlas.pinHoldPose);
+  }
 
   // If user chooses bdi_stand mode, robot will be initialized with PID
   // stand in BDI stand pose pinned.

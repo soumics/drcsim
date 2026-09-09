@@ -1351,6 +1351,45 @@ anything but its own default.
     reading logs after the fact or trusting the automated test suite,
     since that suite has now passed clean through four different (three
     broken) versions of this code without ever detecting the difference.
+  - **Fifth attempt, this time genuinely different in kind.** Reverting to
+    the round-3 `sdf::Joint`-to-`"world"` mechanism did *not* restore the
+    round-3 baseline the way byte-identical code should have: this time
+    interactive testing showed the pin holding fine while pinned (a little
+    vibration, expected/normal), but the exact same old "pelvis frozen
+    forever, everything else flailing" symptom the whole rework was
+    originally meant to fix — meaning the previously-reported "success" in
+    round 3 was likely never fully reliable in the first place, and the
+    real, only-ever-partially-fixed bug is the one this whole design-note
+    history is about: **gz-physics/dartsim will not cleanly detach a
+    dynamically-added joint whose parent is `"world"`, full stop**, no
+    matter which of the three joint-creation mechanisms tried. Given that,
+    trying a *fourth* joint-based variant made no sense. Instead: **stopped
+    using a physics joint for this case entirely.** `AddJoint()`'s
+    world-pin branch now returns a bare, component-less placeholder entity
+    (nothing else — no `sdf::Joint`, no `DetachableJoint`); the actual pin
+    is a per-tick kinematic pose override, added to `VRCPlugin::
+    UpdateStates()`, that forcibly re-applies `atlas.pinHoldPose` to
+    `atlas.pinLinkEntity` via `Model::SetWorldPoseCmd()` — the exact same
+    primitive `Teleport()`/`SetLinkWorldPose()` already use elsewhere in
+    this same plugin — for as long as `atlas.pinJointEntity !=
+    kNullEntity`. Unpinning is just `RemoveJoint()` clearing that entity,
+    which stops the per-tick re-application; there is no physics-engine
+    joint to fail to detach, because none is ever created. All four call
+    sites that used to call `AddJoint()` for the world-pin case
+    (`PinAtlas()`, `Teleport()`, and `DoSetRobotMode()`'s `"harnessed"`
+    and `"pid_stand"` branches) now also set `atlas.pinHoldPose` to
+    whatever pose should be held, at the same point they used to rely on
+    the joint holding it. **General lesson**: when a physics-engine
+    limitation (not a bug in this plugin's own code) blocks a joint-based
+    approach after multiple genuinely-different joint variants all hit the
+    same wall, stop trying joint variants — a kinematic per-tick pose
+    override is a legitimate, often more robust substitute for "rigidly
+    hold this link in place," and this plugin already had the exact
+    primitive needed (`SetLinkWorldPose`) sitting right there, proven, the
+    whole time. **Awaiting interactive re-confirmation**: does the pin
+    still hold correctly, and — the actual point of this whole change —
+    does the pelvis genuinely move again after unpin, verified with
+    `pub_atlas_command` same as before.
   - **Also cleaned up in this same round** (found via the same interactive
     log, unrelated to the pin bug but real, unfixed leftovers from the
     Tier 3 `atlas_description` pass): `atlas.gazebo`/`atlas_v3`/`atlas_v4`/

@@ -129,47 +129,54 @@ namespace drcsim_gazebo_ros_plugins
 ///   gz-sim's own (separate, topic-triggered)
 ///   `gz-sim-detachable-joint-system` does internally. Removal in all
 ///   cases is uniform: `_ecm.RequestRemoveEntity(jointEntity)`.
-///   - *Pin to world* is a real SDF `fixed` joint with parent name
-///     `"world"`, built via `sdf::Joint` setters and turned into a live
-///     entity with `SdfEntityCreator::CreateEntities(&jointSdf, true)` --
-///     this creates and holds correctly (confirmed interactively: the
-///     pinned robot visibly stays in place), but its **removal silently
-///     doesn't detach the physics constraint**: `RequestRemoveEntity`
-///     erases the ECS entity, but gz-physics's dartsim plugin logs `No
-///     joint named [<name>_world_pin_joint] for modelID [N]` and leaves
-///     the actual dartsim-level weld in place forever -- confirmed the
-///     hard way, by watching a real launch where Atlas's pelvis never
-///     moved again after its very first pin, no matter what commanded
-///     every other joint. Near-certainly because "weld to world" is
-///     normally a Skeleton-construction-time operation in dartsim, and
+///   - *Pin to world* is **not** a physics joint at all, after three
+///     different joint-based mechanisms were each tried and found wanting.
+///     First attempt: a real SDF `fixed` joint with parent name `"world"`,
+///     built via `sdf::Joint` setters and `SdfEntityCreator::CreateEntities
+///     (&jointSdf, true)` -- creates and holds correctly (confirmed
+///     interactively), but its removal silently doesn't detach the
+///     physics constraint: `RequestRemoveEntity` erases the ECS entity,
+///     but gz-physics's dartsim plugin logs `No joint named
+///     [<name>_world_pin_joint] for modelID [N]` and leaves the actual
+///     dartsim-level weld in place forever -- confirmed the hard way, by
+///     watching a real launch where Atlas's pelvis never moved again
+///     after its very first pin. Near-certainly because "weld to world"
+///     is normally a Skeleton-construction-time operation in dartsim, and
 ///     joints added this way *after* the model already exists don't get
-///     registered as a normal, later-removable joint object. This is
-///     likely a genuine gz-physics/dartsim gap for *dynamically added*
-///     world joints, not something fixable from the SDF-authoring side.
-///     **Three separate attempts to replace this with a
-///     `DetachableJoint`-based weld** (first to a small model spawned at
-///     runtime and marked static, then to the world file's own
-///     `ground_plane` link, on the theory that `Static` wasn't being
-///     honored for a runtime-spawned model) each made real interactive
-///     behavior *worse*, not better -- Atlas flying/teleporting/spinning
-///     uncontrollably from the moment of pinning, in both cases, even
-///     though `DetachableJoint` is the exact same mechanism already
-///     working for the cross-model welds below (vehicle-seat, fire hose).
-///     The actual root cause was never nailed down (no access to
-///     gz-physics source to confirm; a plausible but unverified guess is
-///     that welding a model's own *floating-base root link* -- which
-///     already carries an implicit 6-DOF connection to the world in
-///     dartsim -- via a second, separate `DetachableJoint` constraint is a
-///     fundamentally different, more fragile case than welding a
-///     non-root link like a hand, which is what the cross-model welds
-///     below actually exercise). **Reverted back to the direct
-///     `sdf::Joint`-to-`"world"` mechanism above, deliberately**, since it
-///     is the only one ever interactively confirmed to hold Atlas
-///     correctly -- accepting the known, far more minor "can't be fully
-///     unpinned" bug as a real, open, deferred issue rather than
-///     continuing to stack unverified fixes on top of each other. If this
-///     is revisited: get a GUI open and watch step-by-step (not just
-///     read logs) before believing any fix "works."
+///     registered as a normal, later-removable joint object. Second and
+///     third attempts replaced this with a `DetachableJoint`-based weld
+///     (to a runtime-spawned "static" model, then to the world file's own
+///     `ground_plane` link) -- each made real interactive behavior
+///     *worse*, not better: Atlas flying/teleporting/spinning
+///     uncontrollably from the moment of pinning, even though
+///     `DetachableJoint` is the exact same mechanism already working
+///     for the cross-model welds below (vehicle-seat, fire hose). Root
+///     cause never nailed down (no access to gz-physics source; a
+///     plausible but unverified guess is that welding a model's own
+///     *floating-base root link* -- which already carries an implicit
+///     6-DOF connection to the world in dartsim -- via a second, separate
+///     `DetachableJoint` constraint is fundamentally more fragile than
+///     welding a non-root link like a hand, which is what the
+///     cross-model welds below actually exercise).
+///
+///     **Fixed by not using a physics joint of any kind for this case**:
+///     `AddJoint()`'s world-pin branch now just creates and returns a
+///     bare, component-less placeholder entity (purely so existing
+///     `pinJointEntity != kNullEntity` / `RemoveJoint()` call sites keep
+///     working unchanged) -- no SDF joint, no `DetachableJoint`. Instead,
+///     `UpdateStates()` forcibly re-applies `atlas.pinHoldPose` to
+///     `atlas.pinLinkEntity` via the same `Model::SetWorldPoseCmd()`
+///     kinematic-teleport primitive `Teleport()`/`SetLinkWorldPose()`
+///     already use elsewhere in this plugin, every single tick, for as
+///     long as `pinJointEntity != kNullEntity`. "Unpinning" is then just
+///     `RemoveJoint()` clearing that entity, which makes the per-tick
+///     re-application stop -- there is no physics-engine joint-removal
+///     step to fail. This sidesteps the entire class of bug above rather
+///     than trying a fourth joint-based variant. Trade-off: the pinned
+///     link is now held by a hard kinematic override (zero compliance)
+///     every tick rather than a physics constraint, which is a stronger,
+///     not weaker, hold in practice, at the cost of not being a "real"
+///     joint (e.g. it will not show up as one in any joint inspector).
 ///   - *Fire hose <-> standpipe screw-thread docking*: the original creates
 ///     a real Classic "screw" joint with a settable thread pitch so the
 ///     connection can be reversed by "unscrewing" it (reading the joint's
@@ -378,6 +385,15 @@ public:
     /// \brief keep initial pose of robot to prevent z-drifting when
     /// teleporting the robot.
     gz::math::Pose3d initialPose;
+
+    /// \brief The pose `UpdateStates()` forcibly re-applies to `pinLinkEntity`
+    /// every tick while `pinJointEntity != kNullEntity` -- see the
+    /// class-level design note on why pinning holds a pose kinematically
+    /// each tick instead of via any physics joint. Set by `PinAtlas()` and
+    /// kept in sync by `Teleport()` (the only two places that change what
+    /// pose is being held); distinct from `initialPose`, which callers rely
+    /// on staying fixed at the original pin pose for Z-drift prevention.
+    gz::math::Pose3d pinHoldPose;
 
     /// \brief Pose of robot relative to vehicle.
     gz::math::Pose3d vehicleRelPose;
