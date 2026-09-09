@@ -935,9 +935,12 @@ passing across `atlas_description`, `drcsim_gazebo_plugins`,
 merged into `ros2-jazzy-harmonic`. `ros2 launch drcsim_gazebo
 atlas.launch.py` brings up Atlas end to end: gz-sim starts, `VRCPlugin`
 spawns the robot from `robot_description`, and `AtlasPlugin` runs under
-the real per-joint PID gains — confirmed by querying `atlas_plugin`'s
-own ROS parameters directly in `test_atlas_launch.py`, not by trying to
-model what "correct" standing dynamics should look like.)
+the real per-joint PID gains — confirmed both automatically (querying
+`atlas_plugin`'s own ROS parameters directly in `test_atlas_launch.py`,
+not by trying to model what "correct" standing dynamics should look
+like) and by hand: **the user watched Atlas actually stand in the
+gz-sim GUI** on 2026-09-09, after two real bugs found via that same
+interactive testing got fixed — see below.)
 
 The goal of this tier: prove the *whole* simulation actually comes up
 together (spawn Atlas, get it to hold a pose instead of collapsing —
@@ -1185,25 +1188,31 @@ anything but its own default.
     `pin_link` bug above, a second real run still ended with the robot
     on the ground (not flying this time, just fallen over) partway
     through the `stand prep -> Nominal -> Dynamic Stand Behavior`
-    sequence, alongside a `No joint named [pelvis_world_pin_joint] for
-    modelID [N]` warning of unclear significance (no accompanying hard
-    rejection error this time, unlike the `utorso` case, so possibly a
-    harmless one-tick creation/query race rather than a repeat of the
-    same bug — not yet root-caused). Given the user's immediate goal was
-    just seeing Atlas stand at all, **the launch's default
-    `startup_mode` was switched to `"pinned"` instead** — the simpler
-    pin/hold/auto-unpin path with no stand-prep choreography, exactly
-    what `VRCPlugin`'s own already-passing gtest exercises (its test
-    world never sets `atlas.startup_mode`, which defaults to `""`, also
-    routed to this same simple path — `atlas.startup_mode` only ever
-    branches on the literal string `"bdi_stand"`; anything else,
-    including `""`, takes the "pinned" branch). `bdi_stand` is still
-    selectable via the `startup_mode` launch argument for whoever wants
-    to debug it further, but **treat it as known-unreliable, not a
-    ready-to-use feature**, until someone actually root-causes the
-    stand-prep/dynamic-stand transition itself (a real, currently open
-    bug — worth a dedicated debugging session with the GUI actually
-    open and watched step by step, not just log-reading).
+    sequence. Given the user's immediate goal was just seeing Atlas
+    stand at all, **the launch's default `startup_mode` was switched to
+    `"pinned"` instead** — the simpler pin/hold/auto-unpin path with no
+    stand-prep choreography, exactly what `VRCPlugin`'s own
+    already-passing gtest exercises (its test world never sets
+    `atlas.startup_mode`, which defaults to `""`, also routed to this
+    same simple path — `atlas.startup_mode` only ever branches on the
+    literal string `"bdi_stand"`; anything else, including `""`, takes
+    the "pinned" branch). **Confirmed working**: with `startup_mode=
+    pinned`, Atlas spawns, holds pinned for `atlas.time_to_unpin`
+    seconds, auto-unpins, and stands under `AtlasPlugin`'s real gains —
+    watched directly in the gz-sim GUI. `bdi_stand` is still selectable
+    via the `startup_mode` launch argument for whoever wants to debug it
+    further, but **treat it as known-unreliable, not a ready-to-use
+    feature**, until someone actually root-causes the stand-prep/
+    dynamic-stand transition itself (a real, currently open bug — worth
+    a dedicated debugging session with the GUI actually open and watched
+    step by step, not just log-reading).
+  - The `No joint named [pelvis_world_pin_joint] for modelID [N]`
+    warning that appears during every pin (both the `bdi_stand` and
+    `pinned` runs above) is **confirmed harmless** — it's present in the
+    successful `pinned` run too, with no ill effect, so it's a one-tick
+    creation/query race (something queries the joint the same tick it's
+    created, before the physics engine has caught up), not a repeat of
+    the real `utorso` rejection bug. Safe to ignore.
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 
