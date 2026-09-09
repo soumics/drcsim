@@ -109,13 +109,16 @@ class WalkKeyboardNode(Node):
             return  # still within the fixed settle delay
 
         self.gait = GaitController(pose)
-        leg_joints = (
-            'l_leg_hpx', 'l_leg_hpy', 'l_leg_kny', 'l_leg_aky', 'l_leg_akx',
-            'r_leg_hpx', 'r_leg_hpy', 'r_leg_kny', 'r_leg_aky', 'r_leg_akx')
-        leg_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in leg_joints)
+        # Log every joint, not just legs, while this is still being
+        # diagnosed interactively -- a bad capture in an arm/back/neck
+        # joint would be invisible if only legs were ever printed, and
+        # the very first publish this node ever makes (this pose,
+        # unchanged, no gait phase active yet) has itself been enough to
+        # cause a fall at least once.
+        full_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in ATLAS_JOINT_NAMES)
         self.get_logger().info(
             f'Atlas has settled into a real, stable starting pose -- ready. '
-            f'Press w to walk. Captured leg joints: {leg_summary}')
+            f'Press w to walk. Captured pose: {full_summary}')
 
     def _tick(self):
         if self.gait is None:
