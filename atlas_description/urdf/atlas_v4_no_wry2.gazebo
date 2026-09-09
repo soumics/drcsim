@@ -211,14 +211,6 @@
     <mu1>0.9</mu1>
     <mu2>0.9</mu2>
   </gazebo>
-  <gazebo>
-    <plugin filename="libgazebo_ros_p3d.so" name="gazebo_ros_p3d">
-      <bodyName>pelvis</bodyName>
-      <topicName>/ground_truth_odom</topicName>
-      <alwaysOn>true</alwaysOn>
-      <updateRate>100.0</updateRate>
-    </plugin>
-  </gazebo>
 
   <!-- foot contact sensors -->
   <gazebo reference="r_foot">
@@ -243,13 +235,6 @@
       </contact>
     </sensor>
   </gazebo>
-  <gazebo>
-    <plugin filename="libgazebo_ros_force.so" name="gazebo_ros_force">
-      <bodyName>pelvis</bodyName>
-      <topicName>/atlas/apply_pelvis_force</topicName>
-    </plugin>
-  </gazebo>
-
 
   <gazebo reference="back_bkz">
     <implicitSpringDamper>1</implicitSpringDamper>
@@ -362,20 +347,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="r_situational_awareness_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>r_situational_awareness_camera</cameraName>
-        <imageTopicName>image_raw</imageTopicName>
-        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
-        <frameName>r_situational_awareness_camera_optical_frame</frameName>
-        <hackBaseline>0.0</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
   <gazebo reference="l_situational_awareness_camera_link">
@@ -409,20 +380,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="l_situational_awareness_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>l_situational_awareness_camera</cameraName>
-        <imageTopicName>image_raw</imageTopicName>
-        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
-        <frameName>l_situational_awareness_camera_optical_frame</frameName>
-        <hackBaseline>0.0</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 
@@ -461,20 +418,6 @@
           <stddev>0.007</stddev>
         </noise>
       </camera>
-      <plugin name="rear_situational_awareness_camera_controller" filename="libgazebo_ros_camera.so">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>0.0</updateRate>
-        <cameraName>rear_situational_awareness_camera</cameraName>
-        <imageTopicName>image_raw</imageTopicName>
-        <cameraInfoTopicName>camera_info</cameraInfoTopicName>
-        <frameName>rear_situational_awareness_camera_optical_frame</frameName>
-        <hackBaseline>0.0</hackBaseline>
-        <distortionK1>0.0</distortionK1>
-        <distortionK2>0.0</distortionK2>
-        <distortionK3>0.0</distortionK3>
-        <distortionT1>0.0</distortionT1>
-        <distortionT2>0.0</distortionT2>
-      </plugin>
     </sensor>
   </gazebo>
 </robot>

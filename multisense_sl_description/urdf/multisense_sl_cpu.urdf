@@ -270,7 +270,6 @@
     </sensor>
   </gazebo>
 
-
   <joint name="right_camera_frame_joint" type="fixed">
     <origin xyz="0.0 -0.035 -0.002"/>
     <parent link="head"/>
@@ -345,7 +344,7 @@
   </link>
 
   <gazebo>
-    <plugin filename="libMultiSenseSLPlugin.so" name="multisense_plugin"/>
+    <plugin filename="MultiSenseSLPlugin" name="drcsim_gazebo_ros_plugins::MultiSenseSLPlugin"/>
   </gazebo>
 
   <!-- imu link -->

@@ -146,11 +146,17 @@ namespace drcsim_gazebo_ros_plugins
 ///     later-removable joint object. This is likely a genuine gz-physics/
 ///     dartsim gap for *dynamically added* world joints, not something
 ///     fixable from the SDF-authoring side. Fixed by sidestepping it
-///     entirely: `EnsureWorldPinAnchor()` spawns one small, permanent,
-///     static "anchor" model at `Configure()`-adjacent time (self-
-///     contained -- built the same programmatic-SDF way `Robot::
-///     InsertModel()` already spawns the robot itself, no world-file
-///     changes needed), and pin-to-world now welds to *that real link* via
+///     entirely: `EnsureWorldPinAnchor()` looks up the `link` link of the
+///     world file's own `ground_plane` model -- declared in the world SDF
+///     and loaded through the normal world-loading path, so it is
+///     unambiguously static from tick zero, unlike a first attempt that
+///     spawned a brand-new "static" model at runtime via
+///     `SdfEntityCreator`, whose `Static` component gz-physics evidently
+///     does not reliably honor for entities created after the simulation
+///     has already started (observed as the pinned robot flying/
+///     teleporting/spinning uncontrollably, consistent with the "anchor"
+///     actually being a free ~1 kg dynamic body rigidly welded to the
+///     pelvis) -- and pin-to-world now welds to *that real link* via
 ///     the exact same `DetachableJoint` mechanism already proven reliable
 ///     (creation *and* removal) for the cross-model welds below.
 ///   - *Fire hose <-> standpipe screw-thread docking*: the original creates
@@ -266,10 +272,11 @@ private:
   gz::sim::Entity AddJoint(
     gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr,
     gz::sim::Entity _modelEntity, gz::sim::Entity _link1, gz::sim::Entity _link2);
-  /// \brief Spawn (once) or return the cached link entity of a small,
-  /// permanent, static model used as the `DetachableJoint` anchor for
-  /// "pin to world" -- see the class-level design note on why this
-  /// replaced a directly-world-parented SDF fixed joint.
+  /// \brief Look up (once) or return the cached link entity of the world
+  /// file's own `ground_plane` model, used as the `DetachableJoint` anchor
+  /// for "pin to world" -- see the class-level design note on why this
+  /// replaced both a directly-world-parented SDF fixed joint and a
+  /// runtime-spawned "static" anchor model.
   gz::sim::Entity EnsureWorldPinAnchor(
     gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr);
   void RemoveJoint(
@@ -561,8 +568,8 @@ public:
 
   gz::sim::Entity vehicleRobotJoint{gz::sim::kNullEntity};
   gz::sim::Entity grabJoint{gz::sim::kNullEntity};
-  /// \brief Link entity of the static anchor model `EnsureWorldPinAnchor()`
-  /// spawns on first use; `gz::sim::kNullEntity` until then.
+  /// \brief Link entity `EnsureWorldPinAnchor()` resolves (ground_plane's
+  /// `link`) on first use; `gz::sim::kNullEntity` until then.
   gz::sim::Entity worldPinAnchorLinkEntity{gz::sim::kNullEntity};
 
   /// \brief links currently receiving an explicit counter-gravity force

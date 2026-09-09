@@ -190,10 +190,6 @@
           <stddev>0.01</stddev>
         </noise>
       </ray>
-      <plugin name="gazebo_ros_head_hokuyo_controller" filename="libgazebo_ros_gpu_laser.so">
-        <topicName>/multisense/lidar_scan</topicName>
-        <frameName>head_hokuyo_frame</frameName>
-      </plugin>
     </sensor>
   </gazebo>
   <!-- Stereo Camera -->
@@ -290,7 +286,6 @@
     </sensor>
   </gazebo>
 
-
   <joint name="right_camera_frame_joint" type="fixed">
     <origin xyz="0.0 -0.035 -0.002"/>
     <parent link="head"/>
@@ -365,7 +360,7 @@
   </link>
 
   <gazebo>
-    <plugin filename="libMultiSenseSLPlugin.so" name="multisense_plugin"/>
+    <plugin filename="MultiSenseSLPlugin" name="drcsim_gazebo_ros_plugins::MultiSenseSLPlugin"/>
   </gazebo>
 
   <!-- imu link -->

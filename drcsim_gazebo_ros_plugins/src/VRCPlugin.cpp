@@ -28,8 +28,6 @@
 
 #include <gz/common/Console.hh>
 #include <gz/math/Angle.hh>
-#include <gz/math/Inertial.hh>
-#include <gz/math/MassMatrix3.hh>
 #include <gz/math/Quaternion.hh>
 #include <gz/plugin/Register.hh>
 #include <gz/sim/Joint.hh>
@@ -43,8 +41,6 @@
 #include <gz/sim/components/Name.hh>
 #include <sdf/Cylinder.hh>
 #include <sdf/Geometry.hh>
-#include <sdf/Link.hh>
-#include <sdf/Model.hh>
 #include <sdf/Root.hh>
 
 #include <atlas_msgs/msg/atlas_behavior_step_data.hpp>
@@ -158,27 +154,37 @@ gz::sim::Entity VRCPlugin::EnsureWorldPinAnchor(
   if (this->worldPinAnchorLinkEntity != gz::sim::kNullEntity) {
     return this->worldPinAnchorLinkEntity;
   }
+  static_cast<void>(_eventMgr);
 
-  sdf::Link linkSdf;
-  linkSdf.SetName("anchor_link");
-  const gz::math::MassMatrix3d massMatrix(
-    1.0, gz::math::Vector3d(1.0, 1.0, 1.0), gz::math::Vector3d::Zero);
-  linkSdf.SetInertial(gz::math::Inertiald(massMatrix, gz::math::Pose3d::Zero));
-
-  sdf::Model modelSdf;
-  modelSdf.SetName("vrc_plugin_world_pin_anchor");
-  modelSdf.SetStatic(true);
-  modelSdf.AddLink(linkSdf);
-
-  gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
-  const gz::sim::Entity anchorModelEntity = creator.CreateEntities(&modelSdf);
-  if (anchorModelEntity == gz::sim::kNullEntity) {
-    gzerr << "EnsureWorldPinAnchor: failed to spawn the anchor model." << std::endl;
+  // Earlier attempt spawned a brand-new small "static" model here via
+  // SdfEntityCreator at runtime. That model's Static component was
+  // correctly created in the ECM, but gz-physics evidently does not honor
+  // Static reliably for a model created after the simulation has already
+  // started the way it does for one declared in the world SDF from load
+  // time -- observed as Atlas flying/teleporting/spinning uncontrollably
+  // the instant it was pinned, consistent with the "anchor" actually being
+  // simulated as a free ~1 kg dynamic body rigidly welded to the pelvis,
+  // not an immovable one. Sidestepped entirely: weld to the `link` link of
+  // the world file's own `ground_plane` model instead. It is declared in
+  // the world SDF and loaded through the normal world-loading path, so it
+  // is unambiguously, correctly static from tick zero -- no runtime
+  // creation, no Static-honoring uncertainty. Requires atlas.world (or any
+  // world this plugin is used with) to define a model literally named
+  // "ground_plane" with a link literally named "link" -- true of every
+  // hand-authored world in this migration; logs a clear error if not.
+  const gz::sim::Entity groundPlaneModel =
+    this->world.ModelByName(_ecm, "ground_plane");
+  if (groundPlaneModel == gz::sim::kNullEntity) {
+    gzerr << "EnsureWorldPinAnchor: world has no \"ground_plane\" model to "
+          << "pin against." << std::endl;
     return gz::sim::kNullEntity;
   }
-
   this->worldPinAnchorLinkEntity =
-    gz::sim::Model(anchorModelEntity).LinkByName(_ecm, "anchor_link");
+    gz::sim::Model(groundPlaneModel).LinkByName(_ecm, "link");
+  if (this->worldPinAnchorLinkEntity == gz::sim::kNullEntity) {
+    gzerr << "EnsureWorldPinAnchor: \"ground_plane\" model has no \"link\" "
+          << "link to pin against." << std::endl;
+  }
   return this->worldPinAnchorLinkEntity;
 }
 
@@ -194,8 +200,8 @@ gz::sim::Entity VRCPlugin::AddJoint(
 
   if (_link1 == gz::sim::kNullEntity) {
     // Pin _link2 to the world -- see the class-level design note for why
-    // this welds to a small static anchor model instead of a directly
-    // world-parented SDF fixed joint.
+    // this welds to the world file's own ground_plane link instead of a
+    // directly world-parented SDF fixed joint.
     _link1 = this->EnsureWorldPinAnchor(_ecm, _eventMgr);
     if (_link1 == gz::sim::kNullEntity) {
       gzerr << "AddJoint: no world-pin anchor link available." << std::endl;

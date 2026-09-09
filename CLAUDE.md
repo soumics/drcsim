@@ -1250,6 +1250,101 @@ anything but its own default.
     reserve the `SdfEntityCreator`-fixed-joint-to-`"world"` approach (if
     used at all) for cases that are genuinely permanent for the life of
     the simulation.
+  - **Second correction**: the `EnsureWorldPinAnchor`/`DetachableJoint`
+    rework above passed the full test suite (537/537) but still failed
+    for real in the interactive re-check — same symptom as before
+    (upper body vibrating at spawn, then flying apart the instant
+    `pub_atlas_command` ran), plus new `gz-physics` log lines the
+    automated tests never surface (no GUI, so no visual + full log
+    isn't captured by gtest): `Link's parent entity [N] not found on
+    model map`, `DetachableJoint's parent link entity [N] not found in
+    link map`, `Failed to find joint [N]`. Root cause:
+    `EnsureWorldPinAnchor()` created the anchor model via
+    `SdfEntityCreator::CreateEntities(&modelSdf)` but never called
+    `creator.SetParent(anchorModelEntity, this->world.Entity())`
+    afterward. `CreateEntities(const sdf::Model*)` builds the model's
+    own entity tree but does **not** attach it to the world (only the
+    `CreateEntities(const sdf::World*)` overload parents its child
+    models automatically) — `Robot::InsertModel()` already does this
+    `SetParent()` call right after its own `CreateEntities()`, which is
+    why the robot itself spawns fine; the new anchor model was missing
+    the same line. Without it, the anchor is an orphan entity gz-physics
+    never registers in its internal model/link maps, so the
+    `DetachableJoint` referencing its link can never actually attach —
+    explaining why the pin never held at all (not "held forever," as
+    the previous, wrong theory said the first fix would cause; this bug
+    is *upstream* of that one, so the anchor never even worked in the
+    session where it was first tested). **Fixed** by adding the missing
+    `creator.SetParent(anchorModelEntity, this->world.Entity())` call.
+    **General lesson, supersedes/extends the one above**: any time
+    `SdfEntityCreator::CreateEntities()` is called on a bare
+    `sdf::Model*`/`sdf::Light*` (i.e. not via the `sdf::World*`
+    overload), the caller MUST follow it with an explicit
+    `creator.SetParent(newEntity, parentEntity)` call, or the new entity
+    is invisible to every other system (physics included) despite
+    existing in the ECM.
+  - **Third correction**: the `SetParent()` fix above did make the
+    `Physics.cc` "not found in model/link map" errors disappear (`gz-sim`
+    log confirmed clean of them), but the interactive re-check got
+    *worse*, not better — Atlas flying/teleporting/spinning with
+    nonsensical behavior from the moment it was pinned, not just when
+    `pub_atlas_command` ran. Root cause (not yet re-confirmed
+    interactively as of this writing, but high-confidence from source
+    inspection): `EnsureWorldPinAnchor()`'s anchor model set
+    `modelSdf.SetStatic(true)`, which does get faithfully written into the
+    ECM as a `components::Static` component — but gz-physics's dartsim
+    plugin evidently does not reliably honor `Static` for a model created
+    at runtime via `SdfEntityCreator` *after* the simulation has already
+    started, the way it does for a model declared in the world SDF from
+    load time (Skeleton "is this body fixed to the world" is normally
+    baked in at construction, same family of limitation as the original
+    dynamically-added-world-joint bug two corrections up). If so, the
+    "static" anchor was actually simulated as a free ~1 kg dynamic body,
+    rigidly welded to Atlas's ~150 kg pelvis via `DetachableJoint` — i.e.
+    not an anchor at all, just extra mass glued on with nothing holding
+    *it* down, while `AtlasPlugin`'s stand-prep PID controller kept
+    applying torques on the (wrong) assumption that the base really was
+    immovable. That combination — an unconstrained system receiving
+    torques tuned for a fixed base — is a textbook recipe for exactly
+    "flying/teleporting/spinning" instability. **Fixed** by not creating
+    any runtime model for the anchor at all:
+    `VRCPlugin::EnsureWorldPinAnchor()` now just looks up the `link` link
+    of the world file's own `ground_plane` model (`World::ModelByName()` +
+    `Model::LinkByName()`) — a model declared in the world SDF and loaded
+    through the normal world-loading path, so it is unambiguously,
+    correctly static from tick zero, no runtime-creation uncertainty of
+    any kind. Requires the world to define a model literally named
+    `ground_plane` with a link literally named `link`; true of every
+    hand-authored world in this migration (logs a clear error otherwise).
+    **General lesson, supersedes the "spawn a static anchor" idea from two
+    corrections up**: don't spawn a fresh "static" model at runtime to use
+    as a physics anchor in gz-sim/dartsim (Harmonic, gz-sim8) — `Static`
+    honoring for runtime-created entities is unproven/unreliable here;
+    prefer welding to a link that already exists and was already static
+    from world-load time (e.g. `ground_plane`) whenever one is available.
+    **Not yet re-confirmed interactively** — awaiting rebuild + retest;
+    this is now the third attempt at this specific fix, so treat the fix
+    as unverified until the user reports the actual `pub_atlas_command`
+    behavior, not just "no errors in the log."
+  - **Also cleaned up in this same round** (found via the same interactive
+    log, unrelated to the pin bug but real, unfixed leftovers from the
+    Tier 3 `atlas_description` pass): `atlas.gazebo`/`atlas_v3`/`atlas_v4`/
+    `atlas_v4_no_wry2`/`atlas_v5.gazebo` still had dead Classic ROS-bridge
+    sub-plugins (`libgazebo_ros_p3d.so`, `libgazebo_ros_force.so`,
+    `libgazebo_ros_camera.so` ×3 per file) with no gz-sim shared library to
+    load (`SystemLoader.cc: Could not find shared library` at every
+    launch) — removed (the underlying `<sensor>` blocks themselves are
+    kept; only the dead ROS-bridge child `<plugin>` tags are gone; no
+    ported replacement exists yet, matching the CLI-executable/Tier-3
+    drop precedent). Also `multisense_sl{,_v3,_v4,_cpu}.urdf` had the same
+    two problems as `AtlasPlugin`/`VRCPlugin` originally did before their
+    Tier-2 fix: a dead `libgazebo_ros_gpu_laser.so` sub-plugin (removed)
+    and `<plugin filename="libMultiSenseSLPlugin.so" name=
+    "multisense_plugin"/>` not matching this port's actual
+    `GZ_ADD_PLUGIN_ALIAS(MultiSenseSLPlugin,
+    "drcsim_gazebo_ros_plugins::MultiSenseSLPlugin")` name (fixed to
+    `filename="MultiSenseSLPlugin"
+    name="drcsim_gazebo_ros_plugins::MultiSenseSLPlugin"`).
 
 ### `.cc` vs `.cpp`: the real cause of the `ament_uncrustify` template-call saga
 

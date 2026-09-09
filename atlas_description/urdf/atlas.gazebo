@@ -211,14 +211,6 @@
     <mu1>0.9</mu1>
     <mu2>0.9</mu2>
   </gazebo>
-  <gazebo>
-    <plugin filename="libgazebo_ros_p3d.so" name="gazebo_ros_p3d">
-      <bodyName>pelvis</bodyName>
-      <topicName>/ground_truth_odom</topicName>
-      <alwaysOn>true</alwaysOn>
-      <updateRate>100.0</updateRate>
-    </plugin>
-  </gazebo>
 
   <!-- foot contact sensors -->
   <gazebo reference="r_foot">
@@ -243,13 +235,6 @@
       </contact>
     </sensor>
   </gazebo>
-  <gazebo>
-    <plugin filename="libgazebo_ros_force.so" name="gazebo_ros_force">
-      <bodyName>pelvis</bodyName>
-      <topicName>/atlas/apply_pelvis_force</topicName>
-    </plugin>
-  </gazebo>
-
 
   <gazebo reference="back_lbz">
     <implicitSpringDamper>1</implicitSpringDamper>
