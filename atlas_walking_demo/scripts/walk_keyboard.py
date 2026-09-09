@@ -61,11 +61,16 @@ from sensor_msgs.msg import JointState
 
 PUBLISH_RATE_HZ = 30.0
 
-# How settled atlas/joint_states must be, over how long a window, before
-# trusting a snapshot of it as a fixed PID target -- see the module
-# docstring on why the very first message alone isn't good enough.
-STABILITY_WINDOW_SEC = 1.0
-STABILITY_THRESHOLD_RAD = 0.01
+# How long to wait, after the first atlas/joint_states message, before
+# trusting a later one as a fixed PID target -- see the module docstring
+# on why the very first message alone isn't good enough. A strict
+# stillness check was tried instead of a fixed delay and never fired at
+# all: Atlas's standing pose has a small persistent oscillation by design
+# (already observed and expected all session), so "wait until it stops
+# changing" can wait forever. A fixed delay past the initial post-unpin
+# settling transient sidesteps that -- whatever small oscillation remains
+# by then is the same kind already long since confirmed harmless.
+SETTLE_DELAY_SEC = 5.0
 
 INSTRUCTIONS = """
 atlas_walking_demo: keyboard-controlled stepping
@@ -80,7 +85,7 @@ class WalkKeyboardNode(Node):
     def __init__(self):
         super().__init__('atlas_walk_keyboard')
         self.gait = None  # constructed once a real, settled starting pose is known
-        self._recent_poses = []  # [(Time, {name: position}), ...], newest last
+        self._first_joint_states_time = None
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
         self.joint_states_sub = self.create_subscription(
@@ -94,17 +99,14 @@ class WalkKeyboardNode(Node):
             return  # not a full report yet (e.g. mid-spawn); wait for one that is
 
         now = self.get_clock().now()
-        self._recent_poses.append((now, pose))
-        cutoff = now - Duration(seconds=STABILITY_WINDOW_SEC)
-        self._recent_poses = [(t, p) for t, p in self._recent_poses if t >= cutoff]
-        if (now - self._recent_poses[0][0]) < Duration(seconds=STABILITY_WINDOW_SEC):
-            return  # not enough history yet to judge stability
-
-        oldest_pose = self._recent_poses[0][1]
-        max_change = max(
-            abs(pose[name] - oldest_pose[name]) for name in ATLAS_JOINT_NAMES)
-        if max_change > STABILITY_THRESHOLD_RAD:
-            return  # still moving -- e.g. mid-transient right after unpinning
+        if self._first_joint_states_time is None:
+            self._first_joint_states_time = now
+            self.get_logger().info(
+                f'Got the first atlas/joint_states message; waiting '
+                f'{SETTLE_DELAY_SEC:.0f}s for the post-unpin settling transient '
+                'to pass before using a reading as the starting pose.')
+        if (now - self._first_joint_states_time) < Duration(seconds=SETTLE_DELAY_SEC):
+            return  # still within the fixed settle delay
 
         self.gait = GaitController(pose)
         leg_joints = (

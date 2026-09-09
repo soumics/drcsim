@@ -1703,15 +1703,34 @@ specifically so the *next* round (if there is one) has something to
 inspect immediately rather than needing another back-and-forth just to
 get a data point.
 
-**General lesson (all three bugs, same root shape)**: any new controller
+**Real bug #4, fourth interactive run**: bug #3's stability-threshold fix
+never fired at all — no "ready" log ever appeared, `walk_keyboard.py`
+never published anything (so no fall either, trivially), and `w` did
+nothing (`self.gait` stayed `None` forever). Root cause: Atlas's standing
+pose has a small persistent oscillation by design — already observed and
+described as normal/expected multiple times earlier this same session
+("oscillating forward and backward a little... not fallen") — so a
+strict "wait until per-joint change drops below 0.01 rad" condition could
+be waiting for a stillness this system may never actually produce.
+**Fixed** by replacing the stability-threshold wait with a fixed delay
+instead (`SETTLE_DELAY_SEC = 5.0`, measured from the first
+`atlas/joint_states` message): simpler, and structurally can't loop
+forever the way a never-satisfied threshold can. Whatever small
+oscillation remains 5 seconds after the first reading is the same kind
+already long confirmed harmless, not the one-time, larger post-unpin
+settling transient bugs #2/#3 were actually guarding against.
+
+**General lesson (all four bugs, same root shape)**: any new controller
 publishing a fixed "assumed" pose, reusing an existing "known-good" pose,
-or trusting a single live reading as if it represented steady state,
-without confirming what it was *actually* proven/measured to be, risks
-exactly this — check *where the robot really is* (bug #1), *under what
-conditions a reused pose was actually validated* (bug #2), and *whether
-a live reading is actually settled, not mid-transient* (bug #3) before
-trusting any of them. Same root-cause shape as the `atlas.world` pin-link
-mismatch from Tier 3, just further up the stack each time.
+trusting a single live reading as if it represented steady state, or
+waiting on a condition that may never actually be satisfied by a system
+with known-normal ongoing motion, risks exactly this — check *where the
+robot really is* (bug #1), *under what conditions a reused pose was
+actually validated* (bug #2), *whether a live reading is actually
+settled, not mid-transient* (bug #3), and *whether "settled" is even a
+condition this system will ever satisfy* (bug #4) before trusting any of
+them. Same root-cause shape as the `atlas.world` pin-link mismatch from
+Tier 3, just further up the stack each time.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

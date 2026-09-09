@@ -24,20 +24,24 @@ Then, in a second terminal:
 ros2 run atlas_walking_demo walk_keyboard.py
 ```
 
-On startup this node waits for `atlas/joint_states` to actually settle
-(not change by more than ~0.01 rad over a full second) and uses *that*
--- Atlas's real, steady-state standing pose -- as the neutral reference
-every gait phase leans/lifts/swings away from. It does **not** move Atlas
-into any different standing pose first: an earlier version tried that (a
-separately-designed "ideal" standing pose) and Atlas fell over, because
-that pose had only ever been used while pinned in the original code,
-never proven for free standing. A version after that trusted the very
-first `atlas/joint_states` message unconditionally, and that fell too --
-consistent with grabbing a snapshot while Atlas was still mid-transient
-right after unpinning, not yet at its real steady state. You should see a
-log line (`Atlas has settled into a real, stable starting pose -- ready.
-Press w to walk.`, with the captured leg joint values printed alongside
-it) and then nothing should move at all until you press `w`.
+On startup this node waits 5 seconds (`SETTLE_DELAY_SEC` in
+`walk_keyboard.py`) after the first `atlas/joint_states` message before
+trusting a later one as the neutral reference every gait phase
+leans/lifts/swings away from -- letting the post-unpin settling
+transient pass. It does **not** move Atlas into any different standing
+pose first: an earlier version tried that (a separately-designed "ideal"
+standing pose) and Atlas fell over, because that pose had only ever been
+used while pinned in the original code, never proven for free standing.
+A version after that trusted the very first `atlas/joint_states` message
+unconditionally, and that fell too -- consistent with grabbing a snapshot
+mid-transient. A version after *that* tried waiting for readings to stop
+changing at all, and that never finished waiting -- Atlas's standing pose
+has a small persistent oscillation by design (already known, harmless),
+so "wait until it's perfectly still" can wait forever. You should see two
+log lines: one when the first `atlas/joint_states` message arrives, and
+`Atlas has settled into a real, stable starting pose -- ready. Press w to
+walk.` (with the captured leg joint values) five seconds after that.
+Nothing should move at all until you press `w`.
 
 Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
