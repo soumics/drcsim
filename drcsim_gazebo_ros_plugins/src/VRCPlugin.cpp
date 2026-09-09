@@ -41,6 +41,7 @@
 #include <gz/sim/components/Name.hh>
 #include <sdf/Cylinder.hh>
 #include <sdf/Geometry.hh>
+#include <sdf/Joint.hh>
 #include <sdf/Root.hh>
 
 #include <atlas_msgs/msg/atlas_behavior_step_data.hpp>
@@ -148,69 +149,42 @@ void VRCPlugin::DeferredLoad(gz::sim::EntityComponentManager & _ecm)
 }
 
 //////////////////////////////////////////////////
-gz::sim::Entity VRCPlugin::EnsureWorldPinAnchor(
-  gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr)
-{
-  if (this->worldPinAnchorLinkEntity != gz::sim::kNullEntity) {
-    return this->worldPinAnchorLinkEntity;
-  }
-  static_cast<void>(_eventMgr);
-
-  // Earlier attempt spawned a brand-new small "static" model here via
-  // SdfEntityCreator at runtime. That model's Static component was
-  // correctly created in the ECM, but gz-physics evidently does not honor
-  // Static reliably for a model created after the simulation has already
-  // started the way it does for one declared in the world SDF from load
-  // time -- observed as Atlas flying/teleporting/spinning uncontrollably
-  // the instant it was pinned, consistent with the "anchor" actually being
-  // simulated as a free ~1 kg dynamic body rigidly welded to the pelvis,
-  // not an immovable one. Sidestepped entirely: weld to the `link` link of
-  // the world file's own `ground_plane` model instead. It is declared in
-  // the world SDF and loaded through the normal world-loading path, so it
-  // is unambiguously, correctly static from tick zero -- no runtime
-  // creation, no Static-honoring uncertainty. Requires atlas.world (or any
-  // world this plugin is used with) to define a model literally named
-  // "ground_plane" with a link literally named "link" -- true of every
-  // hand-authored world in this migration; logs a clear error if not.
-  const gz::sim::Entity groundPlaneModel =
-    this->world.ModelByName(_ecm, "ground_plane");
-  if (groundPlaneModel == gz::sim::kNullEntity) {
-    gzerr << "EnsureWorldPinAnchor: world has no \"ground_plane\" model to "
-          << "pin against." << std::endl;
-    return gz::sim::kNullEntity;
-  }
-  this->worldPinAnchorLinkEntity =
-    gz::sim::Model(groundPlaneModel).LinkByName(_ecm, "link");
-  if (this->worldPinAnchorLinkEntity == gz::sim::kNullEntity) {
-    gzerr << "EnsureWorldPinAnchor: \"ground_plane\" model has no \"link\" "
-          << "link to pin against." << std::endl;
-  }
-  return this->worldPinAnchorLinkEntity;
-}
-
-//////////////////////////////////////////////////
 gz::sim::Entity VRCPlugin::AddJoint(
   gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr,
   gz::sim::Entity _modelEntity, gz::sim::Entity _link1, gz::sim::Entity _link2)
 {
-  // No longer used now that the world-pin case (see below) also welds to
-  // a real link via DetachableJoint, same as every other case -- kept in
-  // the signature to avoid a wider diff across every call site.
-  static_cast<void>(_modelEntity);
-
   if (_link1 == gz::sim::kNullEntity) {
-    // Pin _link2 to the world -- see the class-level design note for why
-    // this welds to the world file's own ground_plane link instead of a
-    // directly world-parented SDF fixed joint.
-    _link1 = this->EnsureWorldPinAnchor(_ecm, _eventMgr);
-    if (_link1 == gz::sim::kNullEntity) {
-      gzerr << "AddJoint: no world-pin anchor link available." << std::endl;
+    // Pin _link2 to the world via a real SDF fixed joint, parented under
+    // the same model as _link2 (see the class-level design note). This is
+    // the only mechanism ever interactively confirmed to hold Atlas
+    // correctly: three separate attempts to replace it with a
+    // DetachableJoint-based weld (to a runtime-spawned "static" anchor,
+    // then to the world file's own ground_plane link) each made real
+    // in-GUI behavior *worse* -- flying/teleporting/spinning instability
+    // from the moment of pinning -- for reasons not fully root-caused (see
+    // the class-level design note history). Reverted back to this,
+    // deliberately, rather than stacking a fourth unverified theory.
+    const auto * nameComponent =
+      _ecm.Component<gz::sim::components::Name>(_link2);
+    if (!nameComponent) {
+      gzerr << "AddJoint: pin target link has no Name component." << std::endl;
       return gz::sim::kNullEntity;
     }
+    const std::string * childName = &nameComponent->Data();
+
+    sdf::Joint jointSdf;
+    jointSdf.SetName(*childName + "_world_pin_joint");
+    jointSdf.SetType(sdf::JointType::FIXED);
+    jointSdf.SetParentName("world");
+    jointSdf.SetChildName(*childName);
+
+    gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);
+    const gz::sim::Entity jointEntity = creator.CreateEntities(&jointSdf, true);
+    creator.SetParent(jointEntity, _modelEntity);
+    return jointEntity;
   }
 
-  // Cross-model (or same-model, or now anchor-model) rigid weld between
-  // two existing links.
+  // Cross-model (or same-model) rigid weld between two existing links.
   const gz::sim::Entity jointEntity = _ecm.CreateEntity();
   _ecm.CreateComponent(
     jointEntity,

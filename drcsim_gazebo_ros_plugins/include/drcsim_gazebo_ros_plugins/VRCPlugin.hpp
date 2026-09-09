@@ -129,36 +129,47 @@ namespace drcsim_gazebo_ros_plugins
 ///   gz-sim's own (separate, topic-triggered)
 ///   `gz-sim-detachable-joint-system` does internally. Removal in all
 ///   cases is uniform: `_ecm.RequestRemoveEntity(jointEntity)`.
-///   - *Pin to world* used to be a real SDF `fixed` joint with parent name
+///   - *Pin to world* is a real SDF `fixed` joint with parent name
 ///     `"world"`, built via `sdf::Joint` setters and turned into a live
 ///     entity with `SdfEntityCreator::CreateEntities(&jointSdf, true)` --
-///     that creates and holds correctly (confirmed: the pinned robot does
-///     visibly stay in place), but its **removal silently doesn't detach
-///     the physics constraint**: `RequestRemoveEntity` erases the ECS
-///     entity, but gz-physics's dartsim plugin logs `No joint named
-///     [<name>_world_pin_joint] for modelID [N]` and leaves the actual
-///     dartsim-level weld in place forever -- confirmed the hard way, by
-///     watching a real launch where Atlas's pelvis never moved again after
-///     its very first pin, no matter what commanded every other joint.
-///     Near-certainly because "weld to world" is normally a Skeleton-
-///     construction-time operation in dartsim, and joints added this way
-///     *after* the model already exists don't get registered as a normal,
-///     later-removable joint object. This is likely a genuine gz-physics/
-///     dartsim gap for *dynamically added* world joints, not something
-///     fixable from the SDF-authoring side. Fixed by sidestepping it
-///     entirely: `EnsureWorldPinAnchor()` looks up the `link` link of the
-///     world file's own `ground_plane` model -- declared in the world SDF
-///     and loaded through the normal world-loading path, so it is
-///     unambiguously static from tick zero, unlike a first attempt that
-///     spawned a brand-new "static" model at runtime via
-///     `SdfEntityCreator`, whose `Static` component gz-physics evidently
-///     does not reliably honor for entities created after the simulation
-///     has already started (observed as the pinned robot flying/
-///     teleporting/spinning uncontrollably, consistent with the "anchor"
-///     actually being a free ~1 kg dynamic body rigidly welded to the
-///     pelvis) -- and pin-to-world now welds to *that real link* via
-///     the exact same `DetachableJoint` mechanism already proven reliable
-///     (creation *and* removal) for the cross-model welds below.
+///     this creates and holds correctly (confirmed interactively: the
+///     pinned robot visibly stays in place), but its **removal silently
+///     doesn't detach the physics constraint**: `RequestRemoveEntity`
+///     erases the ECS entity, but gz-physics's dartsim plugin logs `No
+///     joint named [<name>_world_pin_joint] for modelID [N]` and leaves
+///     the actual dartsim-level weld in place forever -- confirmed the
+///     hard way, by watching a real launch where Atlas's pelvis never
+///     moved again after its very first pin, no matter what commanded
+///     every other joint. Near-certainly because "weld to world" is
+///     normally a Skeleton-construction-time operation in dartsim, and
+///     joints added this way *after* the model already exists don't get
+///     registered as a normal, later-removable joint object. This is
+///     likely a genuine gz-physics/dartsim gap for *dynamically added*
+///     world joints, not something fixable from the SDF-authoring side.
+///     **Three separate attempts to replace this with a
+///     `DetachableJoint`-based weld** (first to a small model spawned at
+///     runtime and marked static, then to the world file's own
+///     `ground_plane` link, on the theory that `Static` wasn't being
+///     honored for a runtime-spawned model) each made real interactive
+///     behavior *worse*, not better -- Atlas flying/teleporting/spinning
+///     uncontrollably from the moment of pinning, in both cases, even
+///     though `DetachableJoint` is the exact same mechanism already
+///     working for the cross-model welds below (vehicle-seat, fire hose).
+///     The actual root cause was never nailed down (no access to
+///     gz-physics source to confirm; a plausible but unverified guess is
+///     that welding a model's own *floating-base root link* -- which
+///     already carries an implicit 6-DOF connection to the world in
+///     dartsim -- via a second, separate `DetachableJoint` constraint is a
+///     fundamentally different, more fragile case than welding a
+///     non-root link like a hand, which is what the cross-model welds
+///     below actually exercise). **Reverted back to the direct
+///     `sdf::Joint`-to-`"world"` mechanism above, deliberately**, since it
+///     is the only one ever interactively confirmed to hold Atlas
+///     correctly -- accepting the known, far more minor "can't be fully
+///     unpinned" bug as a real, open, deferred issue rather than
+///     continuing to stack unverified fixes on top of each other. If this
+///     is revisited: get a GUI open and watch step-by-step (not just
+///     read logs) before believing any fix "works."
 ///   - *Fire hose <-> standpipe screw-thread docking*: the original creates
 ///     a real Classic "screw" joint with a settable thread pitch so the
 ///     connection can be reversed by "unscrewing" it (reading the joint's
@@ -272,13 +283,6 @@ private:
   gz::sim::Entity AddJoint(
     gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr,
     gz::sim::Entity _modelEntity, gz::sim::Entity _link1, gz::sim::Entity _link2);
-  /// \brief Look up (once) or return the cached link entity of the world
-  /// file's own `ground_plane` model, used as the `DetachableJoint` anchor
-  /// for "pin to world" -- see the class-level design note on why this
-  /// replaced both a directly-world-parented SDF fixed joint and a
-  /// runtime-spawned "static" anchor model.
-  gz::sim::Entity EnsureWorldPinAnchor(
-    gz::sim::EntityComponentManager & _ecm, gz::sim::EventManager & _eventMgr);
   void RemoveJoint(
     gz::sim::EntityComponentManager & _ecm, gz::sim::Entity & _joint);
   void Teleport(
@@ -568,9 +572,6 @@ public:
 
   gz::sim::Entity vehicleRobotJoint{gz::sim::kNullEntity};
   gz::sim::Entity grabJoint{gz::sim::kNullEntity};
-  /// \brief Link entity `EnsureWorldPinAnchor()` resolves (ground_plane's
-  /// `link`) on first use; `gz::sim::kNullEntity` until then.
-  gz::sim::Entity worldPinAnchorLinkEntity{gz::sim::kNullEntity};
 
   /// \brief links currently receiving an explicit counter-gravity force
   /// each step (see the class-level design note on gravity compensation).

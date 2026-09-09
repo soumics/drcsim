@@ -1322,10 +1322,35 @@ anything but its own default.
     honoring for runtime-created entities is unproven/unreliable here;
     prefer welding to a link that already exists and was already static
     from world-load time (e.g. `ground_plane`) whenever one is available.
-    **Not yet re-confirmed interactively** — awaiting rebuild + retest;
-    this is now the third attempt at this specific fix, so treat the fix
-    as unverified until the user reports the actual `pub_atlas_command`
-    behavior, not just "no errors in the log."
+    **This theory was also wrong** — the user rebuilt, retested, and
+    reported "nothing changed. same flying, teleporting, falling to the
+    ground. all at the same time." The `ground_plane`-vs-runtime-anchor
+    swap made zero observable difference, which rules out `Static`-
+    honoring as the (sole) explanation, since `ground_plane` is
+    unambiguously static and behavior was identical anyway.
+  - **Fourth correction — reverted, not re-fixed.** Three attempts to
+    replace the direct `sdf::Joint`-to-`"world"` pin mechanism with a
+    `DetachableJoint`-based weld (runtime anchor, then `ground_plane`)
+    each preserved or worsened the same flying/teleporting/spinning
+    instability, and the automated test suite (537/537 passing every
+    round) never caught any of it, since it has no interactive/visual
+    check. Rather than guess a fourth time, `AddJoint()` was reverted to
+    the exact `sdf::Joint`-to-`"world"` mechanism from before any of this
+    — the one mechanism ever interactively confirmed to hold Atlas
+    correctly (round 3, "Atlas successfully stand"). `EnsureWorldPinAnchor()`
+    and the `worldPinAnchorLinkEntity` member are removed entirely; the
+    known, real, but far more minor bug this mechanism has (pin can't be
+    *fully* unpinned — `RequestRemoveEntity` doesn't detach the underlying
+    dartsim constraint, see the class-level design note) is left as an
+    open, documented, deferred issue rather than something to chase
+    further today. **Awaiting interactive re-confirmation** that this
+    reverted code is back to at least the round-3 baseline (stands
+    without flying apart) before touching this mechanism again — and any
+    future attempt at a real fix should start by getting the GUI open and
+    watching frame-by-frame what happens at the instant of pinning, not
+    reading logs after the fact or trusting the automated test suite,
+    since that suite has now passed clean through four different (three
+    broken) versions of this code without ever detecting the difference.
   - **Also cleaned up in this same round** (found via the same interactive
     log, unrelated to the pin bug but real, unfixed leftovers from the
     Tier 3 `atlas_description` pass): `atlas.gazebo`/`atlas_v3`/`atlas_v4`/
