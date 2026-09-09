@@ -27,14 +27,32 @@ Waits for atlas/joint_states (AtlasPlugin's real, current joint
 positions) to actually settle -- not just arrive once -- before
 publishing anything at all, and hands that in as GaitController's
 neutral_pose: the only pose ever actually proven stable free-standing
-this whole session. Locking in the very *first* joint_states message
-unconditionally still fell, straight backward, even with no gait phase
-ever requested -- consistent with grabbing a snapshot while Atlas was
-still mid-transient right after unpinning (still actively moving, not at
-its real steady state yet) and then commanding that transient snapshot
-as a fixed PID target forever after. See gait_controller.py's
-GaitController docstring for the fuller history of this pose's
-back-and-forth (two earlier, different bugs, both interactively caught).
+this whole session.
+
+The very first command is sent through the atlas/reset_controls
+*service*, not the atlas/atlas_command topic -- confirmed the hard way
+that going straight to the topic isn't safe here. AtlasPlugin::
+ZeroAtlasCommand() (called once at startup, before any AtlasCommand
+message ever arrives) sets k_effort=0 for every joint, meaning Atlas has
+been standing this entire session on the AtlasSimInterface/BDI
+feedforward path, not real user-PID at all. AtlasPlugin::
+UpdatePIDControl()'s integral term accumulates every tick *regardless of
+k_effort*, even while that path contributes nothing to the output -- so
+with atlasCommand.position stuck at 0.0 the whole time while the real
+position drifted a little under the BDI path, that integral term had
+likely been quietly winding up (clamped, but still substantial) for the
+entire session. The instant k_effort flips to 255 for the first time,
+that pent-up integral applies all at once as a torque spike -- which is
+exactly what a straight-to-topic first command did, immediately, with no
+gait phase ever requested and joint values that were otherwise
+completely sane (confirmed interactively). atlas/reset_controls's
+reset_pid_controller flag zeroes AtlasPlugin's error terms (integral
+included), and can atomically apply the new AtlasCommand in the same
+call -- a clean, bumpless handoff onto the user-PID path instead.
+
+See gait_controller.py's GaitController docstring for the fuller history
+of this pose's back-and-forth (two earlier, different bugs, both
+interactively caught, before this one).
 
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
@@ -53,6 +71,7 @@ import termios
 import tty
 
 from atlas_msgs.msg import AtlasCommand
+from atlas_msgs.srv import ResetControls
 from gait_controller import ATLAS_JOINT_NAMES, GaitController
 import rclpy
 from rclpy.duration import Duration
@@ -84,16 +103,19 @@ class WalkKeyboardNode(Node):
 
     def __init__(self):
         super().__init__('atlas_walk_keyboard')
-        self.gait = None  # constructed once a real, settled starting pose is known
+        self.gait = None  # constructed once the reset_controls handoff succeeds
         self._first_joint_states_time = None
+        self._reset_requested = False
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
+        self.reset_controls_client = self.create_client(
+            ResetControls, 'atlas/reset_controls')
         self.timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
         self.joint_states_sub = self.create_subscription(
             JointState, 'atlas/joint_states', self._on_joint_states, 10)
 
     def _on_joint_states(self, msg):
-        if self.gait is not None:
-            return  # already initialized from a settled starting pose
+        if self.gait is not None or self._reset_requested:
+            return  # already initialized, or the handoff is already in flight
         pose = dict(zip(msg.name, msg.position))
         if not all(name in pose for name in ATLAS_JOINT_NAMES):
             return  # not a full report yet (e.g. mid-spawn); wait for one that is
@@ -108,17 +130,36 @@ class WalkKeyboardNode(Node):
         if (now - self._first_joint_states_time) < Duration(seconds=SETTLE_DELAY_SEC):
             return  # still within the fixed settle delay
 
+        self._reset_requested = True
+        command = AtlasCommand()
+        command.position = [pose[name] for name in ATLAS_JOINT_NAMES]
+        command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
+        command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
+        request = ResetControls.Request()
+        request.reset_pid_controller = True
+        request.reset_bdi_controller = False
+        request.reload_pid_from_ros = False
+        request.atlas_command = command
+        future = self.reset_controls_client.call_async(request)
+        future.add_done_callback(lambda f: self._on_reset_controls_done(f, pose))
+
+    def _on_reset_controls_done(self, future, pose):
+        response = future.result()
+        if response is None or not response.success:
+            self.get_logger().error(
+                f'atlas/reset_controls call failed ({future.exception()!r}); not '
+                'starting the walk controller.')
+            self._reset_requested = False  # allow another attempt on the next reading
+            return
         self.gait = GaitController(pose)
         # Log every joint, not just legs, while this is still being
         # diagnosed interactively -- a bad capture in an arm/back/neck
-        # joint would be invisible if only legs were ever printed, and
-        # the very first publish this node ever makes (this pose,
-        # unchanged, no gait phase active yet) has itself been enough to
-        # cause a fall at least once.
+        # joint would be invisible if only legs were ever printed.
         full_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in ATLAS_JOINT_NAMES)
         self.get_logger().info(
-            f'Atlas has settled into a real, stable starting pose -- ready. '
-            f'Press w to walk. Captured pose: {full_summary}')
+            f'Atlas has settled into a real, stable starting pose, and the PID '
+            f'handoff succeeded -- ready. Press w to walk. Captured pose: '
+            f'{full_summary}')
 
     def _tick(self):
         if self.gait is None:

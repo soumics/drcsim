@@ -1720,17 +1720,55 @@ oscillation remains 5 seconds after the first reading is the same kind
 already long confirmed harmless, not the one-time, larger post-unpin
 settling transient bugs #2/#3 were actually guarding against.
 
-**General lesson (all four bugs, same root shape)**: any new controller
-publishing a fixed "assumed" pose, reusing an existing "known-good" pose,
-trusting a single live reading as if it represented steady state, or
-waiting on a condition that may never actually be satisfied by a system
-with known-normal ongoing motion, risks exactly this — check *where the
-robot really is* (bug #1), *under what conditions a reused pose was
-actually validated* (bug #2), *whether a live reading is actually
-settled, not mid-transient* (bug #3), and *whether "settled" is even a
-condition this system will ever satisfy* (bug #4) before trusting any of
-them. Same root-cause shape as the `atlas.world` pin-link mismatch from
-Tier 3, just further up the stack each time.
+**Real bug #5, fifth interactive run — the actual root cause**: bug #4's
+fixed-delay fix produced a fully sane, symmetric captured pose (logged in
+full this time: every joint near-zero, legs and arms mirrored) — and
+Atlas *still* fell immediately the instant the "ready" message printed,
+before any key was pressed. With the pose data itself finally cleared of
+suspicion, the remaining candidate was the *act* of publishing itself.
+Checked `AtlasPlugin.cpp` directly rather than guessing again:
+`ZeroAtlasCommand()` (called once at `Configure()`, before any
+`AtlasCommand` message is ever received) sets `k_effort=0` for every
+joint — meaning **Atlas has been standing this entire session on the
+AtlasSimInterface/BDI feedforward path, not real user-PID control at
+all**, despite `atlas_v5_gains.yaml`'s real gains being loaded the whole
+time (they're simply never blended in while `k_effort=0`). Worse,
+`UpdatePIDControl()`'s integral term (`errorTerms[i].kIqI`) accumulates
+*every tick regardless of `k_effort`*, even while contributing nothing to
+the output — so with `atlasCommand.position` stuck at its `0.0` default
+the entire time while Atlas's real position drifted slightly under the
+BDI path, that integral term had almost certainly been quietly winding
+up (clamped, but substantial) for the whole session. `walk_keyboard.py`
+publishing `k_effort=255` for the first time ever, even with a
+position target matching exactly where Atlas already was, was the first
+moment that pent-up integral ever got a chance to apply to the
+output — all at once, as a torque spike. Classic PID "bumpless transfer"
+problem: switching control paths without resetting the inactive path's
+internal state first. **Fixed** by routing the very first command through
+the `atlas/reset_controls` *service* (already ported in Tier 2, unused by
+anything until now) instead of the plain topic:
+`reset_pid_controller=true` zeroes `errorTerms` (integral included), and
+the same service call atomically applies the new `AtlasCommand` in one
+step — a clean handoff with no window for stale state to fire.
+
+**General lesson (all five bugs, same root shape, getting deeper each
+time)**: any new controller publishing a fixed "assumed" pose, reusing an
+existing "known-good" pose, trusting a single live reading as if it
+represented steady state, waiting on a condition that may never actually
+be satisfied, or switching a robot onto a control path that's never been
+active before without resetting that path's accumulated internal state
+first, risks exactly this — check *where the robot really is* (bug #1),
+*under what conditions a reused pose was actually validated* (bug #2),
+*whether a live reading is actually settled, not mid-transient* (bug #3),
+*whether "settled" is even a condition this system will ever satisfy*
+(bug #4), and *what invisible state a newly-activated control path may
+already be carrying* (bug #5) before trusting any of them. Same
+root-cause shape as the `atlas.world` pin-link mismatch from Tier 3, just
+further up the stack each time — and bug #5 specifically is the same
+*class* of lesson as the VRCPlugin world-pin saga earlier in this
+session: a physics/controls subsystem accumulating state that only
+becomes visible the moment something finally exercises the path that
+reads it.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

@@ -28,20 +28,33 @@ On startup this node waits 5 seconds (`SETTLE_DELAY_SEC` in
 `walk_keyboard.py`) after the first `atlas/joint_states` message before
 trusting a later one as the neutral reference every gait phase
 leans/lifts/swings away from -- letting the post-unpin settling
-transient pass. It does **not** move Atlas into any different standing
-pose first: an earlier version tried that (a separately-designed "ideal"
-standing pose) and Atlas fell over, because that pose had only ever been
-used while pinned in the original code, never proven for free standing.
-A version after that trusted the very first `atlas/joint_states` message
-unconditionally, and that fell too -- consistent with grabbing a snapshot
-mid-transient. A version after *that* tried waiting for readings to stop
-changing at all, and that never finished waiting -- Atlas's standing pose
-has a small persistent oscillation by design (already known, harmless),
-so "wait until it's perfectly still" can wait forever. You should see two
-log lines: one when the first `atlas/joint_states` message arrives, and
-`Atlas has settled into a real, stable starting pose -- ready. Press w to
-walk.` (with the captured leg joint values) five seconds after that.
-Nothing should move at all until you press `w`.
+transient pass.
+
+The very first command then goes through the `atlas/reset_controls`
+*service*, not the `atlas/atlas_command` topic. `AtlasPlugin` starts up
+with `k_effort=0` for every joint (real user-PID control is *never*
+active by default -- Atlas has been standing all session on the
+AtlasSimInterface/BDI feedforward path instead), but its PID integral
+term accumulates every tick regardless of `k_effort`, so it had likely
+been quietly winding up, unapplied, for the entire time Atlas stood. A
+version of this node that published straight to the topic as the very
+first command (`k_effort=255`, otherwise identical, sane joint values)
+made Atlas fall immediately, before any key was even pressed -- almost
+certainly that pent-up integral suddenly applying the instant the
+user-PID path activated for the first time. `atlas/reset_controls`'s
+`reset_pid_controller` flag zeroes that state and applies the new command
+atomically in the same call, for a clean handoff.
+
+You should see three log lines: the first `atlas/joint_states` message
+arriving, then (5s later) `Atlas has settled into a real, stable
+starting pose, and the PID handoff succeeded -- ready. Press w to walk.`
+with the full captured pose printed alongside it. Nothing should move at
+all until you press `w`.
+
+This pose (and the mechanism for setting it) went through four earlier,
+different interactively-caught bugs before this one -- see
+`gait_controller.py`'s `GaitController` docstring and `src/drcsim/
+CLAUDE.md` for the fuller history if curious.
 
 Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
