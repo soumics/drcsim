@@ -1788,29 +1788,57 @@ the `reset_controls` call from bug #5 is kept (still needed, sets
 genuinely bumpless at that instant) but now only as the ramp's starting
 point, not the whole fix.
 
-**General lesson (all six bugs, same root shape, getting deeper each
+**Real bug #7, seventh interactive run**: with bug #6's ramp in place and
+diagnostic logging added (measured-vs-target for the leg pitch joints,
+~3Hz, throughout the ramp), Atlas fell again — "on its knees, then on its
+back." The log data itself is what finally pointed away from control
+theory entirely: at `t=0.1s` into the ramp (`k_effort=9`, ~3.5% strength),
+`l_leg_kny` was *already* measured at `2.167` rad (out of a `2.356` rad
+max — essentially fully collapsed). A gain that weak cannot move a knee
+joint over 2 radians in 0.1 simulated second; the earlier torque-spike
+and insufficient-gain theories both require far more applied effort than
+was available yet. Root cause, on reflection: `walk_keyboard.py`'s main
+loop called `rclpy.spin_once(node, timeout_sec=0)` exactly once per
+iteration, interleaved with a **blocking** `select()`-based keyboard read
+of up to ~50ms — meaning ROS callback processing (the 30Hz publish timer,
+the `joint_states` subscription, the `reset_controls` response) could be
+starved or batched behind that blocking read, corrupting the very timing
+(the settle-delay check, the `k_effort` ramp) every fix since bug #4
+depended on: the "0.1s" label was `self.get_clock().now()` at *processing*
+time, not necessarily when the underlying event actually happened, so a
+backlog of queued messages could make a much longer real delay look like
+"0.1s" once finally drained. **Fixed** by moving ROS spinning onto its
+own dedicated background thread (a `SingleThreadedExecutor` on a
+`threading.Thread`), fully decoupled from the keyboard-reading loop, so
+timer/subscription/service callbacks are serviced promptly regardless of
+keyboard activity.
+
+**General lesson (all seven bugs, same root shape, getting deeper each
 time)**: any new controller publishing a fixed "assumed" pose, reusing an
 existing "known-good" pose, trusting a single live reading as if it
 represented steady state, waiting on a condition that may never actually
 be satisfied, resetting a control path's internal state without checking
-whether *that path was ever actually active in the first place*, or
+whether *that path was ever actually active in the first place*,
 switching a system straight to full-strength active control without
-verifying it was under any active control at all before, risks exactly
-this — check *where the robot really is* (bug #1), *under what
-conditions a reused pose was actually validated* (bug #2), *whether a
-live reading is actually settled, not mid-transient* (bug #3), *whether
-"settled" is even a condition this system will ever satisfy* (bug #4),
-*what invisible state a newly-activated control path may already be
-carrying* (bug #5), and *whether that control path — or any active
-control at all — was ever actually the thing holding the system up in
-the first place* (bug #6) before trusting any of them. Same root-cause
-shape as the `atlas.world` pin-link mismatch from Tier 3, just further up
-the stack each time — and bugs #5/#6 specifically are the same *class* of
-lesson as the VRCPlugin world-pin saga earlier in this session: a
-physics/controls subsystem's real behavior only becomes visible the
-moment something finally exercises the path that reveals it, and
-"confirmed stable" observations made before that moment don't actually
-validate what they were assumed to.
+verifying it was under any active control at all before, or trusting its
+*own* timing/message-processing loop without checking whether that loop
+can actually keep up, risks exactly this — check *where the robot really
+is* (bug #1), *under what conditions a reused pose was actually
+validated* (bug #2), *whether a live reading is actually settled, not
+mid-transient* (bug #3), *whether "settled" is even a condition this
+system will ever satisfy* (bug #4), *what invisible state a
+newly-activated control path may already be carrying* (bug #5), *whether
+that control path — or any active control at all — was ever actually the
+thing holding the system up in the first place* (bug #6), and *whether
+the diagnosing node's own execution model can actually deliver the timing
+it's being trusted for* (bug #7) before trusting any of them. Same
+root-cause shape as the `atlas.world` pin-link mismatch from Tier 3, just
+further up the stack each time — and bugs #5–#7 specifically are the same
+*class* of lesson as the VRCPlugin world-pin saga earlier in this
+session: a system's real behavior only becomes visible the moment
+something finally exercises the path that reveals it, and "confirmed
+stable" observations made before that moment don't actually validate what
+they were assumed to.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

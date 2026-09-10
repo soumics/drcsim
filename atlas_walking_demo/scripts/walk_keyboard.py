@@ -60,6 +60,18 @@ See gait_controller.py's GaitController docstring and src/drcsim/
 CLAUDE.md for the fuller history of this pose's back-and-forth (four
 earlier, different bugs, all interactively caught, before this one).
 
+ROS spinning (the publish timer, the joint_states subscription, the
+reset_controls response) runs on its own background thread via an
+executor, entirely decoupled from the keyboard-reading loop in main().
+The first version instead called rclpy.spin_once(timeout_sec=0) once per
+main-loop iteration, interleaved with a blocking ~50ms keyboard read --
+diagnostic logging (see gait_controller.py/CLAUDE.md's bug #7) showed a
+knee joint moving over 2 radians within 0.1s of a ramp that should have
+only been at ~3.5% strength at that point, physically implausible for
+the gain involved -- consistent with ROS callback processing itself being
+starved/batched by the blocking read, corrupting the very timing (the
+settle-delay check, the k_effort ramp) other fixes here depend on.
+
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to a centered stand), q or Ctrl-C = quit.
 Turning is not implemented in this first version.
@@ -74,6 +86,7 @@ naturally.
 
 import sys
 import termios
+import threading
 import tty
 
 from atlas_msgs.msg import AtlasCommand
@@ -264,6 +277,18 @@ def main(args=None):
     node = WalkKeyboardNode()
     print(INSTRUCTIONS)
 
+    # ROS spinning (the 30Hz publish timer, the joint_states subscription,
+    # the reset_controls service response) runs on its own thread, entirely
+    # decoupled from the keyboard-reading loop below -- confirmed the hard
+    # way that interleaving a single spin_once(timeout_sec=0) with a
+    # blocking ~50ms keyboard read every iteration could starve/batch ROS
+    # callback processing, undermining the very timing (the k_effort ramp,
+    # the settle-delay check) multiple earlier fixes here depended on.
+    executor = rclpy.executors.SingleThreadedExecutor()
+    executor.add_node(node)
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
+
     stdin_settings = termios.tcgetattr(sys.stdin.fileno())
     try:
         while rclpy.ok():
@@ -272,11 +297,11 @@ def main(args=None):
                 break
             if key:
                 node.handle_key(key)
-            rclpy.spin_once(node, timeout_sec=0)
     except KeyboardInterrupt:
         pass
     finally:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, stdin_settings)
+        executor.shutdown()
         node.destroy_node()
         rclpy.shutdown()
 

@@ -56,10 +56,16 @@ into a real, stable starting pose; PID handoff started, ramping up over
 alongside it. Give it a few more seconds after that for the ramp itself,
 then press `w`.
 
-This pose (and the mechanism for setting it) went through four earlier,
-different interactively-caught bugs before this one -- see
+This pose (and the mechanism for setting it) went through several
+earlier, different interactively-caught bugs before this -- see
 `gait_controller.py`'s `GaitController` docstring and `src/drcsim/
-CLAUDE.md` for the fuller history if curious.
+CLAUDE.md` for the fuller history if curious. The latest: diagnostic
+logging showed a knee moving over 2 radians within 0.1s of a ramp that
+should have only been at ~3.5% strength -- physically implausible for
+that gain, and consistent with the node's own ROS callback processing
+being starved by the old main loop's blocking keyboard read. ROS
+spinning now runs on its own background thread, fully decoupled from
+keyboard input.
 
 Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
