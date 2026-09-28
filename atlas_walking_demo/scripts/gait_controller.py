@@ -26,7 +26,7 @@ phase's end pose over that phase's duration, sampled once per publish tick
 by GaitController.sample(dt).
 
 GaitController's "neutral" reference pose is whatever Atlas's real joint
-positions were (from atlas/joint_states) at the moment it was constructed
+PID setpoint was (reconstructed from atlas/atlas_state) when it was constructed
 -- NOT a separately-designed standing pose. An earlier version of this
 file hardcoded VRCPlugin::AtlasCommandController::SetPIDStand()'s pose
 (a deep crouch) as that reference instead, reasoning it was "real,
@@ -145,7 +145,7 @@ class GaitController:
     get the current 30-element position list, in ATLAS_JOINT_NAMES order.
 
     `neutral_pose` must be Atlas's real current joint positions (e.g. from
-    the last `atlas/joint_states` message) -- the only pose this
+    atlas/atlas_state as position + effort/kp) -- the only pose this
     controller ever assumes is safe to freely stand in, since it's the
     only one actually observed working. The controller starts already
     "at" this pose (no transition needed, nothing to fall over during),

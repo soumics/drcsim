@@ -24,48 +24,19 @@ Then, in a second terminal:
 ros2 run atlas_walking_demo walk_keyboard.py
 ```
 
-On startup this node waits 5 seconds (`SETTLE_DELAY_SEC` in
-`walk_keyboard.py`) after the first `atlas/joint_states` message before
-trusting a later one as the neutral reference every gait phase
-leans/lifts/swings away from -- letting the post-unpin settling
-transient pass.
-
-The handoff onto real PID control then happens in two careful steps.
-First, the very first command goes through the `atlas/reset_controls`
-*service*, not the `atlas/atlas_command` topic: it resets `AtlasPlugin`'s
-PID integral state and applies a matching position target atomically,
-with `k_effort` left at `0` (unchanged) at this point. Second,
-`k_effort` is ramped from `0` to `255` over `KEFFORT_RAMP_SEC` (3s), not
-switched instantly. The ramp turned out to be necessary even with the
-integral freshly reset and the position matched exactly: `AtlasPlugin`
-starts up with `k_effort=0` for every joint, and nothing in
-`atlas.launch.py`'s default flow ever sends an `AtlasSimInterfaceCommand`
-either -- so **Atlas has been standing this entire session under zero
-active control torque**, held up by passive joint dynamics near its
-resting pose, not by the real, loaded PID gains at all. Switching
-`k_effort` straight to `255` is the first moment any nonzero gain has
-ever actually been applied to a joint -- an inherent shock to a system
-that had been running torque-free the whole time, regardless of how
-cleanly everything else about the handoff is done. A gradual ramp is the
-standard fix.
-
-You should see two log lines a few seconds apart: the first
-`atlas/joint_states` message arriving, then (5s later) `Atlas has settled
-into a real, stable starting pose; PID handoff started, ramping up over
-3s -- ready once that finishes.` with the full captured pose printed
-alongside it. Give it a few more seconds after that for the ramp itself,
-then press `w`.
-
-This pose (and the mechanism for setting it) went through several
-earlier, different interactively-caught bugs before this -- see
-`gait_controller.py`'s `GaitController` docstring and `src/drcsim/
-CLAUDE.md` for the fuller history if curious. The latest: diagnostic
-logging showed a knee moving over 2 radians within 0.1s of a ramp that
-should have only been at ~3.5% strength -- physically implausible for
-that gain, and consistent with the node's own ROS callback processing
-being starved by the old main loop's blocking keyboard read. ROS
-spinning now runs on its own background thread, fully decoupled from
-keyboard input.
+On startup this node reads `atlas/atlas_state` once and takes over
+`AtlasPlugin`'s *current PID setpoint* -- reconstructed as
+`position + effort / kp`, all zeros by default -- as the neutral stance
+every gait phase leans/lifts/swings away from. It keeps `k_effort=255`
+(what `AtlasPlugin` already uses), so taking over is bumpless and nothing
+moves until you press `w`. Why the setpoint and not the measured pose:
+these gains have no integral term, so each joint's small gravity sag below
+its setpoint is exactly the error that produces the torque holding Atlas
+up; commanding the measured (sagged) pose zeroes that torque and Atlas
+collapses. (Several earlier versions did exactly that -- see
+`src/drcsim/CLAUDE.md`, bug #8.) You should see one line, `Took over the
+current PID setpoint ... -- ready.`, followed by a `[diag]` line each
+second.
 
 Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't

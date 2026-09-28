@@ -17,243 +17,121 @@
 """
 Keyboard-controlled statically-stable stepping for Atlas.
 
-Run *after* atlas.launch.py already has Atlas standing normally (unpinned,
-under AtlasPlugin's regular PID control) -- this node only ever publishes
-AtlasCommand, the same live topic AtlasCommandController::SetPIDStand()
-and drcsim_tutorials/atlas_teleop.py already use; it makes no changes to
-any plugin or launch file.
+Run *after* atlas.launch.py has Atlas standing. Atlas stands because
+AtlasPlugin's per-joint PID (k_effort=255, real gains from
+atlas_v5_gains.yaml) holds every joint toward its current setpoint --
+all zeros by default -- and gravity sags each joint slightly *below* that
+setpoint. That sag is the proportional error that produces the holding
+torque (these gains have no integral term). So this node must take over
+the controller's *setpoint*, not the measured pose: commanding the
+measured (sagged) positions zeroes the error, drops the holding torque to
+nothing, and Atlas collapses. The setpoint isn't published directly, so it
+is reconstructed from atlas/atlas_state as
 
-Waits for atlas/joint_states (AtlasPlugin's real, current joint
-positions) to actually settle -- not just arrive once -- before
-publishing anything at all, and hands that in as GaitController's
-neutral_pose: the only pose ever actually proven stable free-standing
-this whole session.
+    setpoint = measured_position + applied_effort / kp_position
 
-The handoff onto real PID control happens carefully, in two parts, both
-found necessary the hard way:
-
-1. The very first command goes through the atlas/reset_controls
-   *service* (reset_pid_controller=true), not straight to the
-   atlas/atlas_command topic -- it zeroes AtlasPlugin's PID error terms
-   (integral included) and atomically applies a matching position target
-   in the same call, with k_effort left at 0 (its existing value) at this
-   point, not yet 255.
-2. k_effort is then ramped from 0 to 255 over KEFFORT_RAMP_SEC, not
-   switched instantly. This turned out to matter even with the integral
-   freshly zeroed and the position target exactly matched: AtlasPlugin::
-   ZeroAtlasCommand() (called once at startup, before any AtlasCommand
-   ever arrives) sets k_effort=0 for every joint, and nothing in
-   atlas.launch.py's default flow ever publishes an
-   AtlasSimInterfaceCommand either -- so AtlasSimInterfaceState::f_out
-   (the k_effort=0 path's own output) has been computing to exactly zero
-   the whole time too (its gains are only ever set by such a message).
-   Meaning: **Atlas has been standing this entire session under zero
-   active control torque**, held up by passive joint dynamics near its
-   resting pose, not by the real, loaded PID gains at all. Switching
-   k_effort straight to 255 -- even bumpless in every other respect -- is
-   the first moment any nonzero gain has ever actually been applied to a
-   joint, an inherent shock to a system that had been running torque-free
-   the whole time. A gradual ramp is the standard fix for exactly this
-   kind of control-mode handoff.
-
-See gait_controller.py's GaitController docstring and src/drcsim/
-CLAUDE.md for the fuller history of this pose's back-and-forth (four
-earlier, different bugs, all interactively caught, before this one).
-
-ROS spinning (the publish timer, the joint_states subscription, the
-reset_controls response) runs on its own background thread via an
-executor, entirely decoupled from the keyboard-reading loop in main().
-The first version instead called rclpy.spin_once(timeout_sec=0) once per
-main-loop iteration, interleaved with a blocking ~50ms keyboard read --
-diagnostic logging (see gait_controller.py/CLAUDE.md's bug #7) showed a
-knee joint moving over 2 radians within 0.1s of a ramp that should have
-only been at ~3.5% strength at that point, physically implausible for
-the gain involved -- consistent with ROS callback processing itself being
-starved/batched by the blocking read, corrupting the very timing (the
-settle-delay check, the k_effort ramp) other fixes here depend on.
+(exact at rest; see CLAUDE.md for how this was established). k_effort is
+kept at 255 throughout -- the value AtlasPlugin already uses -- so taking
+over is bumpless: no gain change, no controller reset.
 
 Keys: w = start/continue walking forward, space or s = stop (finishes the
-current step, then returns to a centered stand), q or Ctrl-C = quit.
-Turning is not implemented in this first version.
+current step, then returns to the neutral stance), q or Ctrl-C = quit.
 
-Raw single-keypress reading follows the same termios/tty pattern ROS 2's
-own well-known teleop_twist_keyboard.py uses -- there was no existing
-keyboard-input precedent anywhere in this repo to follow instead (every
-prior manual-input tool here is Joy-message-based, e.g. atlas_teleop.py),
-and that pattern doesn't fit this node's discrete walk/stop commands
-naturally.
+ROS spinning runs on its own executor thread, decoupled from the blocking
+keyboard read in main(). Raw keypress reading follows ROS 2's
+teleop_twist_keyboard.py termios/tty pattern.
 """
 
+import select
 import sys
 import termios
 import threading
 import tty
 
-from atlas_msgs.msg import AtlasCommand
-from atlas_msgs.srv import ResetControls
+from atlas_msgs.msg import AtlasCommand, AtlasState
 from gait_controller import ATLAS_JOINT_NAMES, GaitController
 import rclpy
-from rclpy.duration import Duration
+from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
-from sensor_msgs.msg import JointState
 
 PUBLISH_RATE_HZ = 30.0
-
-# How long to wait, after the first atlas/joint_states message, before
-# trusting a later one as a fixed PID target -- see the module docstring
-# on why the very first message alone isn't good enough. A strict
-# stillness check was tried instead of a fixed delay and never fired at
-# all: Atlas's standing pose has a small persistent oscillation by design
-# (already observed and expected all session), so "wait until it stops
-# changing" can wait forever. A fixed delay past the initial post-unpin
-# settling transient sidesteps that -- whatever small oscillation remains
-# by then is the same kind already long since confirmed harmless.
-SETTLE_DELAY_SEC = 5.0
-
-# How long to linearly ramp k_effort from 0 to 255 once the handoff
-# starts, instead of switching instantly -- see the module docstring on
-# why an instant switch, even with position matched and the PID integral
-# freshly reset, still isn't bumpless here: k_effort has been 0 for the
-# entire rest of this session, so this is the first moment any nonzero
-# gain -- real or otherwise -- has ever actually been applied to a joint.
-KEFFORT_RAMP_SEC = 3.0
+DIAG_PERIOD_SEC = 1.0
 
 INSTRUCTIONS = """
 atlas_walking_demo: keyboard-controlled stepping
-  w      - start/continue walking forward
-  space, s - stop (finishes the current step, then stands centered)
+  w         - start/continue walking forward
+  space, s  - stop (finishes the current step, then stands)
   q, Ctrl-C - quit
 """
+
+
+def reconstruct_setpoint(state):
+    """
+    Return {joint: PID setpoint} reconstructed from one AtlasState message.
+
+    Pure function (no rclpy), split out for unit testing.
+    """
+    setpoint = {}
+    for i, name in enumerate(ATLAS_JOINT_NAMES):
+        kp = state.kp_position[i]
+        position = state.position[i]
+        setpoint[name] = position + state.effort[i] / kp if kp > 0.0 else position
+    return setpoint
 
 
 class WalkKeyboardNode(Node):
 
     def __init__(self):
         super().__init__('atlas_walk_keyboard')
-        self.gait = None  # constructed once the reset_controls handoff succeeds
-        self._first_joint_states_time = None
-        self._reset_requested = False
-        self._ramp_start_time = None  # set once the handoff succeeds
-        self._neutral_pose = None  # set alongside _reset_requested
-        self._last_diag_log_time = None
+        self.gait = None  # constructed from the first atlas/atlas_state message
+        self._last_state = None
+        self._last_diag_time = None
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
-        self.reset_controls_client = self.create_client(
-            ResetControls, 'atlas/reset_controls')
-        self.timer = self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
-        self.joint_states_sub = self.create_subscription(
-            JointState, 'atlas/joint_states', self._on_joint_states, 10)
+        self.create_subscription(AtlasState, 'atlas/atlas_state', self._on_state, 10)
+        self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
 
-    def _on_joint_states(self, msg):
-        pose = dict(zip(msg.name, msg.position))
-        self._log_ramp_diagnostics(pose)
-        if self.gait is not None or self._reset_requested:
-            return  # already initialized, or the handoff is already in flight
-        if not all(name in pose for name in ATLAS_JOINT_NAMES):
-            return  # not a full report yet (e.g. mid-spawn); wait for one that is
-
-        now = self.get_clock().now()
-        if self._first_joint_states_time is None:
-            self._first_joint_states_time = now
-            self.get_logger().info(
-                f'Got the first atlas/joint_states message; waiting '
-                f'{SETTLE_DELAY_SEC:.0f}s for the post-unpin settling transient '
-                'to pass before using a reading as the starting pose.')
-        if (now - self._first_joint_states_time) < Duration(seconds=SETTLE_DELAY_SEC):
-            return  # still within the fixed settle delay
-
-        self._reset_requested = True
-        self._neutral_pose = pose
-        command = AtlasCommand()
-        command.position = [pose[name] for name in ATLAS_JOINT_NAMES]
-        command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
-        # k_effort=0 here, matching its current (default, never-yet-changed)
-        # value exactly -- this call's job is only to reset the integral
-        # term and set a matching position target, truly bumpless at this
-        # instant. _tick() ramps k_effort up from here; see KEFFORT_RAMP_SEC.
-        command.k_effort = [0] * len(ATLAS_JOINT_NAMES)
-        request = ResetControls.Request()
-        request.reset_pid_controller = True
-        request.reset_bdi_controller = False
-        request.reload_pid_from_ros = False
-        request.atlas_command = command
-        future = self.reset_controls_client.call_async(request)
-        future.add_done_callback(lambda f: self._on_reset_controls_done(f, pose))
-
-    def _on_reset_controls_done(self, future, pose):
-        response = future.result()
-        if response is None or not response.success:
-            self.get_logger().error(
-                f'atlas/reset_controls call failed ({future.exception()!r}); not '
-                'starting the walk controller.')
-            self._reset_requested = False  # allow another attempt on the next reading
+    def _on_state(self, msg):
+        self._last_state = msg
+        if self.gait is not None:
             return
-        self._ramp_start_time = self.get_clock().now()
-        self.gait = GaitController(pose)
-        # Log every joint, not just legs, while this is still being
-        # diagnosed interactively -- a bad capture in an arm/back/neck
-        # joint would be invisible if only legs were ever printed.
-        full_summary = ', '.join(f'{name}={pose[name]:.3f}' for name in ATLAS_JOINT_NAMES)
+        if len(msg.position) != len(ATLAS_JOINT_NAMES):
+            return  # plugin not fully initialized yet
+        setpoint = reconstruct_setpoint(msg)
+        self.gait = GaitController(setpoint)
+        legs = ', '.join(
+            f'{n}={setpoint[n]:+.3f}' for n in ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky'))
         self.get_logger().info(
-            f'Atlas has settled into a real, stable starting pose; PID handoff '
-            f'started, ramping up over {KEFFORT_RAMP_SEC:.0f}s -- ready once that '
-            f'finishes. Press w to walk. Captured pose: {full_summary}')
-
-    def _current_k_effort(self):
-        """Return the current 0-255 k_effort value, ramping up from the handoff."""
-        elapsed = (self.get_clock().now() - self._ramp_start_time).nanoseconds / 1e9
-        return round(255 * min(1.0, elapsed / KEFFORT_RAMP_SEC))
-
-    def _log_ramp_diagnostics(self, pose):
-        """
-        Print measured-vs-target for the leg pitch joints, indefinitely.
-
-        Diagnostic only. ~3Hz during the ramp and for a few seconds after
-        (to see the settling transient in detail), then ~1Hz forever after
-        that -- a previous version of this stopped logging entirely a few
-        seconds past the end of the ramp, on the assumption that whatever
-        happened after was no longer interesting. That assumption was
-        untested: the log showed the ramp converging and staying stable
-        for as long as it ran, and Atlas fell anyway -- with no visibility
-        into whether that happened just after logging stopped or much
-        later. Logging forever (at a slow, non-spammy rate) removes that
-        blind spot instead of guessing at the right cutoff again.
-        """
-        if self._ramp_start_time is None:
-            return
-        now = self.get_clock().now()
-        elapsed = (now - self._ramp_start_time).nanoseconds / 1e9
-        log_period = 1.0 / 3.0 if elapsed <= KEFFORT_RAMP_SEC + 3.0 else 1.0
-        if (self._last_diag_log_time is not None and
-                (now - self._last_diag_log_time).nanoseconds / 1e9 < log_period):
-            return
-        self._last_diag_log_time = now
-
-        joints = ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky', 'r_leg_hpy', 'r_leg_kny', 'r_leg_aky')
-        target = self._neutral_pose or pose
-        deltas = ', '.join(
-            f'{name}: measured={pose[name]:.3f} target={target[name]:.3f} '
-            f'err={pose[name] - target[name]:+.3f}' for name in joints)
-        self.get_logger().info(
-            f'[ramp diag] t={elapsed:.1f}s k_effort={self._current_k_effort()} {deltas}')
+            f'Took over the current PID setpoint ({legs}, ...) -- ready. Press w to walk.')
 
     def _tick(self):
         if self.gait is None:
-            return  # still waiting on the first atlas/joint_states message
-        position = self.gait.sample(1.0 / PUBLISH_RATE_HZ)
+            return
         command = AtlasCommand()
         command.header.stamp = self.get_clock().now().to_msg()
-        command.position = position
-        # No effort feedforward: this pose is only ever a delta away from
-        # Atlas's own already-proven-stable neutral pose (see
-        # gait_controller.py's module docstring), which itself already
-        # holds under plain PID with no feedforward at all.
+        command.position = self.gait.sample(1.0 / PUBLISH_RATE_HZ)
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
-        command.k_effort = [self._current_k_effort()] * len(ATLAS_JOINT_NAMES)
+        command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
         self.pub.publish(command)
+        self._log_diagnostics(command.position)
+
+    def _log_diagnostics(self, target):
+        """Log commanded vs measured leg pitch once a second (tuning aid)."""
+        now = self.get_clock().now()
+        if (self._last_state is None or (
+                self._last_diag_time is not None and
+                (now - self._last_diag_time).nanoseconds / 1e9 < DIAG_PERIOD_SEC)):
+            return
+        self._last_diag_time = now
+        s = self._last_state
+        parts = []
+        for name in ('l_leg_hpx', 'l_leg_hpy', 'l_leg_kny', 'r_leg_hpx', 'r_leg_hpy', 'r_leg_kny'):
+            i = ATLAS_JOINT_NAMES.index(name)
+            parts.append(f'{name} cmd={target[i]:+.3f} meas={s.position[i]:+.3f}')
+        self.get_logger().info('[diag] ' + ', '.join(parts))
 
     def handle_key(self, key):
         if self.gait is None:
-            return  # still waiting on the first atlas/joint_states message
+            return
         if key == 'w':
             if not self.gait.walking:
                 self.get_logger().info('Walking forward.')
@@ -266,7 +144,6 @@ class WalkKeyboardNode(Node):
 
 def _read_key(settings, timeout_sec):
     """Return one keypress (blocking up to timeout_sec) or '' on timeout."""
-    import select
     tty.setraw(sys.stdin.fileno())
     ready, _, _ = select.select([sys.stdin], [], [], timeout_sec)
     key = sys.stdin.read(1) if ready else ''
@@ -279,17 +156,9 @@ def main(args=None):
     node = WalkKeyboardNode()
     print(INSTRUCTIONS)
 
-    # ROS spinning (the 30Hz publish timer, the joint_states subscription,
-    # the reset_controls service response) runs on its own thread, entirely
-    # decoupled from the keyboard-reading loop below -- confirmed the hard
-    # way that interleaving a single spin_once(timeout_sec=0) with a
-    # blocking ~50ms keyboard read every iteration could starve/batch ROS
-    # callback processing, undermining the very timing (the k_effort ramp,
-    # the settle-delay check) multiple earlier fixes here depended on.
-    executor = rclpy.executors.SingleThreadedExecutor()
+    executor = SingleThreadedExecutor()
     executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, daemon=True)
-    spin_thread.start()
+    threading.Thread(target=executor.spin, daemon=True).start()
 
     stdin_settings = termios.tcgetattr(sys.stdin.fileno())
     try:
