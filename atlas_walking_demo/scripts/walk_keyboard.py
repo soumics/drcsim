@@ -205,24 +205,26 @@ class WalkKeyboardNode(Node):
 
     def _log_ramp_diagnostics(self, pose):
         """
-        Print measured-vs-target for the leg pitch joints during the ramp.
+        Print measured-vs-target for the leg pitch joints, indefinitely.
 
-        Diagnostic only, throttled to ~3Hz, active only from the moment
-        the handoff starts until a few seconds past the end of the ramp --
-        several earlier fixes here (integral reset, then a k_effort ramp)
-        turned out wrong or incomplete only once tried interactively, so
-        this exists to show the *actual* trajectory (a slow buckle looks
-        very different from a sudden spike) instead of guessing at a next
-        mechanism blind.
+        Diagnostic only. ~3Hz during the ramp and for a few seconds after
+        (to see the settling transient in detail), then ~1Hz forever after
+        that -- a previous version of this stopped logging entirely a few
+        seconds past the end of the ramp, on the assumption that whatever
+        happened after was no longer interesting. That assumption was
+        untested: the log showed the ramp converging and staying stable
+        for as long as it ran, and Atlas fell anyway -- with no visibility
+        into whether that happened just after logging stopped or much
+        later. Logging forever (at a slow, non-spammy rate) removes that
+        blind spot instead of guessing at the right cutoff again.
         """
         if self._ramp_start_time is None:
             return
         now = self.get_clock().now()
         elapsed = (now - self._ramp_start_time).nanoseconds / 1e9
-        if elapsed > KEFFORT_RAMP_SEC + 3.0:
-            return  # done diagnosing; the ramp finished a while ago
+        log_period = 1.0 / 3.0 if elapsed <= KEFFORT_RAMP_SEC + 3.0 else 1.0
         if (self._last_diag_log_time is not None and
-                (now - self._last_diag_log_time).nanoseconds / 1e9 < 0.3):
+                (now - self._last_diag_log_time).nanoseconds / 1e9 < log_period):
             return
         self._last_diag_log_time = now
 
