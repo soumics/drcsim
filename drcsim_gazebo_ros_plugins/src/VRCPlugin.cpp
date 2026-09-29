@@ -269,6 +269,65 @@ void VRCPlugin::ApplyGravityCompensation(gz::sim::EntityComponentManager & _ecm)
 }
 
 //////////////////////////////////////////////////
+void VRCPlugin::ApplyHarness(
+  gz::sim::EntityComponentManager & _ecm, const gz::sim::UpdateInfo & _info)
+{
+  // A spring-damper "gantry harness" pulling the pin link toward
+  // pinHoldPose (moving at pinHoldVelocity), applied as a wrench every tick.
+  //
+  // This replaced holding the pose kinematically (SetWorldPoseCmd every
+  // tick), which made Atlas *rigidly* over-constrained whenever its feet
+  // were on the floor: infinitely stiff pelvis + stiff joint servos + rigid
+  // floor turned millimetre leg-length mismatches into ~1000 N per foot,
+  // tipped the soles, and -- because a pose command moves the whole model,
+  // planted feet included -- dragged the stance foot along with the pelvis
+  // while walking (stick-slip, 6-12 cm per step, measured). Commanding the
+  // pelvis's velocity instead had the same over-constraint, and commanding
+  // its angular velocity splayed the legs' hip roll. A spring gives: the
+  // legs carry the weight naturally and the feet stay where friction holds
+  // them. Large errors (initial pinning, a hard knock) still teleport.
+  gz::sim::Link link(this->atlas.pinLinkEntity);
+  link.EnableVelocityChecks(_ecm, true);
+  const gz::math::Pose3d actual = gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
+  const gz::math::Pose3d & target = this->atlas.pinHoldPose;
+
+  this->atlas.pinHoldVelocity = gz::math::Vector3d::Zero;
+  if (this->warpRobotWithCmdVel && _info.simTime <= this->warpRobotStopTime) {
+    this->atlas.pinHoldVelocity = target.Rot().RotateVector(
+      gz::math::Vector3d(this->robotCmdVel.linear.x, this->robotCmdVel.linear.y, 0)) +
+      gz::math::Vector3d(0, 0, this->robotCmdVel.linear.z);
+  }
+
+  const gz::math::Vector3d posErr = target.Pos() - actual.Pos();
+  gz::math::Vector3d rotAxis;
+  double rotAngle = 0.0;
+  (target.Rot() * actual.Rot().Inverse()).AxisAngle(rotAxis, rotAngle);
+  if (rotAngle > GZ_PI) {
+    rotAngle -= 2.0 * GZ_PI;
+  }
+  const auto linVel = link.WorldLinearVelocity(_ecm);
+  const auto angVel = link.WorldAngularVelocity(_ecm);
+  if (posErr.Length() > 0.05 || std::abs(rotAngle) > 0.25 || !linVel || !angVel) {
+    this->SetLinkWorldPose(_ecm, this->atlas.modelEntity, this->atlas.pinLinkEntity, target);
+    return;
+  }
+
+  // Stiff enough to hold Atlas within ~1 cm / ~1 deg against walking leg
+  // reactions, soft enough that the legs, not the harness, carry the
+  // weight. Explicitly integrated at the 1 ms physics step: stable for
+  // effective masses down to a few kg / inertias down to ~0.1 kg m^2.
+  constexpr double kLinStiffness = 20000.0;   // N/m
+  constexpr double kLinDamping = 4000.0;      // N s/m
+  constexpr double kRotStiffness = 10000.0;   // N m/rad
+  constexpr double kRotDamping = 300.0;       // N m s/rad
+  const gz::math::Vector3d force = kLinStiffness * posErr +
+    kLinDamping * (this->atlas.pinHoldVelocity - *linVel);
+  const gz::math::Vector3d torque = kRotStiffness * rotAngle * rotAxis -
+    kRotDamping * (*angVel);
+  link.AddWorldWrench(_ecm, force, torque);
+}
+
+//////////////////////////////////////////////////
 void VRCPlugin::SetFeetCollide(const std::string &)
 {
   // No component-flag equivalent for runtime collide-mode toggling exists
@@ -560,7 +619,11 @@ void VRCPlugin::SetRobotCmdVel(
     this->warpRobotStopTime = std::chrono::steady_clock::duration{0};
   }
 
-  if (_cmd.linear.x == 0 && _cmd.linear.y == 0 && _cmd.angular.z == 0) {
+  // linear.z counts too: it raises/lowers the harness while pinned (see
+  // UpdateStates()).
+  if (_cmd.linear.x == 0 && _cmd.linear.y == 0 && _cmd.linear.z == 0 &&
+    _cmd.angular.z == 0)
+  {
     this->warpRobotWithCmdVel = false;
   } else {
     this->robotCmdVel = _cmd;
@@ -842,18 +905,17 @@ void VRCPlugin::UpdateStates(
 
   const double curTime = std::chrono::duration<double>(_info.simTime).count();
 
-  // Kinematically hold the pin link in place every tick while pinned --
-  // see the class-level design note on why this replaced a physics joint
-  // entirely. Runs unconditionally, every tick, ahead of the state
+  // Hold the pin link on the harness every tick while pinned -- see the
+  // class-level design note on why this replaced a physics joint entirely,
+  // and ApplyHarness() on why it is a spring, not a pose. Runs
+  // unconditionally, every tick, ahead of the state
   // machine below, so it applies regardless of which state currently has
   // atlas pinned (startup pinning, "pinned"/"pinned_with_gravity"/
   // "pid_stand"/"harnessed" modes, or the cmd_vel warp-while-pinned path).
   if (this->atlas.pinJointEntity != gz::sim::kNullEntity &&
     this->atlas.pinLinkEntity != gz::sim::kNullEntity)
   {
-    this->SetLinkWorldPose(
-      _ecm, this->atlas.modelEntity, this->atlas.pinLinkEntity,
-      this->atlas.pinHoldPose);
+    this->ApplyHarness(_ecm, _info);
   }
 
   // If user chooses bdi_stand mode, robot will be initialized with PID
@@ -992,8 +1054,15 @@ void VRCPlugin::UpdateStates(
       cmd = curPose.Rot().RotateVector(cmd);
 
       newPose.Pos() = curPose.Pos() + cmd * dt;
-      // Prevent robot from drifting vertically.
-      newPose.Pos().Z() = this->atlas.initialPose.Pos().Z();
+      if (pinned) {
+        // The hold pose is commanded, not measured, so it cannot drift:
+        // keep its height and let linear.z raise/lower the harness (the
+        // walking demo lowers it a few cm for a bent-knee gait).
+        newPose.Pos().Z() = curPose.Pos().Z() + this->robotCmdVel.linear.z * dt;
+      } else {
+        // Prevent robot from drifting vertically.
+        newPose.Pos().Z() = this->atlas.initialPose.Pos().Z();
+      }
 
       gz::math::Vector3d rpy = curPose.Rot().Euler();
       rpy.X() = 0;
@@ -1001,9 +1070,15 @@ void VRCPlugin::UpdateStates(
       rpy.Z() = rpy.Z() + this->robotCmdVel.angular.z * dt;
       newPose.Rot() = gz::math::Quaterniond(rpy);
 
-      this->Teleport(
-        _ecm, _eventMgr, this->atlas.pinLinkEntity, this->atlas.pinJointEntity,
-        newPose);
+      if (pinned) {
+        // Just advance the hold target; the per-tick hold above drives the
+        // pelvis there by velocity (teleporting would drag planted feet).
+        this->atlas.pinHoldPose = newPose;
+      } else {
+        this->Teleport(
+          _ecm, _eventMgr, this->atlas.pinLinkEntity, this->atlas.pinJointEntity,
+          newPose);
+      }
     }
   }
 

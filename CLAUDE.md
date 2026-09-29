@@ -1923,6 +1923,61 @@ harness first**; balance control (CoM/ZMP) is the next project.
 - Tests: atlas_walking_demo 22/22, drcsim_gazebo_ros_plugins 160 (0 fail,
   33 skipped).
 
+### Harness walking v2: IK foot trajectories + spring harness (2026-09-29)
+
+The keyframe harness gait walked, but looked bad, so it was replaced.
+Everything below was measured in the container with
+`docker_ws/{foot_track,walk_stats,track_err,glide_test}.py`. Foot world
+position comes from `/world/default/dynamic_pose/info`: model pose plus
+foot pose relative to the model.
+
+**New gait: `atlas_walking_demo/scripts/harness_gait.py`** (pure,
+unit-tested). It plans ankle positions in the hip-pitch frame and solves
+2-link sagittal IK. Details:
+- **Leg geometry** from `atlas_v5_raw.urdf`: thigh (-0.05, -0.374), shin
+  (0, -0.422). At zero angles the ankle sits under the pelvis origin.
+- **IK branch gotcha:** the 5 cm thigh offset means `kny=0` and
+  `kny≈0.27` give the same leg length. Joint zero is on the *other* branch
+  from a forward-bent knee, so the takeover crouch blends in joint space.
+- **Crouch depth is very sensitive:** a 5 cm drop needs 49° of knee bend;
+  2.5 cm gives about 30° mid-stance (used).
+- **Swing:** Hermite curve with endpoint slopes equal to ground speed, so
+  the foot leaves and lands at zero *world* velocity. This alone did not
+  fix slip; the harness did.
+- **Timing:** stance moves the ankle back at the pelvis speed. The node
+  runs on sim time (`/clock` is bridged), so its velocity integration
+  matches VRCPlugin's (measured 0.409 against 0.417 m/s commanded).
+
+**VRCPlugin changes:**
+- The cmd_vel warp honours `linear.z` while pinned (lowers the harness).
+  `SetRobotCmdVel` used to treat a z-only command as a stop.
+- While pinned, the warp only advances `pinHoldPose`; it no longer
+  teleports.
+- `ApplyHarness()` is a spring-damper wrench on the pin link:
+  - linear 20000 N/m and 4000 N·s/m;
+  - rotational 10000 N·m/rad and 300 N·m·s/rad;
+  - teleport only if the error exceeds 5 cm or 0.25 rad.
+
+Why the harness changed, in order of discovery (each version measured):
+1. **Pose teleport every tick:** teleporting a model moves *all* its
+   links. The loaded stance foot was dragged with the pelvis, then yanked
+   back by the hip: stick-slip, 6–12 cm per stance.
+2. **Adding a pin-link velocity hold:** `Link::SetAngularVelocity`
+   (link-frame) splayed hip roll ±15–30°, cause unknown. Linear velocity
+   alone did not stop slip.
+3. **Velocity servo with no teleport:** still 6–10 cm slip, and foot
+   loads of about 1000 N each (2000 N total, more than body weight).
+   Diagnosis: a rigid pelvis, stiff joint servos and a rigid floor
+   over-constrain the robot. Millimetre mismatches become hundreds of
+   newtons, and the soles tip ±10°.
+4. **Spring-damper (current):** slip about 2.5 cm per stance, a steady
+   0.50 m stride, pelvis and hip yaw/roll within 1.5°, about 880 N per
+   foot. Plugin tests 160/0 fail; the normal startup pin/unpin/stand is
+   unchanged.
+
+Also: the gz GUI `/gui/screenshot` service returns true but saves nothing.
+`ImageGrab` of `:1` captures the user's whole desktop, so don't use it.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

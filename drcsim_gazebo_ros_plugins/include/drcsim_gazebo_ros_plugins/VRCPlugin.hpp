@@ -173,10 +173,16 @@ namespace drcsim_gazebo_ros_plugins
 ///     re-application stop -- there is no physics-engine joint-removal
 ///     step to fail. This sidesteps the entire class of bug above rather
 ///     than trying a fourth joint-based variant. Trade-off: the pinned
-///     link is now held by a hard kinematic override (zero compliance)
-///     every tick rather than a physics constraint, which is a stronger,
-///     not weaker, hold in practice, at the cost of not being a "real"
-///     joint (e.g. it will not show up as one in any joint inspector).
+///     link is held by the plugin every tick rather than by a physics
+///     constraint, at the cost of not being a "real" joint (e.g. it will
+///     not show up as one in any joint inspector).
+///     **Update (harness walking)**: the per-tick hold was first a hard
+///     pose teleport (zero compliance). With the feet on the floor, that
+///     over-constrains Atlas: millimetre leg-length mismatches became
+///     ~1000 N per foot, and teleporting a moving pelvis also moved the
+///     planted feet (stick-slip). `ApplyHarness()` now pulls the pin link
+///     toward `atlas.pinHoldPose` with a stiff spring-damper wrench and
+///     teleports only on large errors (initial pinning, a hard knock).
 ///   - *Fire hose <-> standpipe screw-thread docking*: the original creates
 ///     a real Classic "screw" joint with a settable thread pitch so the
 ///     connection can be reversed by "unscrewing" it (reading the joint's
@@ -302,6 +308,11 @@ private:
   void SetLinkGravityMode(gz::sim::Entity _linkEntity, bool _enabled);
   void ApplyGravityCompensation(gz::sim::EntityComponentManager & _ecm);
 
+  /// \brief Pull the pinned pin link toward atlas.pinHoldPose with a
+  /// spring-damper wrench (see the definition for why not a pose hold).
+  void ApplyHarness(
+    gz::sim::EntityComponentManager & _ecm, const gz::sim::UpdateInfo & _info);
+
   /// \brief gz-sim only exposes an instant world-pose teleport command at
   /// the whole-*model* level (`Model::SetWorldPoseCmd()`) -- there is no
   /// per-link equivalent (see the class-level design note). This computes
@@ -386,14 +397,19 @@ public:
     /// teleporting the robot.
     gz::math::Pose3d initialPose;
 
-    /// \brief The pose `UpdateStates()` forcibly re-applies to `pinLinkEntity`
-    /// every tick while `pinJointEntity != kNullEntity` -- see the
-    /// class-level design note on why pinning holds a pose kinematically
-    /// each tick instead of via any physics joint. Set by `PinAtlas()` and
-    /// kept in sync by `Teleport()` (the only two places that change what
-    /// pose is being held); distinct from `initialPose`, which callers rely
-    /// on staying fixed at the original pin pose for Z-drift prevention.
+    /// \brief The pose `ApplyHarness()` pulls `pinLinkEntity` toward every
+    /// tick while `pinJointEntity != kNullEntity` -- see the class-level
+    /// design note on why pinning is done by the plugin each tick instead
+    /// of via any physics joint. Set by `PinAtlas()`/`Teleport()` and
+    /// advanced by the cmd_vel warp while pinned; distinct from
+    /// `initialPose`, which callers rely on staying fixed at the original
+    /// pin pose for Z-drift prevention.
     gz::math::Pose3d pinHoldPose;
+
+    /// \brief World velocity `pinHoldPose` is currently moving at (the
+    /// cmd_vel warp velocity while warping, else zero) -- the harness
+    /// damps the pin link toward it.
+    gz::math::Vector3d pinHoldVelocity;
 
     /// \brief Pose of robot relative to vehicle.
     gz::math::Pose3d vehicleRelPose;

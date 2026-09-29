@@ -45,26 +45,44 @@ implemented yet.
 ### Harness mode (default)
 
 Like a real lab gantry, the node first puts Atlas in a harness: it
-publishes `pinned_with_gravity` on `atlas/mode`, so `VRCPlugin` holds the
-pelvis at its current pose while gravity still acts on the limbs. With
-balance taken care of, `gait_controller.HARNESS_CYCLE` runs a human-like
-swing/stance cycle:
+publishes `pinned_with_gravity` on `atlas/mode`. `VRCPlugin` then holds the
+pelvis with a stiff spring-damper while gravity still acts, so the legs
+carry Atlas's weight but it can't fall.
 
-- lift the knee;
-- reach the thigh forward;
-- plant the heel ahead of the hip;
-- sweep the stance leg back and push off.
+With balance taken care of, `harness_gait.py` walks the way a person does,
+planning where each *ankle* goes and solving the leg's inverse kinematics
+every tick:
 
-All the while the node publishes `atlas/cmd_vel`
-(`forward_speed`, default 0.35 m/s, matched to the stance foot's sweep) so
-the held pelvis actually travels forward. Stopping finishes the current
-step with both feet down, then stops the pelvis.
+- The harness first lowers 2.5 cm, over 3 s, so the knees stay slightly
+  bent (~30°). The arms come down from Atlas's zero T-pose at the same
+  time.
+- **Stance:** the ankle moves back at exactly the pelvis speed, so the
+  foot stays planted.
+- **Swing:** the foot lifts off, arcs forward 8 cm high and lands half a
+  step ahead of the hip.
+- Each foot is down 60% of the stride; each arm swings with the opposite
+  leg.
+- Pressing `w` ramps the step length up over one stride. Stopping ramps it
+  down, then takes one step in place to bring both feet back under the
+  hips.
+
+The node runs on sim time and moves the harness through `atlas/cmd_vel`
+(forward at 0.42 m/s, down while crouching), in step with the feet.
 
 ```bash
-ros2 run atlas_walking_demo walk_keyboard.py                          # harness
-ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p forward_speed:=0.2
+ros2 run atlas_walking_demo walk_keyboard.py                             # harness
 ros2 topic pub --once atlas/mode std_msgs/msg/String "{data: nominal}"   # release
 ```
+
+Measured over 12 strides:
+
+| Measure | Result |
+|---|---|
+| Stride | 0.50 m |
+| Stance-foot slip | ~2.5 cm |
+| Pelvis attitude | within 1.5° |
+| Hip yaw/roll | within 1.5° |
+| Load per foot | ~880 N (Atlas's weight shared) |
 
 `-p harness:=false` runs the free-standing lean/lift/plant `WALK_CYCLE`
 below instead. Without a balance controller it only manages a step or two

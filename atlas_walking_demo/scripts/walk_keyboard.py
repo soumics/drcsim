@@ -39,9 +39,11 @@ current step, then returns to the neutral stance), q or Ctrl-C = quit.
 
 By default (parameter harness:=true) the node first puts Atlas in
 VRCPlugin's "pinned_with_gravity" mode -- the pelvis held like a lab
-gantry harness -- and runs the full swing/stance HARNESS_CYCLE, advancing
-the held pelvis through atlas/cmd_vel while walking so Atlas really moves
-forward across the floor. harness:=false runs the free-standing
+gantry harness -- lowers the harness a little and runs harness_gait.py's
+foot-trajectory gait (leg IK, planted stance feet, arm swing), moving the
+held pelvis through atlas/cmd_vel in step with the feet. The node runs on
+sim time so its pelvis velocity integrates exactly as VRCPlugin's does,
+and stance feet stay put on the floor. harness:=false runs the free-standing
 lean-lift-plant WALK_CYCLE instead, which still needs a balance controller
 to get further than a step or two (see README.md). The harness is left on
 when the node quits; publish "nominal" on atlas/mode to release it.
@@ -58,11 +60,13 @@ import threading
 import tty
 
 from atlas_msgs.msg import AtlasCommand, AtlasState
-from gait_controller import ATLAS_JOINT_NAMES, GaitController, HARNESS_FORWARD_SPEED
+from gait_controller import ATLAS_JOINT_NAMES, GaitController
 from geometry_msgs.msg import Twist
+from harness_gait import HarnessGait
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from std_msgs.msg import String
 
 PUBLISH_RATE_HZ = 30.0
@@ -109,9 +113,10 @@ class WalkKeyboardNode(Node):
         self.gait = None  # constructed from the first atlas/atlas_state message
         self._last_state = None
         self._last_diag_time = None
+        self._last_tick_time = None
         self.harness = self.declare_parameter('harness', True).value
-        self.forward_speed = self.declare_parameter(
-            'forward_speed', HARNESS_FORWARD_SPEED).value
+        if self.harness and not self.get_parameter('use_sim_time').value:
+            self.set_parameters([Parameter('use_sim_time', value=True)])
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.mode_pub = self.create_publisher(String, 'atlas/mode', 10)
         self.cmd_vel_pub = self.create_publisher(Twist, 'atlas/cmd_vel', 10)
@@ -134,7 +139,7 @@ class WalkKeyboardNode(Node):
                     self.kp[i], self.kd[i] = HARNESS_GAIN_OVERRIDES[joint]
             # VRCPlugin holds the pelvis where it is right now, gravity on.
             self.mode_pub.publish(String(data='pinned_with_gravity'))
-        self.gait = GaitController(setpoint, harness=self.harness)
+        self.gait = HarnessGait(setpoint) if self.harness else GaitController(setpoint)
         legs = ', '.join(
             f'{n}={setpoint[n]:+.3f}' for n in ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky'))
         self.get_logger().info(
@@ -145,20 +150,32 @@ class WalkKeyboardNode(Node):
     def _tick(self):
         if self.gait is None:
             return
+        now = self.get_clock().now()
+        dt = 1.0 / PUBLISH_RATE_HZ
+        if self._last_tick_time is not None:
+            dt = (now - self._last_tick_time).nanoseconds / 1e9
+        self._last_tick_time = now
+        if dt <= 0.0:
+            return
+        velocity = (0.0, 0.0)
+        if self.harness:
+            positions, velocity = self.gait.sample(dt)
+        else:
+            positions = self.gait.sample(dt)
         command = AtlasCommand()
-        command.header.stamp = self.get_clock().now().to_msg()
-        command.position = self.gait.sample(1.0 / PUBLISH_RATE_HZ)
+        command.header.stamp = now.to_msg()
+        command.position = positions
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
         command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
         # AtlasPlugin replaces its live gains with any full-length array.
         command.kp_position = self.kp
         command.kd_position = self.kd
         self.pub.publish(command)
-        if self.harness and self.gait.phase_name != 'IDLE':
+        if velocity != (0.0, 0.0):
             # VRCPlugin stops the warp 0.1 s after the last message, so
-            # publishing only while stepping is what stops the pelvis.
+            # publishing only while moving is what stops the pelvis.
             twist = Twist()
-            twist.linear.x = float(self.forward_speed)
+            twist.linear.x, twist.linear.z = velocity
             self.cmd_vel_pub.publish(twist)
         self._log_diagnostics(command.position)
 
