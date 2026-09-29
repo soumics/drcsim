@@ -42,6 +42,34 @@ Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
 the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
 implemented yet.
 
+### Harness mode (default)
+
+Like a real lab gantry, the node first puts Atlas in a harness: it
+publishes `pinned_with_gravity` on `atlas/mode`, so `VRCPlugin` holds the
+pelvis at its current pose while gravity still acts on the limbs. With
+balance taken care of, `gait_controller.HARNESS_CYCLE` runs a human-like
+swing/stance cycle:
+
+- lift the knee;
+- reach the thigh forward;
+- plant the heel ahead of the hip;
+- sweep the stance leg back and push off.
+
+All the while the node publishes `atlas/cmd_vel`
+(`forward_speed`, default 0.35 m/s, matched to the stance foot's sweep) so
+the held pelvis actually travels forward. Stopping finishes the current
+step with both feet down, then stops the pelvis.
+
+```bash
+ros2 run atlas_walking_demo walk_keyboard.py                          # harness
+ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p forward_speed:=0.2
+ros2 topic pub --once atlas/mode std_msgs/msg/String "{data: nominal}"   # release
+```
+
+`-p harness:=false` runs the free-standing lean/lift/plant `WALK_CYCLE`
+below instead. Without a balance controller it only manages a step or two
+before falling (see `src/drcsim/CLAUDE.md`).
+
 ## Tuning, one milestone at a time
 
 `atlas/debug/{l,r}_foot_contact` (`geometry_msgs/WrenchStamped`, already

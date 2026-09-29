@@ -15,6 +15,8 @@
 
   <exec_depend>rclpy</exec_depend>
   <exec_depend>atlas_msgs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
 
   <test_depend>ament_cmake_copyright</test_depend>
   <test_depend>ament_cmake_flake8</test_depend>

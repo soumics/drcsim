@@ -1870,6 +1870,39 @@ something finally exercises the path that reveals it, and "confirmed
 stable" observations made before that moment don't actually validate what
 they were assumed to.
 
+### Harness walking (✅ verified 2026-09-29, in the `drcsim_jazzy` container)
+
+Free-standing stepping still falls ~2 s after `w` (open-loop, sway ±3.5°
+at ~2 s period; P-only ankle feedback `aky += 0.5*pitch` halves sway, any D
+term or Kp ≥ 1 falls). Per the user's choice, walking now runs **in a
+harness first**; balance control (CoM/ZMP) is the next project.
+
+- `walk_keyboard.py` (default `harness:=true`) publishes
+  `pinned_with_gravity` on `atlas/mode` at takeover.
+  - It runs `gait_controller.HARNESS_CYCLE`: LIFT/SWING/PLANT per leg.
+  - Leg poses are (hpy, kny, aky) from `HARNESS_LEG_POSES`, with the sole
+    flat when grounded.
+  - It publishes `atlas/cmd_vel` (`forward_speed`, 0.35 m/s) only while
+    not IDLE.
+  - `harness:=false` keeps the old free-standing `WALK_CYCLE`.
+- **VRCPlugin warp drift fix**: the cmd_vel warp integrated from the
+  *measured* pin-link pose.
+  - Physics nudges the held pelvis within a tick, and that nudge was
+    adopted into `pinHoldPose` every tick.
+  - Before the fix: 3 s of pure `linear.x=0.3` went −0.36 m x, +0.31 m y,
+    yaw +0.39 rad.
+  - The warp now integrates from `pinHoldPose` while pinned.
+  - After the fix: 25 s walk → x +9.08 m, y −0.02 m, yaw −0.002 rad.
+- Joints track the harness keyframes within ~0.05–0.1 rad. Hip roll
+  (`hpx`, commanded 0) wobbles up to ±0.3 rad from foot friction while the
+  pelvis advances. That is cosmetic; the fix would be to stiffen hpx or
+  match `forward_speed` more precisely.
+- `walk_keyboard.py` quit abort ("terminate called without an active
+  exception") came from destroying the node under a still-spinning
+  executor thread. Fixed by joining the spin thread first.
+- Tests: atlas_walking_demo 22/22, drcsim_gazebo_ros_plugins 160 (0 fail,
+  33 skipped).
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

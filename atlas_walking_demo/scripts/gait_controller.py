@@ -131,6 +131,63 @@ WALK_CYCLE = [
 ]
 
 
+# --- Harness gait --------------------------------------------------------
+#
+# With the pelvis held by VRCPlugin's harness ("pinned_with_gravity" on
+# atlas/mode), nothing has to balance, so the legs can follow a real
+# human-like swing/stance cycle instead of the cautious lean-lift-plant
+# above. Each leg pose is an absolute (hpy, kny, aky) offset from neutral,
+# chosen so hpy + kny + aky == 0 wherever the foot is on (or about to touch)
+# the ground: the sole stays parallel to the floor. Measured under the
+# harness: the LIFTED pose clears the floor completely (swing-foot Fz ~0)
+# while the pelvis stays within ~4 degrees of upright.
+HARNESS_LEG_POSES = {
+    'MID': (0.0, 0.0, 0.0),            # straight under the hip
+    'LIFTED': (-0.5, 0.9, -0.4),       # knee up, foot clear of the floor
+    'REACH': (-0.7, 0.7, -0.1),        # thigh forward, toe up: heel strike next
+    'FRONT': (-0.3, 0.15, 0.15),       # planted ahead of the hip
+    'BACK': (0.3, 0.1, -0.4),          # planted behind the hip, about to push off
+    'PUSH_OFF': (0.2, 0.3, -0.5),      # heel rising as stance ends
+}
+
+HARNESS_LIFT_DURATION = 0.4
+HARNESS_SWING_DURATION = 0.4
+HARNESS_PLANT_DURATION = 0.4
+
+# Stance foot sweep per step, from FRONT to BACK, is about
+# 0.8 m * (sin 0.3 + sin 0.3) ~= 0.47 m over the 1.2 s a step takes, so a
+# pelvis advancing at ~0.35 m/s keeps the planted foot roughly still on
+# the floor instead of skating. walk_keyboard.py feeds this to atlas/cmd_vel.
+HARNESS_FORWARD_SPEED = 0.35
+
+
+class HarnessPhase:
+    """One harness-gait phase: the target leg pose for the swing and stance leg."""
+
+    def __init__(self, name, swing, swing_pose, stance_pose, duration, stop_ok=False):
+        self.name = name
+        self.swing = swing
+        self.support = 'r' if swing == 'l' else 'l'
+        self.swing_pose = swing_pose
+        self.stance_pose = stance_pose
+        self.duration = duration
+        # A stop request is honored only after a phase that ends with both
+        # feet planted.
+        self.stop_ok = stop_ok
+
+
+HARNESS_CYCLE = [
+    HarnessPhase('LIFT_RIGHT', 'r', 'LIFTED', 'MID', HARNESS_LIFT_DURATION),
+    HarnessPhase('SWING_RIGHT', 'r', 'REACH', 'BACK', HARNESS_SWING_DURATION),
+    HarnessPhase('PLANT_RIGHT', 'r', 'FRONT', 'PUSH_OFF', HARNESS_PLANT_DURATION,
+                 stop_ok=True),
+    HarnessPhase('LIFT_LEFT', 'l', 'LIFTED', 'MID', HARNESS_LIFT_DURATION),
+    HarnessPhase('SWING_LEFT', 'l', 'REACH', 'BACK', HARNESS_SWING_DURATION),
+    HarnessPhase('PLANT_LEFT', 'l', 'FRONT', 'PUSH_OFF', HARNESS_PLANT_DURATION,
+                 stop_ok=True),
+]
+
+
 def _lerp_pose(pose_a, pose_b, alpha):
     return {name: pose_a[name] + (pose_b[name] - pose_a[name]) * alpha
             for name in ATLAS_JOINT_NAMES}
@@ -154,7 +211,9 @@ class GaitController:
     that instead transitioned into a hardcoded pose fell over.
     """
 
-    def __init__(self, neutral_pose):
+    def __init__(self, neutral_pose, harness=False):
+        self.harness = harness
+        self.cycle = HARNESS_CYCLE if harness else WALK_CYCLE
         self.walking = False
         self._stop_requested = False
         self.neutral_pose = dict(neutral_pose)
@@ -176,7 +235,7 @@ class GaitController:
         """Advance by dt seconds and return the current 30-value position list."""
         self._elapsed += dt
         duration = (
-            WALK_CYCLE[self._phase_index].duration
+            self.cycle[self._phase_index].duration
             if self._phase_index is not None else IDLE_DURATION)
         alpha = min(1.0, self._elapsed / duration)
         pose = _lerp_pose(self._prev_pose, self._target_pose, alpha)
@@ -199,6 +258,12 @@ class GaitController:
         the module docstring.
         """
         pose = dict(self.neutral_pose)
+        if self.harness:
+            for side, key in ((phase.swing, phase.swing_pose),
+                              (phase.support, phase.stance_pose)):
+                for joint, delta in zip(('hpy', 'kny', 'aky'), HARNESS_LEG_POSES[key]):
+                    pose[f'{side}_leg_{joint}'] += delta
+            return pose
         lean_sign = 1.0 if phase.support == 'l' else -1.0
         pose['l_leg_hpx'] += lean_sign * LEAN_HPX
         pose['r_leg_hpx'] += -lean_sign * LEAN_HPX
@@ -217,7 +282,7 @@ class GaitController:
         self._phase_index = index
         self._elapsed = 0.0
         self._prev_pose = dict(self._target_pose)
-        self._target_pose = self._target_pose_for(WALK_CYCLE[index])
+        self._target_pose = self._target_pose_for(self.cycle[index])
 
     def _begin_idle(self):
         self._phase_index = None
@@ -229,8 +294,14 @@ class GaitController:
     def _advance(self):
         if self._phase_index is None:
             return  # already idle and settled; nothing to advance
-        finished_name = WALK_CYCLE[self._phase_index].name
-        if self._stop_requested and finished_name.startswith('SHIFT'):
+        finished = self.cycle[self._phase_index]
+        stop_ok = finished.stop_ok if self.harness else finished.name.startswith('SHIFT')
+        if self._stop_requested and stop_ok:
             self._begin_idle()
             return
-        self._begin_phase((self._phase_index + 1) % len(WALK_CYCLE))
+        self._begin_phase((self._phase_index + 1) % len(self.cycle))
+
+    @property
+    def phase_name(self):
+        """Return the current phase's name, or 'IDLE'."""
+        return 'IDLE' if self._phase_index is None else self.cycle[self._phase_index].name

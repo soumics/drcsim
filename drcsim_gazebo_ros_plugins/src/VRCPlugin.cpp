@@ -975,7 +975,15 @@ void VRCPlugin::UpdateStates(
 
     if (this->warpRobotWithCmdVel && (_info.simTime <= this->warpRobotStopTime)) {
       this->lastUpdateTime = _info.simTime;
-      const gz::math::Pose3d curPose =
+      // Integrate from the commanded hold pose while pinned, not the
+      // measured one: within a tick physics nudges the held pelvis a little
+      // (the legs push against the ground), and re-reading that measured
+      // pose here adopted the nudge into the next hold pose every tick --
+      // an unbounded yaw/position drift that made a pure linear.x command
+      // wander sideways and turn.
+      const bool pinned = this->atlas.pinJointEntity != gz::sim::kNullEntity;
+      const gz::math::Pose3d curPose = pinned ?
+        this->atlas.pinHoldPose :
         gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
       gz::math::Pose3d newPose = curPose;
 

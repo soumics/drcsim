@@ -37,6 +37,15 @@ over is bumpless: no gain change, no controller reset.
 Keys: w = start/continue walking forward, space or s = stop (finishes the
 current step, then returns to the neutral stance), q or Ctrl-C = quit.
 
+By default (parameter harness:=true) the node first puts Atlas in
+VRCPlugin's "pinned_with_gravity" mode -- the pelvis held like a lab
+gantry harness -- and runs the full swing/stance HARNESS_CYCLE, advancing
+the held pelvis through atlas/cmd_vel while walking so Atlas really moves
+forward across the floor. harness:=false runs the free-standing
+lean-lift-plant WALK_CYCLE instead, which still needs a balance controller
+to get further than a step or two (see README.md). The harness is left on
+when the node quits; publish "nominal" on atlas/mode to release it.
+
 ROS spinning runs on its own executor thread, decoupled from the blocking
 keyboard read in main(). Raw keypress reading follows ROS 2's
 teleop_twist_keyboard.py termios/tty pattern.
@@ -49,10 +58,12 @@ import threading
 import tty
 
 from atlas_msgs.msg import AtlasCommand, AtlasState
-from gait_controller import ATLAS_JOINT_NAMES, GaitController
+from gait_controller import ATLAS_JOINT_NAMES, GaitController, HARNESS_FORWARD_SPEED
+from geometry_msgs.msg import Twist
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
+from std_msgs.msg import String
 
 PUBLISH_RATE_HZ = 30.0
 DIAG_PERIOD_SEC = 1.0
@@ -86,7 +97,12 @@ class WalkKeyboardNode(Node):
         self.gait = None  # constructed from the first atlas/atlas_state message
         self._last_state = None
         self._last_diag_time = None
+        self.harness = self.declare_parameter('harness', True).value
+        self.forward_speed = self.declare_parameter(
+            'forward_speed', HARNESS_FORWARD_SPEED).value
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
+        self.mode_pub = self.create_publisher(String, 'atlas/mode', 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, 'atlas/cmd_vel', 10)
         self.create_subscription(AtlasState, 'atlas/atlas_state', self._on_state, 10)
         self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
 
@@ -97,11 +113,16 @@ class WalkKeyboardNode(Node):
         if len(msg.position) != len(ATLAS_JOINT_NAMES):
             return  # plugin not fully initialized yet
         setpoint = reconstruct_setpoint(msg)
-        self.gait = GaitController(setpoint)
+        if self.harness:
+            # VRCPlugin holds the pelvis where it is right now, gravity on.
+            self.mode_pub.publish(String(data='pinned_with_gravity'))
+        self.gait = GaitController(setpoint, harness=self.harness)
         legs = ', '.join(
             f'{n}={setpoint[n]:+.3f}' for n in ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky'))
         self.get_logger().info(
-            f'Took over the current PID setpoint ({legs}, ...) -- ready. Press w to walk.')
+            f'Took over the current PID setpoint ({legs}, ...)'
+            f'{" and put Atlas in the harness" if self.harness else ""}'
+            ' -- ready. Press w to walk.')
 
     def _tick(self):
         if self.gait is None:
@@ -112,6 +133,12 @@ class WalkKeyboardNode(Node):
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
         command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
         self.pub.publish(command)
+        if self.harness and self.gait.phase_name != 'IDLE':
+            # VRCPlugin stops the warp 0.1 s after the last message, so
+            # publishing only while stepping is what stops the pelvis.
+            twist = Twist()
+            twist.linear.x = float(self.forward_speed)
+            self.cmd_vel_pub.publish(twist)
         self._log_diagnostics(command.position)
 
     def _log_diagnostics(self, target):
@@ -127,7 +154,7 @@ class WalkKeyboardNode(Node):
         for name in ('l_leg_hpx', 'l_leg_hpy', 'l_leg_kny', 'r_leg_hpx', 'r_leg_hpy', 'r_leg_kny'):
             i = ATLAS_JOINT_NAMES.index(name)
             parts.append(f'{name} cmd={target[i]:+.3f} meas={s.position[i]:+.3f}')
-        self.get_logger().info('[diag] ' + ', '.join(parts))
+        self.get_logger().info(f'[diag] {self.gait.phase_name}: ' + ', '.join(parts))
 
     def handle_key(self, key):
         if self.gait is None:
@@ -158,7 +185,8 @@ def main(args=None):
 
     executor = SingleThreadedExecutor()
     executor.add_node(node)
-    threading.Thread(target=executor.spin, daemon=True).start()
+    spin_thread = threading.Thread(target=executor.spin, daemon=True)
+    spin_thread.start()
 
     stdin_settings = termios.tcgetattr(sys.stdin.fileno())
     try:
@@ -172,7 +200,11 @@ def main(args=None):
         pass
     finally:
         termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, stdin_settings)
+        # Stop and join the spin thread before tearing the node down;
+        # destroying it under a still-spinning executor aborts the process
+        # ("terminate called without an active exception").
         executor.shutdown()
+        spin_thread.join(timeout=2.0)
         node.destroy_node()
         rclpy.shutdown()
 
