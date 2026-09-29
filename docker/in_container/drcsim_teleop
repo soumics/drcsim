@@ -1,0 +1,3 @@
+#!/bin/bash
+# Keyboard teleop: walk, turn, side-step, grip, kick (see atlas_walking_demo/README.md).
+exec ros2 run atlas_walking_demo walk_keyboard.py "$@"

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CycloneDDS for drcsim: everything runs on one machine, so talk over the
+  loopback interface only (unicast to localhost). This keeps the simulation
+  off the LAN and away from other ROS 2 systems on the host; ROS_DOMAIN_ID
+  (77 by default in docker/run.sh) separates it further.
+  MaxAutoParticipantIndex is raised because gz-sim, its plugins and the
+  launch's state publishers are many participants on one host.
+-->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain Id="any">
+    <General>
+      <Interfaces>
+        <NetworkInterface name="lo"/>
+      </Interfaces>
+      <AllowMulticast>false</AllowMulticast>
+    </General>
+    <Discovery>
+      <ParticipantIndex>auto</ParticipantIndex>
+      <MaxAutoParticipantIndex>120</MaxAutoParticipantIndex>
+      <Peers>
+        <Peer address="localhost"/>
+      </Peers>
+    </Discovery>
+  </Domain>
+</CycloneDDS>

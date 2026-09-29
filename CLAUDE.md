@@ -2044,6 +2044,85 @@ here (`__GLX_VENDOR_LIBRARY_NAME=mesa`, `__EGL_VENDOR_LIBRARY_FILENAMES=`
 the Mesa JSON). NV-GLX gives `X Error ... BadValue` and gz exits with
 code 1.
 
+### Hand mounting bugs, Docker image, modern skin (2026-09-29, done)
+
+**Results**
+
+Mounts:
+- `docker_ws/fix_hand_mounts.py` derived every left mount from measured
+  wrist frames. It tries each hand-frame symmetry plane and keeps the best
+  mirror; it rewrote v3 iRobot, v4 ×3 and v5 Robotiq/iRobot.
+- `test_hand_mounts.py` passes 17/17. Screenshots (Gazebo and RViz, each
+  hand) confirm Sandia and Robotiq sit at the wrist, point outward and
+  mirror each other.
+
+Hand types:
+- **Robotiq:** its finger linkages are closed loops. DART drops the
+  loop-closing joints (SDFFeatures.cc:1111 errors); the gripper still
+  mounts and Atlas stands. For RViz, the launch hands the state publishers
+  a URDF with those passive joints fixed (`_fix_robotiq_passive_joints`),
+  giving 127/127 TF.
+- **iRobot: not offered in the launch.**
+  - Its `proximal_link` inertia violated the triangle inequality, so the
+    whole robot failed to spawn; fixed with the diagonal.
+  - Its fingers are closed loops too, and the sim diverges within seconds
+    (NaN efforts, ODE aabb assertion), even with 10× flex-link masses.
+
+Rendering and middleware:
+- **CycloneDDS + NVIDIA in the image: the gz server renders on the RTX GPU
+  with no segfault.** Under FastDDS that combination crashed (Tier notes
+  above).
+- The Ogre-Next GUI on Xvfb segfaults in Mesa EGL (`driCreateNewScreen3`),
+  even with llvmpipe forced. `drcsim_snapshot` therefore uses
+  `--render-engine-gui ogre` (GLX): diffuse colours only, no PBR.
+
+Skin:
+- The PBR skin renders pearl/black/red/graphite as designed. The `ufarm`
+  (the long v5 forearm) was added to the pearl panels after the first
+  screenshot looked too dark.
+
+**Every hand was mounted wrong, found by measuring TF.**
+- **Bug 1, bare `<insert_block name="origin"/>`:** used in
+  sandia/robotiq/irobot hand xacros. ROS 2 xacro requires
+  `xacro:insert_block`; it emitted the bare tag literally, so the URDF had
+  *no origin* on every hand-mount joint. Both palms sat exactly on the wrist
+  link, with no offset and no rotation.
+  - Fixed in all four hand xacros.
+- **Bug 2, v5 left mounts:** v5's left-arm frames are the right arm's
+  rotated π about z (`l_arm_shz` rpy, vigir URDF). The "mirrored" left
+  mounts from Tier 1 therefore put the left hand *inside the forearm*.
+  - Measured with Sandia: left fingers at the elbow (y 0.664 against wrist
+    0.939); the right hand was correct.
+  - Correct left mount = t_L = diag(−1,1,1)·t_R and
+    R_L = Rz(π)ᵀ·M·R_R·M_palm, where M = diag(1,−1,1). M_palm = M for the
+    Sandia model, which is built mirrored (`reflect`); it is I for
+    Robotiq/iRobot, which use the same model on both sides (a mirror
+    *conjugate*).
+  - v5 values: Sandia (0.00179, −0.13516, 0.01176), yaw −π/2; Robotiq
+    (0.00125, −0.17, 0.01), rpy (0, π, 0); iRobot (0.00179, −0.09516,
+    0.01176), rpy (−π/2, 0, π).
+- `atlas_description/test/test_hand_mounts.py` runs zero-pose FK on every
+  `*_hands` xacro. It requires each hand to reach out past its wrist and
+  the left hand to be the right's mirror, as point sets within 2 cm.
+- The Robotiq and iRobot v5 xacros also got gz-sim plugin tags.
+  `atlas.launch.py` now takes `hands:=sandia|robotiq|irobot|none` and starts
+  a state publisher for each hand's joint-state topic.
+
+**Docker (`docker/`).**
+- Base `osrf/ros:jazzy-desktop-full`, plus CycloneDDS (loopback-only
+  `cyclonedds.xml`), rosdep dependencies and a prebuilt workspace.
+- `NVIDIA_DRIVER_CAPABILITIES=all`; PRIME offload is controlled by
+  `DRCSIM_PRIME_OFFLOAD`.
+- Host scripts: build/run/sim/gui/teleop/shell/stop. In-container commands:
+  `drcsim_sim`, `drcsim_gui`, `drcsim_teleop`, `drcsim_snapshot` (Gazebo
+  and RViz screenshots on a private Xvfb :99, never the user's screen).
+- The first build succeeded (`drcsim:jazzy`), before the hand fixes.
+
+**skin:=modern (default).** The launch converts the URDF to SDF (`gz sdf -p`)
+and gives every visual a PBR car-paint material: pearl body panels, piano
+black trim, graphite hands, an ultra-red head. It is used only for VRCPlugin's
+spawn; RViz keeps the URDF.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

@@ -36,7 +36,9 @@ the DRCSIM_ROS_PARAMS_FILE environment variable at it before gz-sim
 """
 
 import os
+import subprocess
 import tempfile
+import xml.etree.ElementTree as ET
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -55,8 +57,104 @@ import yaml
 
 HAND_XACROS = {
     'sandia': 'atlas_v5_sandia_hands.urdf.xacro',
+    # Robotiq's finger linkages are closed kinematic loops; DART (gz-sim's
+    # physics) drops the loop-closing joints, so the passive bars get no
+    # joint state (no TF in RViz) -- the grippers still mount and actuate.
+    'robotiq': 'atlas_v5_robotiq_hands.urdf.xacro',
+    # No 'irobot': its fingers are closed loops too, and with their ~0.6 g
+    # flex links the simulation diverges (NaN efforts, ODE collision
+    # assertion) within seconds -- even with 10x masses. The xacro and its
+    # mount are correct for URDF/RViz use (see CLAUDE.md).
     'none': 'atlas_v5.urdf.xacro',
 }
+
+# Joint-state topics each hand plugin publishes outside atlas/joint_states.
+HAND_JOINT_STATE_TOPICS = {
+    'sandia': [f'sandia_hands/{s}_hand/joint_states' for s in ('l', 'r')],
+    'robotiq': [f'robotiq_hands/{s}_hand/joint_states' for s in ('left', 'right')],
+    'irobot': [f'irobot_hands/{s}_hand/joint_states' for s in ('l', 'r')],
+}
+
+# skin:=modern -- a "brand-new car" paint job: physically based materials
+# (gz-sim/Ogre2 PBR) replacing the meshes' old textures. Each entry is
+# (diffuse RGB, metalness, roughness): pearl-white multi-coat body panels,
+# gloss piano-black joints and trim, graphite-metallic hands, an "ultra
+# red" head as the badge.
+PAINTS = {
+    'pearl': ((0.92, 0.93, 0.95), 0.25, 0.12),
+    'piano_black': ((0.02, 0.02, 0.025), 0.2, 0.08),
+    'graphite': ((0.20, 0.21, 0.23), 0.85, 0.28),
+    'ultra_red': ((0.62, 0.02, 0.04), 0.45, 0.15),
+}
+# First matching substring of the link/visual name wins.
+PAINT_RULES = [
+    (('hokuyo',), 'piano_black'),
+    (('head', 'multisense'), 'ultra_red'),
+    (('palm', '_f0', '_f1', '_f2', '_f3', 'finger', 'irobot', 'robotiq', 'base_link'),
+     'graphite'),
+    (('utorso', 'pelvis', 'uleg', 'lleg', 'uarm', 'larm', 'ufarm'), 'pearl'),
+]
+
+
+def _fix_robotiq_passive_joints(robot_description):
+    """
+    Return the URDF with the Robotiq fingers' passive linkage joints fixed.
+
+    For robot_state_publisher/RViz only. DART can't close the fingers'
+    parallel-linkage loops, so those joints are never simulated and never
+    get a joint state: RViz then shows the whole RobotModel in error.
+    Fixed, they get static TFs; only the actuated finger joints (joint_1..3
+    and palm_finger_*_joint) keep moving.
+    """
+    root = ET.fromstring(robot_description)
+    for joint in root.findall('joint'):
+        name = joint.get('name')
+        if 'finger_' in name and joint.get('type') != 'fixed' and not (
+                name.endswith(('_joint_1', '_joint_2', '_joint_3')) or
+                ('palm_finger_' in name and name.endswith('_joint'))):
+            joint.set('type', 'fixed')
+    return ET.tostring(root, encoding='unicode')
+
+
+def _paint_for(name):
+    for keys, paint in PAINT_RULES:
+        if any(key in name for key in keys):
+            return paint
+    return 'piano_black'
+
+
+def _modern_skin_sdf(robot_description):
+    """
+    Convert the URDF to SDF and give every visual a PBR car-paint material.
+
+    Only VRCPlugin's spawn (gz) sees this; robot_state_publisher/RViz keep
+    the plain URDF. gz sdf -p is the same URDF->SDF conversion VRCPlugin's
+    sdf::Root::LoadSdfString() would do, so the model is otherwise
+    identical. Fixed-joint children are merged into their parent link by
+    that conversion, so visuals are matched by their own (lumped) names.
+    """
+    with tempfile.NamedTemporaryFile('w', suffix='.urdf', delete=False) as urdf:
+        urdf.write(robot_description)
+    try:
+        sdf = subprocess.run(['gz', 'sdf', '-p', urdf.name], capture_output=True,
+                             text=True, check=True).stdout
+    finally:
+        os.unlink(urdf.name)
+    root = ET.fromstring(sdf[sdf.index('<sdf'):])
+    for link in root.iter('link'):
+        for visual in link.findall('visual'):
+            rgb, metalness, roughness = PAINTS[_paint_for(visual.get('name', link.get('name')))]
+            for old in visual.findall('material'):
+                visual.remove(old)
+            color = ' '.join(f'{c:.3f}' for c in rgb) + ' 1'
+            material = ET.SubElement(visual, 'material')
+            ET.SubElement(material, 'ambient').text = color
+            ET.SubElement(material, 'diffuse').text = color
+            ET.SubElement(material, 'specular').text = '0.9 0.9 0.9 1'
+            metal = ET.SubElement(ET.SubElement(material, 'pbr'), 'metal')
+            ET.SubElement(metal, 'metalness').text = str(metalness)
+            ET.SubElement(metal, 'roughness').text = str(roughness)
+    return ET.tostring(root, encoding='unicode')
 
 
 def _sandia_hand_gains():
@@ -92,7 +190,12 @@ def generate_launch_description():
             description='Path to the gz-sim world file to load.'),
         DeclareLaunchArgument(
             'hands', default_value='sandia', choices=list(HAND_XACROS),
-            description='Hands on Atlas: four-finger Sandia hands, or none.'),
+            description='Hands on Atlas: Sandia (4 fingers), Robotiq (3-finger '
+                        'gripper), or none.'),
+        DeclareLaunchArgument(
+            'skin', default_value='modern', choices=['modern', 'classic'],
+            description="Atlas's look in Gazebo: modern car-paint PBR materials "
+                        'or the original textures.'),
         DeclareLaunchArgument(
             'robot_xacro', default_value='',
             description='Path to the robot xacro file VRCPlugin will spawn '
@@ -137,6 +240,12 @@ def _launch_setup(context, *args, **kwargs):
     }
 
     robot_description = xacro.process_file(robot_xacro).toxml()
+    skin = LaunchConfiguration('skin').perform(context)
+    spawn_description = (
+        _modern_skin_sdf(robot_description) if skin == 'modern' else robot_description)
+    rsp_description = (
+        _fix_robotiq_passive_joints(robot_description)
+        if 'robotiq_hands' in os.path.basename(robot_xacro) else robot_description)
 
     gains_yaml_path = os.path.join(
         get_package_share_directory('drcsim_gazebo'), 'config', 'atlas_v5_gains.yaml')
@@ -144,7 +253,7 @@ def _launch_setup(context, *args, **kwargs):
         combined_params = yaml.safe_load(gains_file)
 
     combined_params.setdefault('vrc_plugin', {}).setdefault('ros__parameters', {}).update({
-        'robot_description': robot_description,
+        'robot_description': spawn_description,
         'robot_initial_pose.x': pose['x'],
         'robot_initial_pose.y': pose['y'],
         'robot_initial_pose.z': pose['z'],
@@ -159,10 +268,11 @@ def _launch_setup(context, *args, **kwargs):
     })
 
     extra_joint_state_topics = ['multisense/joint_states']
+    for hand, topics in HAND_JOINT_STATE_TOPICS.items():
+        if f'{hand}_hands' in os.path.basename(robot_xacro):
+            extra_joint_state_topics += topics
     if 'sandia_hands' in os.path.basename(robot_xacro):
         combined_params.update(_sandia_hand_gains())
-        extra_joint_state_topics += [
-            f'sandia_hands/{side}_hand/joint_states' for side in ('l', 'r')]
 
     params_fd, params_path = tempfile.mkstemp(
         prefix='drcsim_gazebo_ros_params_', suffix='.yaml')
@@ -198,7 +308,7 @@ def _launch_setup(context, *args, **kwargs):
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='atlas_robot_state_publisher',
-            parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
+            parameters=[{'robot_description': rsp_description, 'use_sim_time': True}],
             remappings=[('joint_states', 'atlas/joint_states')],
             output='screen'),
     ] + [
@@ -211,7 +321,7 @@ def _launch_setup(context, *args, **kwargs):
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name=topic.replace('/', '_').replace('_joint_states', '_state_publisher'),
-            parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
+            parameters=[{'robot_description': rsp_description, 'use_sim_time': True}],
             remappings=[('joint_states', topic),
                         ('robot_description', topic.replace('joint_states', 'robot_description'))],
             output='screen')

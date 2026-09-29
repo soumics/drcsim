@@ -202,7 +202,7 @@
     <joint name="${side}_sandia_hand_joint" type="fixed">
       <parent link="${parent}"/>
       <child link="${side}_palm"/>
-      <insert_block name="origin" />
+      <xacro:insert_block name="origin"/>
     </joint>
 
     <xacro:finger side="${side}" idx="0" x="0.140" y="0.00000" z="0" r="0" p="0" yaw="${0.3*reflect}" reflect="${reflect}" joint_type="${joint_type}"/>

@@ -5,8 +5,12 @@
 
   <!-- Set the initial hand position and orientation by changing 'rpy' and 'xyz'
   to mach the values in your actual robot. -->
+  <!-- Left mount derived as the mirror image of the right one (v5's left-arm
+       frames are the right arm's rotated pi about z), using the gripper's
+       own symmetry plane; checked by test/test_hand_mounts.py. The old
+       values put the left gripper inside the forearm (see CLAUDE.md). -->
   <xacro:robotiq_hand prefix="l_" parent="l_hand" reflect="-1">
-    <origin rpy="3.14159 3.14159 3.14159" xyz="-0.00125 0.17 0.01"/>
+    <origin xyz="0.00125 -0.17000 0.01000" rpy="0.00000 0.00000 3.14159"/>
   </xacro:robotiq_hand>
   <xacro:robotiq_hand prefix="r_" parent="r_hand" reflect="1">
     <origin rpy="3.14159 0 0" xyz="-0.00125 -0.17 0.01"/>
@@ -15,13 +19,13 @@
 
   <gazebo>
     <!-- plugin for left RobotiQ hand -->
-    <plugin name="left_robotiq_hand_plugin" filename="libRobotiqHandPlugin.so">
+    <plugin filename="RobotiqHandPlugin" name="drcsim_gazebo_ros_plugins::RobotiqHandPlugin">
       <side>left</side>
       <kp_position>5.0</kp_position>
       <kd_position>0.5</kd_position>
     </plugin>
     <!-- plugin for right RobotiQ hand -->
-    <plugin name="right_robotiq_hand_plugin" filename="libRobotiqHandPlugin.so">
+    <plugin filename="RobotiqHandPlugin" name="drcsim_gazebo_ros_plugins::RobotiqHandPlugin">
       <side>right</side>
       <kp_position>5.0</kp_position>
       <kd_position>0.5</kd_position>

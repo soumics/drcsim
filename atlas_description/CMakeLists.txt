@@ -26,6 +26,7 @@ if(BUILD_TESTING)
 
   find_package(ament_cmake_pytest REQUIRED)
   ament_add_pytest_test(test_xacro_parses test/test_xacro_parses.py)
+  ament_add_pytest_test(test_hand_mounts test/test_hand_mounts.py)
 endif()
 
 ament_package()

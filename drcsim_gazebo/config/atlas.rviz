@@ -1,0 +1,27 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+Visualization Manager:
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Enabled: true
+    - Class: rviz_default_plugins/RobotModel
+      Name: RobotModel
+      Enabled: true
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Transient Local
+    - Class: rviz_default_plugins/TF
+      Name: TF
+      Enabled: false
+  Global Options:
+    Fixed Frame: pelvis
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 3.5
+      Focal Point: {X: 0, Y: 0, Z: -0.2}
+      Pitch: 0.2
+      Yaw: 0.8

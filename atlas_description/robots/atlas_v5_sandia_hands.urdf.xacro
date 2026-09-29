@@ -7,7 +7,11 @@
     <origin xyz="-0.00179 -0.13516 0.01176" rpy="0 0 -1.57079"/>
   </xacro:sandia_hand>
   <xacro:sandia_hand side="left" parent="l_hand" reflect="-1" joint_type="revolute" thumb_angle="0">
-    <origin xyz="0.00179  0.13516 0.01176" rpy="0 0  1.57079"/>
+    <!-- v5's left-arm frames are the right arm's rotated pi about z (l_arm_shz
+         rpy), so the mirror image of the right mount is x negated, y and
+         the rotation unchanged. Verified: fingers now point out past the
+         wrist, mirroring the right hand (see CLAUDE.md). -->
+    <origin xyz="0.00179 -0.13516 0.01176" rpy="0 0 -1.57079"/>
   </xacro:sandia_hand>
 
   <xacro:include filename="$(find atlas_description)/urdf/atlas_v5.gazebo" />

@@ -6,17 +6,21 @@
   <xacro:irobot_hand side="right" parent="r_hand" reflect="1">
     <origin xyz="-0.00179 -0.09516 0.01176" rpy="1.57079 0 0"/>
   </xacro:irobot_hand>
+  <!-- Left mount derived as the mirror image of the right one (v5's left-arm
+       frames are the right arm's rotated pi about z), using the hand's own
+       symmetry plane; checked by test/test_hand_mounts.py. The old values
+       put the left hand inside the forearm (see CLAUDE.md). -->
   <xacro:irobot_hand side="left" parent="l_hand" reflect="-1">
-    <origin xyz="0.00179  0.09516 0.01176" rpy="-1.57079 0 0"/>
+    <origin xyz="0.00179 -0.09516 0.01176" rpy="1.57079 -0.00000 -0.00000"/>
   </xacro:irobot_hand>
 
   <gazebo>
     <!-- plugin for right irobot hand -->
-    <plugin name="right_irobot_hand_plugin" filename="libIRobotHandPlugin.so">
+    <plugin filename="IRobotHandPlugin" name="drcsim_gazebo_ros_plugins::IRobotHandPlugin">
       <side>right</side>
     </plugin>
     <!-- plugin for left irobot hand -->
-    <plugin name="left_irobot_hand_plugin" filename="libIRobotHandPlugin.so">
+    <plugin filename="IRobotHandPlugin" name="drcsim_gazebo_ros_plugins::IRobotHandPlugin">
       <side>left</side>
     </plugin>
   </gazebo>

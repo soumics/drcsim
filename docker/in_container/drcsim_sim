@@ -1,0 +1,4 @@
+#!/bin/bash
+# Start the Atlas simulation (server + ROS side). Extra args go to
+# atlas.launch.py, e.g. hands:=robotiq, skin:=classic, headless:=true.
+exec ros2 launch drcsim_gazebo atlas.launch.py "$@"
