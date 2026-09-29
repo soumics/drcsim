@@ -15,80 +15,88 @@
 # limitations under the License.
 
 """
-Keyboard-controlled statically-stable stepping for Atlas.
+Keyboard (and Twist) teleoperation of Atlas walking, grasping and kicks.
 
 Run *after* atlas.launch.py has Atlas standing. Atlas stands because
 AtlasPlugin's per-joint PID (k_effort=255, real gains from
 atlas_v5_gains.yaml) holds every joint toward its current setpoint --
 all zeros by default -- and gravity sags each joint slightly *below* that
 setpoint. That sag is the proportional error that produces the holding
-torque (these gains have no integral term). So this node must take over
-the controller's *setpoint*, not the measured pose: commanding the
-measured (sagged) positions zeroes the error, drops the holding torque to
-nothing, and Atlas collapses. The setpoint isn't published directly, so it
-is reconstructed from atlas/atlas_state as
+torque (these gains have no integral term). So this node takes over the
+controller's *setpoint*, not the measured pose: commanding the measured
+(sagged) positions zeroes the error, drops the holding torque to nothing,
+and Atlas collapses. The setpoint is reconstructed from atlas/atlas_state
+as
 
     setpoint = measured_position + applied_effort / kp_position
 
-(exact at rest; see CLAUDE.md for how this was established). k_effort is
-kept at 255 throughout -- the value AtlasPlugin already uses -- so taking
-over is bumpless: no gain change, no controller reset.
+(exact at rest; see CLAUDE.md for how this was established).
 
-Keys: w = start/continue walking forward, space or s = stop (finishes the
-current step, then returns to the neutral stance), q or Ctrl-C = quit.
+By default (harness:=true) the node then puts Atlas in VRCPlugin's
+"pinned_with_gravity" harness, crouches slightly and runs harness_gait.py's
+omnidirectional foot-trajectory gait, moving the harness through
+atlas/cmd_vel in step with the feet. It runs on sim time so its velocity
+integration matches VRCPlugin's. Besides the keys below it follows any
+geometry_msgs/Twist on atlas_walk/cmd_vel (joystick, teleop_twist_keyboard,
+a planner), which takes priority while messages keep arriving.
 
-By default (parameter harness:=true) the node first puts Atlas in
-VRCPlugin's "pinned_with_gravity" mode -- the pelvis held like a lab
-gantry harness -- lowers the harness a little and runs harness_gait.py's
-foot-trajectory gait (leg IK, planted stance feet, arm swing), moving the
-held pelvis through atlas/cmd_vel in step with the feet. The node runs on
-sim time so its pelvis velocity integrates exactly as VRCPlugin's does,
-and stance feet stay put on the floor. harness:=false runs the free-standing
-lean-lift-plant WALK_CYCLE instead, which still needs a balance controller
-to get further than a step or two (see README.md). The harness is left on
-when the node quits; publish "nominal" on atlas/mode to release it.
+harness:=false runs the free-standing lean/lift/plant WALK_CYCLE instead
+(w and space only); without a balance controller it manages a step or two.
+The harness stays on when the node quits; publish "nominal" on atlas/mode
+to release it.
 
 ROS spinning runs on its own executor thread, decoupled from the blocking
 keyboard read in main(). Raw keypress reading follows ROS 2's
 teleop_twist_keyboard.py termios/tty pattern.
 """
 
+import math
 import select
+import subprocess
 import sys
 import termios
 import threading
+import time
 import tty
 
 from atlas_msgs.msg import AtlasCommand, AtlasState
 from gait_controller import ATLAS_JOINT_NAMES, GaitController
 from geometry_msgs.msg import Twist
+import harness_gait
 from harness_gait import HarnessGait
+from osrf_msgs.msg import JointCommands
 import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from std_msgs.msg import String
+import teleop_extras as tx
 
 PUBLISH_RATE_HZ = 30.0
+DIAG_PERIOD_SEC = 2.0
+TWIST_TIMEOUT_SEC = 0.5
 
 # (kp, kd) sent in AtlasCommand for the leg yaw/roll joints while walking
 # in the harness. atlas_v5_gains.yaml's values (hpz p=5, hpx p=900, akx
 # p=300) leave them nearly limp: measured over a harness walk, foot
 # friction swung hip yaw across its whole +-45 deg range and hip roll
-# +-24 deg while both were commanded 0 -- the "drunk" gait. The gait never
-# moves these joints, so they only need to hold still.
+# +-24 deg while both were commanded 0 -- the "drunk" gait. They now also
+# steer the feet (turning, side-stepping), so they must track.
 HARNESS_GAIN_OVERRIDES = {
     'hpz': (1000.0, 10.0),
     'hpx': (2500.0, 10.0),
     'akx': (1000.0, 3.0),
 }
-DIAG_PERIOD_SEC = 1.0
 
 INSTRUCTIONS = """
-atlas_walking_demo: keyboard-controlled stepping
-  w         - start/continue walking forward
-  space, s  - stop (finishes the current step, then stands)
-  q, Ctrl-C - quit
+atlas_walking_demo -- keyboard teleop (Atlas in a harness)
+  w / s     walk forward / backward        a / d   side-step left / right
+  q / e     turn left / right              z / c   curve forward left / right
+  space, x  stop (finishes the step)       + / -   speed up / down
+  g         open/close both hands          [ / ]   left / right hand
+  k / l / j push Atlas: from the right / front / behind
+  Ctrl-C    quit
+Also follows geometry_msgs/Twist on atlas_walk/cmd_vel.
 """
 
 
@@ -106,6 +114,10 @@ def reconstruct_setpoint(state):
     return setpoint
 
 
+def _yaw(q):
+    return math.atan2(2.0 * (q.w * q.z + q.x * q.y), 1.0 - 2.0 * (q.y * q.y + q.z * q.z))
+
+
 class WalkKeyboardNode(Node):
 
     def __init__(self):
@@ -114,14 +126,27 @@ class WalkKeyboardNode(Node):
         self._last_state = None
         self._last_diag_time = None
         self._last_tick_time = None
+        self._twist = None
+        self._twist_time = None
+        self.speed_index = 2
+        self.grippers = {'l': tx.Gripper(), 'r': tx.Gripper()}
         self.harness = self.declare_parameter('harness', True).value
         if self.harness and not self.get_parameter('use_sim_time').value:
             self.set_parameters([Parameter('use_sim_time', value=True)])
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.mode_pub = self.create_publisher(String, 'atlas/mode', 10)
         self.cmd_vel_pub = self.create_publisher(Twist, 'atlas/cmd_vel', 10)
+        self.hand_pubs = {
+            side: self.create_publisher(
+                JointCommands, f'sandia_hands/{side}_hand/joint_commands', 10)
+            for side in ('l', 'r')}
         self.create_subscription(AtlasState, 'atlas/atlas_state', self._on_state, 10)
+        self.create_subscription(Twist, 'atlas_walk/cmd_vel', self._on_twist, 10)
         self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
+
+    @property
+    def speed(self):
+        return tx.SPEED_STEPS[self.speed_index]
 
     def _on_state(self, msg):
         self._last_state = msg
@@ -140,12 +165,14 @@ class WalkKeyboardNode(Node):
             # VRCPlugin holds the pelvis where it is right now, gravity on.
             self.mode_pub.publish(String(data='pinned_with_gravity'))
         self.gait = HarnessGait(setpoint) if self.harness else GaitController(setpoint)
-        legs = ', '.join(
-            f'{n}={setpoint[n]:+.3f}' for n in ('l_leg_hpy', 'l_leg_kny', 'l_leg_aky'))
         self.get_logger().info(
-            f'Took over the current PID setpoint ({legs}, ...)'
-            f'{" and put Atlas in the harness" if self.harness else ""}'
-            ' -- ready. Press w to walk.')
+            'Took over the current PID setpoint'
+            f'{" and put Atlas in the harness (crouching in 3 s)" if self.harness else ""}'
+            ' -- ready.')
+
+    def _on_twist(self, msg):
+        self._twist = (msg.linear.x, msg.linear.y, msg.angular.z)
+        self._twist_time = time.monotonic()
 
     def _tick(self):
         if self.gait is None:
@@ -157,8 +184,9 @@ class WalkKeyboardNode(Node):
         self._last_tick_time = now
         if dt <= 0.0:
             return
-        velocity = (0.0, 0.0)
+        velocity = (0.0, 0.0, 0.0, 0.0)
         if self.harness:
+            self._apply_twist()
             positions, velocity = self.gait.sample(dt)
         else:
             positions = self.gait.sample(dt)
@@ -171,40 +199,97 @@ class WalkKeyboardNode(Node):
         command.kp_position = self.kp
         command.kd_position = self.kd
         self.pub.publish(command)
-        if velocity != (0.0, 0.0):
+        if any(velocity):
             # VRCPlugin stops the warp 0.1 s after the last message, so
             # publishing only while moving is what stops the pelvis.
             twist = Twist()
-            twist.linear.x, twist.linear.z = velocity
+            twist.linear.x, twist.linear.y, twist.linear.z, twist.angular.z = velocity
             self.cmd_vel_pub.publish(twist)
-        self._log_diagnostics(command.position)
+        for side, gripper in self.grippers.items():
+            hand = JointCommands()
+            hand.name = [f'{"left" if side == "l" else "right"}_{j}'
+                         for j in tx.HAND_JOINT_NAMES]
+            hand.position = gripper.sample(dt)
+            self.hand_pubs[side].publish(hand)
+        self._log_diagnostics()
 
-    def _log_diagnostics(self, target):
-        """Log commanded vs measured leg pitch once a second (tuning aid)."""
+    def _apply_twist(self):
+        """Follow atlas_walk/cmd_vel while it is fresh; stop when it goes stale."""
+        if self._twist_time is None:
+            return
+        if time.monotonic() - self._twist_time > TWIST_TIMEOUT_SEC:
+            self._twist_time = None
+            self.gait.stop()
+            return
+        self.gait.set_velocity(*self._twist)
+
+    def _log_diagnostics(self):
         now = self.get_clock().now()
         if (self._last_state is None or (
                 self._last_diag_time is not None and
                 (now - self._last_diag_time).nanoseconds / 1e9 < DIAG_PERIOD_SEC)):
             return
         self._last_diag_time = now
-        s = self._last_state
-        parts = []
-        for name in ('l_leg_hpx', 'l_leg_hpy', 'l_leg_kny', 'r_leg_hpx', 'r_leg_hpy', 'r_leg_kny'):
-            i = ATLAS_JOINT_NAMES.index(name)
-            parts.append(f'{name} cmd={target[i]:+.3f} meas={s.position[i]:+.3f}')
-        self.get_logger().info(f'[diag] {self.gait.phase_name}: ' + ', '.join(parts))
+        if self.harness:
+            vx, vy, wz = self.gait.velocity
+            self.get_logger().info(
+                f'[{self.gait.phase_name}] vx={vx:+.2f} vy={vy:+.2f} m/s '
+                f'wz={wz:+.2f} rad/s  speed {int(self.speed * 100)}%  '
+                f'hands L/R {self.grippers["l"].level:.0%}/{self.grippers["r"].level:.0%}')
+        else:
+            self.get_logger().info(f'[{self.gait.phase_name}]')
 
     def handle_key(self, key):
         if self.gait is None:
             return
-        if key == 'w':
-            if not self.gait.walking:
-                self.get_logger().info('Walking forward.')
-            self.gait.start_walking()
-        elif key in (' ', 's'):
-            if self.gait.walking:
-                self.get_logger().info('Stopping (finishing current step).')
-            self.gait.stop_walking()
+        if not self.harness:
+            if key == 'w':
+                self.gait.start_walking()
+            elif key in tx.STOP_KEYS:
+                self.gait.stop_walking()
+            return
+        command = tx.walk_command(
+            key, self.speed, harness_gait.MAX_VX, harness_gait.MAX_VX_BACK,
+            harness_gait.MAX_VY, harness_gait.MAX_WZ)
+        if command is not None:
+            self.get_logger().info(
+                f'Walk: vx={command[0]:+.2f} vy={command[1]:+.2f} wz={command[2]:+.2f}')
+            self.gait.set_velocity(*command)
+        elif key in tx.STOP_KEYS:
+            self.get_logger().info('Stopping (finishing the current step).')
+            self.gait.stop()
+        elif key in ('+', '=', '-', '_'):
+            step = 1 if key in ('+', '=') else -1
+            self.speed_index = max(0, min(len(tx.SPEED_STEPS) - 1, self.speed_index + step))
+            self.get_logger().info(f'Speed {int(self.speed * 100)}% (applies to the next key).')
+        elif key == 'g':
+            closing = max(g.target for g in self.grippers.values()) < 0.5
+            for gripper in self.grippers.values():
+                gripper.target = 1.0 if closing else 0.0
+            self.get_logger().info(f'{"Closing" if closing else "Opening"} both hands.')
+        elif key in ('[', ']'):
+            side = 'l' if key == '[' else 'r'
+            self.grippers[side].toggle()
+            self.get_logger().info(
+                f'{"Closing" if self.grippers[side].target else "Opening"} '
+                f'{"left" if side == "l" else "right"} hand.')
+        elif key in tx.KICK_KEYS:
+            self._kick(tx.KICK_KEYS[key])
+
+    def _kick(self, body_direction):
+        """Push the torso (direction given in Atlas's own frame)."""
+        yaw = _yaw(self._last_state.orientation) if self._last_state else 0.0
+        bx, by = body_direction
+        world = (bx * math.cos(yaw) - by * math.sin(yaw), bx * math.sin(yaw) + by * math.cos(yaw))
+        apply, clear = tx.kick_commands(world)
+        self.get_logger().info('Kick!')
+
+        def run():
+            subprocess.run(apply, capture_output=True, timeout=5)
+            time.sleep(tx.KICK_DURATION)
+            subprocess.run(clear, capture_output=True, timeout=5)
+
+        threading.Thread(target=run, daemon=True).start()
 
 
 def _read_key(settings, timeout_sec):
@@ -230,7 +315,7 @@ def main(args=None):
     try:
         while rclpy.ok():
             key = _read_key(stdin_settings, timeout_sec=0.05)
-            if key in ('q', '\x03'):  # 'q' or Ctrl-C
+            if key == '\x03':  # Ctrl-C
                 break
             if key:
                 node.handle_key(key)

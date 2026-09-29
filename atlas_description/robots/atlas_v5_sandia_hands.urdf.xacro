@@ -15,11 +15,11 @@
 
   <gazebo>
     <!-- include plugin for the left sandia hand -->
-    <plugin name="leftsandia_hand_plugin" filename="libSandiaHandPlugin.so">
+    <plugin filename="SandiaHandPlugin" name="drcsim_gazebo_ros_plugins::SandiaHandPlugin">
       <side>left</side>
     </plugin>
     <!-- include plugin for the right sandia hand -->
-    <plugin name="right_sandia_hand_plugin" filename="libSandiaHandPlugin.so">
+    <plugin filename="SandiaHandPlugin" name="drcsim_gazebo_ros_plugins::SandiaHandPlugin">
       <side>right</side>
     </plugin>
   </gazebo>

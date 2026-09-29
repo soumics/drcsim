@@ -107,8 +107,15 @@ class TestAtlasPluginReceivesRealGains(unittest.TestCase):
 
         request = GetParameters.Request()
         request.names = list(EXPECTED_GAINS.keys())
-        future = client.call_async(request)
-        rclpy.spin_until_future_complete(self.node, future, timeout_sec=30.0)
+        # Retry: with the hands' extra nodes the startup graph is big enough
+        # that FastDDS can report the service before the reply path is
+        # matched, dropping the first response ("failed to send response
+        # ... (timeout)" in the plugin's log). Later calls answer at once.
+        for _ in range(6):
+            future = client.call_async(request)
+            rclpy.spin_until_future_complete(self.node, future, timeout_sec=10.0)
+            if future.result() is not None:
+                break
         self.assertIsNotNone(future.result(), 'get_parameters call timed out')
 
         actual = {

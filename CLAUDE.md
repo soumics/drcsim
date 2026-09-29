@@ -1978,6 +1978,72 @@ Why the harness changed, in order of discovery (each version measured):
 Also: the gz GUI `/gui/screenshot` service returns true but saves nothing.
 `ImageGrab` of `:1` captures the user's whole desktop, so don't use it.
 
+### Omnidirectional teleop, kicks, Sandia hands, RViz fix (2026-09-29)
+
+**Gait and teleop**
+- `harness_gait.py` is now velocity-driven: `set_velocity(vx, vy, wz)` and
+  `stop()`.
+- `leg_ik_3d()` solves hip yaw → hip roll (frontal plane, including the
+  2.25 cm hpy lateral offset) → sagittal 2-link. `akx = -hpx` and
+  `aky = -(hpy + kny)` keep the sole level.
+- The unit test checks the IK against an independent FK.
+- Live check (`docker_ws/ik_check.py`, pinned, legs in the air): about
+  2–3 cm error. That is PD steady-state error (no integral term), not IK.
+- Walking and turning at once is scaled so the outer foot's stroke stays
+  within straight-ahead reach. Without it the leg hit full extension and
+  the knee snapped about 11 rad/s at lift-off.
+- `teleop_extras.py` (pure, tested) holds the key map, `Gripper` blending
+  (the original tutorial's `cyl` grasp) and the gz `kick_commands`.
+- `walk_keyboard.py` also follows `atlas_walk/cmd_vel` (Twist). **Ctrl-C
+  quits**; `q` is now turn-left.
+- `VRCPlugin::ApplyHarness` damps toward the commanded yaw rate, so it
+  doesn't drag against turning.
+- Live, driven via Twist (`docker_ws/drive_test.py`): forward 1.89 m,
+  backward 1.61 m, side-steps ±0.95 m, turns ±127°, curve 110°; pelvis
+  tilt under 2°.
+- Kicks (`docker_ws/kick_test.py`): 900 N × 0.2 s from the side, front and
+  back move the pelvis by at most 3.7 cm or 3.4°, and walking continues.
+- **Pushes need** `gz-sim-apply-link-wrench-system`, now in `atlas.world`.
+  It also enables the GUI's Apply Force/Torque tool.
+
+**RViz RobotModel was red.** `hokuyo_joint`, the MultiSense lidar spin, is
+published on `multisense/joint_states`, which no state publisher read, so
+its links had no TF. `atlas.launch.py` now starts one extra
+`robot_state_publisher` per extra joint-state topic: the MultiSense and
+both Sandia hands. Their `robot_description` is remapped out of the way.
+`docker_ws/tf_check.py`: 113/113 links have TF.
+
+**Sandia hands are now the default** (`hands:=sandia|none`; `robot_xacro`
+still overrides). Four bugs kept them from working:
+1. The v5 xacro used Classic `libSandiaHandPlugin.so` tags; now in gz-sim
+   form.
+2. The fixed joints in `sandia_hand*.urdf.xacro` had the same names as
+   their child links (`*_base`, `*_accel`). SDFormat's frame graph rejects
+   that (fatal, "frame already exists"), so they were renamed `*_joint`.
+3. VRCPlugin then retried the failed spawn every tick and aborted on
+   re-declaring `robot_initial_pose.x`. It now logs the SDF errors once and
+   enters `SPAWN_FAILED`.
+4. `SandiaHandPlugin` built its node without `RosNodeOptionsFromEnv()`, so
+   all finger gains were 0. The launch now maps
+   `sandia_hand_gazebo_gains.yaml` (`gains.left_f0_j0`) onto the node
+   `/sandia_hands/<l|r>_hand/sandia_hand_plugin` (`gains.f0_j0.p`).
+
+Also in `sandia_hand.gazebo.xacro`: the dead Classic multicamera ROS plugin
+and controller-manager block were dropped, and `ContactModelPlugin` was
+converted to its gz-sim tag. Fingers close in about 1 s (right) to 3 s
+(left, the same gains; not investigated).
+
+**Tests.** `drcsim_gazebo`'s launch test needed a retry around the first
+`get_parameters` call. With the hands' extra nodes, FastDDS reports the
+service before the reply path is matched ("failed to send response ...
+(timeout)"). With `hands:=none` it passed unchanged; live calls answer
+instantly.
+
+**Container note.** Tests that start gz with rendering sensors need Mesa
+here (`__GLX_VENDOR_LIBRARY_NAME=mesa`, `__EGL_VENDOR_LIBRARY_FILENAMES=`
+the Mesa JSON). NV-GLX gives `X Error ... BadValue` and gz exits with
+code 1.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

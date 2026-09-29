@@ -159,20 +159,9 @@
             <stddev>${noise_stddev}</stddev>
           </noise>
         </camera>
-        <plugin filename="libgazebo_ros_multicamera.so" name="stereo_camera_controller">
-          <alwaysOn>true</alwaysOn>
-          <updateRate>0.0</updateRate>
-          <cameraName>sandia_hands/${parent}</cameraName>
-          <imageTopicName>image_raw</imageTopicName>
-          <cameraInfoTopicName>camera_info</cameraInfoTopicName>
-          <frameName>${side}_palm_left_camera_optical_frame</frameName>
-          <hackBaseline>${stereo_offset}</hackBaseline>
-          <distortionK1>0.0</distortionK1>
-          <distortionK2>0.0</distortionK2>
-          <distortionK3>0.0</distortionK3>
-          <distortionT1>0.0</distortionT1>
-          <distortionT2>0.0</distortionT2>
-        </plugin>
+        <!-- The Classic libgazebo_ros_multicamera.so ROS publisher has no
+             gz-sim equivalent here and was dropped (as for the MultiSense
+             head's cameras); the sensor itself still renders in gz. -->
       </sensor>
     </gazebo>
     <joint name="${side}_palm_right_camera_frame_joint" type="fixed">
@@ -202,18 +191,10 @@
     <link name="${side}_palm_right_camera_optical_frame"/>
   </xacro:macro>
   <!-- end cameras -->
-  <xacro:macro name="sandia_hand_gazebo_controller" params="side">
-    <gazebo>
-      <plugin filename="libgazebo_ros_controller_manager.so" name="gazebo_ros_controller_manager">
-        <alwaysOn>true</alwaysOn>
-        <updateRate>1000.0</updateRate>
-      </plugin>
-    </gazebo>
-  </xacro:macro>
 
   <xacro:macro name="sandia_hand_tactile_sensors_gazebo" params="side parent" >
     <gazebo>
-      <plugin filename="libContactModelPlugin.so" name="sandia_contact_plugin">
+      <plugin filename="ContactModelPlugin" name="drcsim_gazebo_ros_plugins::ContactModelPlugin">
          <contact>
           <collision>${parent}::${parent}_collision_${side}_palm</collision>
           <collision>${parent}::${parent}_collision_${side}_palm_1</collision>

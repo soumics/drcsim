@@ -1,94 +1,86 @@
 # atlas_walking_demo
 
-Statically-stable, keyboard-controlled stepping for Atlas. New tutorial
-content built on top of the ported `drcsim` packages — not a port of
-anything from the original repo, and not a real dynamic/balance-controlled
-walk: there is no CoM/ZMP controller anywhere in this codebase (see
-`src/drcsim/CLAUDE.md`). `gait_controller.py`'s tuning constants (lean
-angle, step height/length, phase durations) are starting estimates from
-Atlas v5's real leg geometry, not guaranteed-correct — expect to retune
-them against what you actually see, no rebuild needed since it's plain
-Python.
+Keyboard teleoperation for Atlas. It walks in every direction, turns, grasps
+with its Sandia hands and can be kicked. This is new tutorial content built
+on top of the ported `drcsim` packages, not a port of anything from the
+original repo.
+
+Walking runs in a **harness**, like a lab gantry: `VRCPlugin` holds the
+pelvis with a stiff spring-damper, and the legs carry the weight. There is
+no free-standing balance controller in this codebase yet (see
+`src/drcsim/CLAUDE.md`).
 
 ## Run it
 
-Atlas must already be standing normally first:
-
 ```bash
-ros2 launch drcsim_gazebo atlas.launch.py
+ros2 launch drcsim_gazebo atlas.launch.py          # Atlas with Sandia hands
+ros2 run atlas_walking_demo walk_keyboard.py        # second terminal
 ```
 
-Then, in a second terminal:
+The node takes over Atlas's current PID setpoint (bumpless), puts it in the
+harness and crouches 2.5 cm, lowering the arms from the zero T-pose. This
+takes 3 s. The setpoint is reconstructed as `position + effort / kp`,
+because commanding the measured, gravity-sagged pose drops the holding
+torque (see `CLAUDE.md`, bug #8).
 
-```bash
-ros2 run atlas_walking_demo walk_keyboard.py
-```
-
-On startup this node reads `atlas/atlas_state` once and takes over
-`AtlasPlugin`'s *current PID setpoint* -- reconstructed as
-`position + effort / kp`, all zeros by default -- as the neutral stance
-every gait phase leans/lifts/swings away from. It keeps `k_effort=255`
-(what `AtlasPlugin` already uses), so taking over is bumpless and nothing
-moves until you press `w`. Why the setpoint and not the measured pose:
-these gains have no integral term, so each joint's small gravity sag below
-its setpoint is exactly the error that produces the torque holding Atlas
-up; commanding the measured (sagged) pose zeroes that torque and Atlas
-collapses. (Several earlier versions did exactly that -- see
-`src/drcsim/CLAUDE.md`, bug #8.) You should see one line, `Took over the
-current PID setpoint ... -- ready.`, followed by a `[diag]` line each
-second.
-
-Keys: `w` = start/continue walking forward, `space`/`s` = stop (finishes
-the current step, then stands centered), `q`/Ctrl-C = quit. Turning isn't
-implemented yet.
-
-### Harness mode (default)
-
-Like a real lab gantry, the node first puts Atlas in a harness: it
-publishes `pinned_with_gravity` on `atlas/mode`. `VRCPlugin` then holds the
-pelvis with a stiff spring-damper while gravity still acts, so the legs
-carry Atlas's weight but it can't fall.
-
-With balance taken care of, `harness_gait.py` walks the way a person does,
-planning where each *ankle* goes and solving the leg's inverse kinematics
-every tick:
-
-- The harness first lowers 2.5 cm, over 3 s, so the knees stay slightly
-  bent (~30°). The arms come down from Atlas's zero T-pose at the same
-  time.
-- **Stance:** the ankle moves back at exactly the pelvis speed, so the
-  foot stays planted.
-- **Swing:** the foot lifts off, arcs forward 8 cm high and lands half a
-  step ahead of the hip.
-- Each foot is down 60% of the stride; each arm swings with the opposite
-  leg.
-- Pressing `w` ramps the step length up over one stride. Stopping ramps it
-  down, then takes one step in place to bring both feet back under the
-  hips.
-
-The node runs on sim time and moves the harness through `atlas/cmd_vel`
-(forward at 0.42 m/s, down while crouching), in step with the feet.
-
-```bash
-ros2 run atlas_walking_demo walk_keyboard.py                             # harness
-ros2 topic pub --once atlas/mode std_msgs/msg/String "{data: nominal}"   # release
-```
-
-Measured over 12 strides:
-
-| Measure | Result |
+| Keys | Action |
 |---|---|
-| Stride | 0.50 m |
-| Stance-foot slip | ~2.5 cm |
-| Pelvis attitude | within 1.5° |
-| Hip yaw/roll | within 1.5° |
-| Load per foot | ~880 N (Atlas's weight shared) |
+| `w` / `s` | walk forward / backward |
+| `a` / `d` | side-step left / right |
+| `q` / `e` | turn in place left / right |
+| `z` / `c` | walk forward curving left / right |
+| `space` / `x` | stop (finishes the step, then stands) |
+| `+` / `-` | speed 25–100% (applies to the next walking key) |
+| `g`, `[` / `]` | open/close both hands; left / right hand only |
+| `k` / `l` / `j` | kick Atlas from the right / front / behind (900 N, 0.2 s) |
+| Ctrl-C | quit (the harness stays on) |
 
-`-p harness:=false` runs the free-standing lean/lift/plant `WALK_CYCLE`
-below instead. Without a balance controller it only manages a step or two
-before falling (see `src/drcsim/CLAUDE.md`).
+Any `geometry_msgs/Twist` on `atlas_walk/cmd_vel` also drives it, for
+example a joystick or `teleop_twist_keyboard`. Twist takes priority while
+messages keep arriving and stops Atlas 0.5 s after they stop:
 
-## Tuning, one milestone at a time
+```bash
+ros2 run teleop_twist_keyboard teleop_twist_keyboard --ros-args -r cmd_vel:=atlas_walk/cmd_vel
+ros2 topic pub --once atlas/mode std_msgs/msg/String "{data: nominal}"   # release harness
+```
+
+You can also push Atlas with the mouse: Gazebo's **Apply Force/Torque** GUI
+plugin works, because `atlas.world` loads the `ApplyLinkWrench` system.
+
+## How the gait works (`harness_gait.py`)
+
+The gait is driven by a body velocity (vx, vy, turn rate). Every tick it
+plans where each ankle goes relative to the pelvis and solves the full leg
+IK (hip yaw, roll, pitch, knee, and ankle pitch and roll), keeping the soles
+level:
+
+- **Stance:** the ankle moves exactly opposite to the pelvis, including
+  rotation, so the planted foot stays still.
+- **Swing:** the foot lifts off at ground speed, arcs 8 cm high and lands
+  half a step ahead in the direction of travel.
+- **Knees:** bent about 30° in stance. Each foot is down 60% of the stride,
+  and each arm swings with the opposite leg.
+- **Velocity changes:** rate-limited. Walking and turning at once is scaled
+  so the outer foot never outreaches the leg.
+- **Stopping:** ends with one stride in place, bringing the feet home.
+
+Measured in the simulator (30 Hz commands, sim time):
+
+| Test | Result |
+|---|---|
+| Forward 0.30 m/s, 6 s | 1.89 m straight |
+| Backward 0.25 m/s | 1.61 m |
+| Side-step 0.15 m/s | 0.95 m, no forward drift |
+| Turn 0.35 rad/s | 127°, turning in place |
+| Stride / stance-foot slip (forward) | 0.50 m / ~2.5 cm |
+| Pelvis tilt while walking | under 2° |
+| Kick from the side (900 N, 0.2 s) | pelvis moves 3.7 cm, back within ~1 s, keeps walking |
+
+`-p harness:=false` runs the older free-standing lean/lift/plant
+`WALK_CYCLE` in `gait_controller.py` instead (only `w` and `space`).
+Without a balance controller it only manages a step or two before falling.
+
+## Free-standing mode: tuning, one milestone at a time
 
 `atlas/debug/{l,r}_foot_contact` (`geometry_msgs/WrenchStamped`, already
 published by `AtlasPlugin` whenever cheats are enabled — on by default in

@@ -45,6 +45,9 @@
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
     <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"/>
     <plugin filename="gz-sim-contact-system" name="gz::sim::systems::Contact"/>
+    <!-- Pushes/kicks: /world/default/wrench (atlas_walking_demo's 'k' key)
+         and the GUI's Apply Force/Torque tool. -->
+    <plugin filename="gz-sim-apply-link-wrench-system" name="gz::sim::systems::ApplyLinkWrench"/>
 
     <!-- A global light source. Inlined (was <include><uri>model://sun
          </uri></include>); that relied on Gazebo Fuel to resolve

@@ -452,7 +452,10 @@ public:
       SPAWN_QUEUED = 1,
       SPAWN_SUCCESS = 2,
       INIT_MODEL_SUCCESS = 3,
-      INITIALIZED = 4
+      INITIALIZED = 4,
+      /// robot_description could not be spawned; logged once, not retried
+      /// (retrying every tick re-declared ROS parameters and aborted).
+      SPAWN_FAILED = 5
     };
     int startupSequence;
 

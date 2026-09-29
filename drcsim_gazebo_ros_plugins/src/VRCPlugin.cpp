@@ -292,10 +292,12 @@ void VRCPlugin::ApplyHarness(
   const gz::math::Pose3d & target = this->atlas.pinHoldPose;
 
   this->atlas.pinHoldVelocity = gz::math::Vector3d::Zero;
+  gz::math::Vector3d targetAngVel = gz::math::Vector3d::Zero;
   if (this->warpRobotWithCmdVel && _info.simTime <= this->warpRobotStopTime) {
     this->atlas.pinHoldVelocity = target.Rot().RotateVector(
       gz::math::Vector3d(this->robotCmdVel.linear.x, this->robotCmdVel.linear.y, 0)) +
       gz::math::Vector3d(0, 0, this->robotCmdVel.linear.z);
+    targetAngVel.Z() = this->robotCmdVel.angular.z;
   }
 
   const gz::math::Vector3d posErr = target.Pos() - actual.Pos();
@@ -323,7 +325,7 @@ void VRCPlugin::ApplyHarness(
   const gz::math::Vector3d force = kLinStiffness * posErr +
     kLinDamping * (this->atlas.pinHoldVelocity - *linVel);
   const gz::math::Vector3d torque = kRotStiffness * rotAngle * rotAxis -
-    kRotDamping * (*angVel);
+    kRotDamping * (*angVel - targetAngVel);
   link.AddWorldWrench(_ecm, force, torque);
 }
 
@@ -1487,17 +1489,20 @@ void VRCPlugin::Robot::InsertModel(
     RCLCPP_ERROR(
       _rosNode->get_logger(), "failed to spawn model: robot_description "
       "parameter not set.");
-    this->startupSequence = Robot::NONE;
+    this->startupSequence = Robot::SPAWN_FAILED;
     return;
   }
 
   sdf::Root root;
   const sdf::Errors errors = root.LoadSdfString(robotStr);
   if (!errors.empty() || !root.Model()) {
+    for (const auto & error : errors) {
+      RCLCPP_ERROR(_rosNode->get_logger(), "robot_description: %s", error.Message().c_str());
+    }
     RCLCPP_ERROR(
       _rosNode->get_logger(), "failed to parse robot_description as an "
-      "SDF or URDF model.");
-    this->startupSequence = Robot::NONE;
+      "SDF or URDF model; atlas will not be spawned.");
+    this->startupSequence = Robot::SPAWN_FAILED;
     return;
   }
   gz::sim::SdfEntityCreator creator(_ecm, _eventMgr);

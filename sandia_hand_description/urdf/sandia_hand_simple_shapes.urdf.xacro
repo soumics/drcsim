@@ -218,7 +218,7 @@
       </inertial>
     </link>
 
-    <joint name="${side}_f${idx}_base" type="fixed">
+    <joint name="${side}_f${idx}_base_joint" type="fixed">
       <parent link="${side}_palm"/>
       <child link="${side}_f${idx}_base"/>
       <origin xyz="${x} ${y} ${z}" rpy="${r} ${p} ${yaw}"/>
@@ -251,17 +251,17 @@
       <limit lower="-${M_pi/2}" upper="${M_pi/2}" effort="28" velocity="${velocity_limit}"/>
     </joint>
 
-    <joint name="${side}_f${idx}_fixed_accel" type="fixed">
+    <joint name="${side}_f${idx}_fixed_accel_joint" type="fixed">
       <parent link="${side}_f${idx}_base"/>
       <child link="${side}_f${idx}_fixed_accel"/>
       <origin xyz="-0.05 0 0" rpy="0 0 0"/>
     </joint>
-    <joint name="${side}_f${idx}_1_accel" type="fixed">
+    <joint name="${side}_f${idx}_1_accel_joint" type="fixed">
       <parent link="${side}_f${idx}_1"/>
       <child link="${side}_f${idx}_1_accel"/>
       <origin xyz="0.03 0 0" rpy="-${M_pi/2} 0 0"/>
     </joint>
-    <joint name="${side}_f${idx}_2_accel" type="fixed">
+    <joint name="${side}_f${idx}_2_accel_joint" type="fixed">
       <parent link="${side}_f${idx}_2"/>
       <child link="${side}_f${idx}_2_accel"/>
       <origin xyz="0.04 0 0" rpy="-${M_pi/2} 0 0"/>
@@ -422,7 +422,6 @@
     <xacro:finger side="${side}" idx="3" x="0.03995" y="${-0.04383*reflect}" z="0.014" r="0" p="-${M_pi/2 + thumb_angle}" yaw="${-(2.3562+thumb_angle)*reflect}" reflect="${reflect}" joint_type="${joint_type}"/>
 
     <!-- not needed unless simulating the hand by itself
-    <xacro:sandia_hand_gazebo_controller side="${side}" />
     -->
     <xacro:sandia_hand_gazebo side="${side}" />
     <xacro:sandia_hand_cameras_gazebo side="${side}" reflect="${reflect}" parent="${parent}" />

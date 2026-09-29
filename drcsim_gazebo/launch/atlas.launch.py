@@ -15,7 +15,7 @@
 # limitations under the License.
 
 """
-Bring up Atlas (v5, no hands) in Gazebo Harmonic under VRCPlugin/AtlasPlugin.
+Bring up Atlas (v5, Sandia hands by default) in Gazebo Harmonic under VRCPlugin/AtlasPlugin.
 
 Replaces the original drcsim's atlas.launch -> atlas_no_controllers.launch
 -> atlas_bringup.launch -> atlas_v5_bringup.launch roslaunch XML chain.
@@ -53,6 +53,36 @@ import xacro
 import yaml
 
 
+HAND_XACROS = {
+    'sandia': 'atlas_v5_sandia_hands.urdf.xacro',
+    'none': 'atlas_v5.urdf.xacro',
+}
+
+
+def _sandia_hand_gains():
+    """
+    Return ROS params for both SandiaHandPlugin nodes from the hand's gains YAML.
+
+    sandia_hand_gazebo_gains.yaml keys gains per side (gains.left_f0_j0: {p,
+    d, ...}); each plugin instance is its own node,
+    /sandia_hands/<l|r>_hand/sandia_hand_plugin, declaring gains.f0_j0.p etc.
+    """
+    path = os.path.join(
+        get_package_share_directory('sandia_hand_description'), 'config',
+        'sandia_hand_gazebo_gains.yaml')
+    with open(path) as gains_file:
+        gains = yaml.safe_load(gains_file)['gains']
+    params = {}
+    for side in ('left', 'right'):
+        node = f'/sandia_hands/{side[0]}_hand/sandia_hand_plugin'
+        values = params.setdefault(node, {'ros__parameters': {}})['ros__parameters']
+        for joint, joint_gains in gains.items():
+            if joint.startswith(side + '_'):
+                for key, value in joint_gains.items():
+                    values[f'gains.{joint[len(side) + 1:]}.{key}'] = float(value)
+    return params
+
+
 def generate_launch_description():
     declared_arguments = [
         DeclareLaunchArgument(
@@ -61,11 +91,12 @@ def generate_launch_description():
                 get_package_share_directory('drcsim_model_resources'), 'worlds', 'atlas.world'),
             description='Path to the gz-sim world file to load.'),
         DeclareLaunchArgument(
-            'robot_xacro',
-            default_value=os.path.join(
-                get_package_share_directory('atlas_description'), 'robots',
-                'atlas_v5.urdf.xacro'),
-            description='Path to the robot xacro file VRCPlugin will spawn.'),
+            'hands', default_value='sandia', choices=list(HAND_XACROS),
+            description='Hands on Atlas: four-finger Sandia hands, or none.'),
+        DeclareLaunchArgument(
+            'robot_xacro', default_value='',
+            description='Path to the robot xacro file VRCPlugin will spawn '
+                        '(overrides `hands`).'),
         DeclareLaunchArgument('x', default_value='0.0'),
         DeclareLaunchArgument('y', default_value='0.0'),
         DeclareLaunchArgument('z', default_value='0.90'),
@@ -92,7 +123,9 @@ def generate_launch_description():
 
 def _launch_setup(context, *args, **kwargs):
     world = LaunchConfiguration('world').perform(context)
-    robot_xacro = LaunchConfiguration('robot_xacro').perform(context)
+    hands = LaunchConfiguration('hands').perform(context)
+    robot_xacro = LaunchConfiguration('robot_xacro').perform(context) or os.path.join(
+        get_package_share_directory('atlas_description'), 'robots', HAND_XACROS[hands])
     startup_mode = LaunchConfiguration('startup_mode').perform(context)
     gz_verbosity = LaunchConfiguration('gz_verbosity').perform(context)
     headless = LaunchConfiguration('headless').perform(context).lower() in ('true', '1')
@@ -124,6 +157,12 @@ def _launch_setup(context, *args, **kwargs):
         'atlas.delay_max_per_window': 0.25,
         'atlas.delay_max_per_step': 0.025,
     })
+
+    extra_joint_state_topics = ['multisense/joint_states']
+    if 'sandia_hands' in os.path.basename(robot_xacro):
+        combined_params.update(_sandia_hand_gains())
+        extra_joint_state_topics += [
+            f'sandia_hands/{side}_hand/joint_states' for side in ('l', 'r')]
 
     params_fd, params_path = tempfile.mkstemp(
         prefix='drcsim_gazebo_ros_params_', suffix='.yaml')
@@ -162,4 +201,19 @@ def _launch_setup(context, *args, **kwargs):
             parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
             remappings=[('joint_states', 'atlas/joint_states')],
             output='screen'),
+    ] + [
+        # Joints published outside atlas/joint_states -- the MultiSense
+        # head's spinning lidar (hokuyo_joint) and the hands' fingers -- need
+        # their own state publisher each; without their TFs RViz shows the
+        # whole RobotModel in error (red). The original relayed these into
+        # joint_states with topic_tools (not in Jazzy's base install).
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name=topic.replace('/', '_').replace('_joint_states', '_state_publisher'),
+            parameters=[{'robot_description': robot_description, 'use_sim_time': True}],
+            remappings=[('joint_states', topic),
+                        ('robot_description', topic.replace('joint_states', 'robot_description'))],
+            output='screen')
+        for topic in extra_joint_state_topics
     ]

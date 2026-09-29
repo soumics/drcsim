@@ -40,6 +40,8 @@
 #include <gz/sim/components/Link.hh>
 #include <gz/sim/components/Name.hh>
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 using drcsim_gazebo_ros_plugins::SandiaHandPlugin;
 
 //////////////////////////////////////////////////
@@ -284,8 +286,11 @@ void SandiaHandPlugin::Load(gz::sim::EntityComponentManager & _ecm)
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
+  // RosNodeOptionsFromEnv() carries the launch file's params (the finger
+  // gains below); without it every gain stayed 0 and the fingers were limp.
   this->rosNode = std::make_shared<rclcpp::Node>(
-    "sandia_hand_plugin", "/sandia_hands/" + this->imuLinkName);
+    "sandia_hand_plugin", "/sandia_hands/" + this->imuLinkName,
+    drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   const int numFingers = 4;
   const int numFingerJoints = 3;

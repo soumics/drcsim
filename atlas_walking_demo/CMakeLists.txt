@@ -6,6 +6,7 @@ find_package(ament_cmake REQUIRED)
 install(PROGRAMS
   scripts/gait_controller.py
   scripts/harness_gait.py
+  scripts/teleop_extras.py
   scripts/walk_keyboard.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -20,9 +21,11 @@ if(BUILD_TESTING)
   set(AMENT_LINT_PORTED
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gait_controller.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/harness_gait.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/teleop_extras.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/walk_keyboard.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_gait_controller.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_harness_gait.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_teleop_extras.py"
   )
   ament_copyright(${AMENT_LINT_PORTED})
   ament_flake8(${AMENT_LINT_PORTED})
@@ -33,6 +36,7 @@ if(BUILD_TESTING)
 
   ament_add_pytest_test(test_gait_controller test/test_gait_controller.py)
   ament_add_pytest_test(test_harness_gait test/test_harness_gait.py)
+  ament_add_pytest_test(test_teleop_extras test/test_teleop_extras.py)
 endif()
 
 ament_package()
