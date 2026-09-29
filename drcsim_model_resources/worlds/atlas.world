@@ -48,8 +48,6 @@
     <!-- Pushes/kicks: /world/default/wrench (atlas_walking_demo's 'k' key)
          and the GUI's Apply Force/Torque tool. -->
     <plugin filename="gz-sim-apply-link-wrench-system" name="gz::sim::systems::ApplyLinkWrench"/>
-    <!-- IMU sensors (pelvis, MultiSense head) only produce data with this. -->
-    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
 
     <!-- A global light source. Inlined (was <include><uri>model://sun
          </uri></include>); that relied on Gazebo Fuel to resolve

@@ -167,7 +167,10 @@
       <topic>multisense/lidar_scan</topic>
       <gz_frame_id>head_hokuyo_frame</gz_frame_id>
       <visualize>false</visualize>
-      <update_rate>40</update_rate>
+      <!-- 20 Hz (the real Hokuyo UTM-30LX does 40): with the spindle at
+           1.5 rad/s still a scan every 4 degrees, at half the rendering and
+           point-cloud load. -->
+      <update_rate>20</update_rate>
       <ray>
         <scan>
           <horizontal>

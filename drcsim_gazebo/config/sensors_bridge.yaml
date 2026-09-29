@@ -1,6 +1,8 @@
 # gz -> ROS bridges for Atlas's sensors (ros_gz_bridge parameter_bridge).
 # The sensors' gz topics and TF frame ids are set in the URDF/gazebo files
-# (<topic>, <gz_frame_id>), so ROS gets the same names.
+# (<topic>, <gz_frame_id>), so ROS gets the same names. IMUs are not bridged:
+# AtlasPlugin (atlas/imu) and MultiSenseSLPlugin (multisense/imu) publish
+# them already, and a second publisher on those topics mixed two streams.
 - ros_topic_name: multisense/left/image_raw
   gz_topic_name: multisense/left/image_raw
   ros_type_name: sensor_msgs/msg/Image
@@ -30,16 +32,6 @@
   gz_topic_name: multisense/lidar_scan/points
   ros_type_name: sensor_msgs/msg/PointCloud2
   gz_type_name: gz.msgs.PointCloudPacked
-  direction: GZ_TO_ROS
-- ros_topic_name: multisense/imu
-  gz_topic_name: multisense/imu
-  ros_type_name: sensor_msgs/msg/Imu
-  gz_type_name: gz.msgs.IMU
-  direction: GZ_TO_ROS
-- ros_topic_name: atlas/imu
-  gz_topic_name: atlas/imu
-  ros_type_name: sensor_msgs/msg/Imu
-  gz_type_name: gz.msgs.IMU
   direction: GZ_TO_ROS
 - ros_topic_name: atlas/l_situational_awareness_camera/image_raw
   gz_topic_name: atlas/l_situational_awareness_camera/image_raw

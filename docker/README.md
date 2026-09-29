@@ -74,7 +74,10 @@ Inside the container these commands are on `PATH`:
   `docker/cyclonedds.xml`.
   - It uses loopback only, with unicast to localhost, so the simulation
     stays off the LAN and away from other ROS 2 systems on the machine.
-- `ROS_DOMAIN_ID=77` and `GZ_PARTITION=drcsim` separate it further. Change
+- `docker/run.sh` gives the container ROS domain **78** and gz partition **drcsim_docker**
+  (`DRCSIM_ROS_DOMAIN_ID` / `DRCSIM_GZ_PARTITION` to change them). With host networking, any
+  other simulation on the same domain/partition would mix its robot, sensors and TF into this
+  one; `docker/sim.sh` warns if it sees a second simulation.
   them with `ROS_DOMAIN_ID=… docker/run.sh`.
 - To talk to the simulation from outside the container, use the same RMW,
   domain and CycloneDDS config.

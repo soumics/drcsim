@@ -21,8 +21,17 @@ if ! pgrep -f "Xvfb :98" > /dev/null; then
   Xvfb :98 -screen 0 1280x720x24 > /tmp/xvfb98.log 2>&1 &
   sleep 2
 fi
-sed -e 's/Width: 1280/Width: 1280/' -e 's/Height: 900/Height: 720/' \
-  "$CONFIG/atlas.rviz" > /tmp/demo.rviz
+# The video shows RViz's 3D view and camera panels without the Displays tree:
+# that is UI chrome, and in this software-rendered RViz its status icons
+# flicker (the data and TF are fine -- a normally running RViz drops no clouds).
+python3 - "$CONFIG/atlas.rviz" /tmp/demo.rviz <<'PY'
+import sys
+import yaml
+cfg = yaml.safe_load(open(sys.argv[1]))
+cfg['Panels'] = [p for p in cfg.get('Panels', []) if p.get('Class') != 'rviz_common/Displays']
+cfg['Window Geometry'].update({'Width': 1280, 'Height': 720, 'Displays': {'collapsed': True}})
+yaml.safe_dump(cfg, open(sys.argv[2], 'w'))
+PY
 DISPLAY=:98 LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LIBRARY_NAME=mesa __NV_PRIME_RENDER_OFFLOAD=0 \
   rviz2 -d /tmp/demo.rviz --ros-args -p use_sim_time:=true > /tmp/demo_rviz.log 2>&1 &
 RVIZ=$!

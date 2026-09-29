@@ -28,7 +28,7 @@ Visualization Manager:
         Value: /multisense/lidar_points
         Reliability Policy: Best Effort
         Depth: 100
-      Decay Time: 4
+      Decay Time: 3
       Style: Points
       Size (Pixels): 2
       Color Transformer: AxisColor

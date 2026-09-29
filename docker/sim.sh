@@ -15,3 +15,15 @@ if docker exec "$NAME" pgrep -f "ros2 launch drcsim_gazebo" > /dev/null; then
 fi
 docker exec -d "$NAME" /entrypoint.sh bash -c "drcsim_sim headless:=true $* > /tmp/sim.log 2>&1"
 echo "Simulation starting in $NAME (log: docker exec $NAME tail -f /tmp/sim.log)."
+# Another simulation on the same gz partition (another container or the
+# host) would mix its topics into this one -- warn once this one is up.
+(
+  sleep 40
+  n=$(docker exec "$NAME" /entrypoint.sh bash -c \
+    'gz topic -i -t /world/default/stats 2> /dev/null | sed -n "/Publishers/,/Subscribers/p" | grep -c "tcp://"' \
+    || echo 0)
+  if [ "${n:-0}" -gt 1 ]; then
+    echo "WARNING: more than one gz simulation publishes on this gz partition;" \
+         "stop the other one (it mixes robots, sensors and TF)." >&2
+  fi
+) &

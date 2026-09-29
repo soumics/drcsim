@@ -2238,6 +2238,44 @@ edits.
   (e.g. `/demo_camera/image`). Use it to judge PBR colours; the Xvfb
   snapshots can't show them.
 
+### "Unstable" camera views and the RViz red status (2026-09-30)
+
+**Root cause: a second simulation.**
+- A forgotten `atlas.launch.py` in the old `drcsim_jazzy` container (left
+  over from my own test run; its Atlas had fallen) was publishing on the
+  same gz partition (`drcsim`) and ROS domain (77) as the Docker container.
+- With host networking and DDS cross-RMW interop, RViz and the cameras mixed
+  two robots: images from a fallen robot, alternating IMU readings, TF from
+  both.
+- How it was found: IMU pitch jumped between −2° and −81° (a fallen robot),
+  and `gz topic -i` showed two publishers per sensor topic.
+- **Fixes:**
+  - `docker/run.sh` defaults to domain 78 / partition `drcsim_docker`.
+  - `docker/sim.sh` warns if `/world/default/stats` has more than one
+    publisher.
+  - Always stop old sims before testing.
+
+**Other fixes found along the way:**
+- **IMUs:** AtlasPlugin and MultiSenseSLPlugin already publish `atlas/imu` /
+  `multisense/imu`. The bridge was a second publisher on each, so the IMU
+  bridge entries and the gz IMU system were removed. The earlier note that
+  "the IMUs had no data" was wrong.
+- **Visor light:** it sat in the MultiSense cameras' view (cyan bar);
+  raised above the ±24° vertical FOV.
+- **Lidar:** 40 → 20 Hz.
+
+**The red RViz status.**
+- The data is fine: `tf_probe` found a transform for 799/799 clouds, and a
+  debug-logging RViz dropped 0/1702 during a recording (the only other
+  drop was one start-up cloud before any TF existed).
+- The recording-only RViz, software-rendered on Xvfb, flickers its
+  point-cloud *status* (parent Error while Points/Transform are OK; about
+  40% of frames). `drcsim_record_demo` therefore records RViz without the
+  Displays panel.
+
+**Tooling:** `xdotool` was used ad hoc to expand RViz status rows on Xvfb
+while debugging; it is not in the image.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

@@ -109,7 +109,8 @@ DEFAULT_PAINT = 'rose_gold'
 HAND_VISUAL_KEYS = ('svh', 'palm', '_f0', '_f1', '_f2', '_f3', 'finger')
 # (link, name, pose "x y z r p y", geometry element, emissive RGB).
 ACCENT_LIGHTS = [
-    ('head', 'visor_light', '0.055 0 0.028 0 0 0', ('box', {'size': '0.006 0.16 0.012'}),
+    # Above the stereo cameras' field of view (+-24 deg vertically).
+    ('head', 'visor_light', '0.045 0 0.05 0 0 0', ('box', {'size': '0.006 0.16 0.012'}),
      (0.0, 0.85, 1.0)),
     ('utorso', 'chest_light', '0.27 0 0.33 0 1.5708 0',
      ('cylinder', {'radius': '0.05', 'length': '0.008'}), (0.0, 0.85, 1.0)),

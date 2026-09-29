@@ -3,6 +3,9 @@
 # GPU, the host's X display and host networking.
 #   docker/run.sh              start container "drcsim"
 #   DRCSIM_PRIME_OFFLOAD=0 docker/run.sh   desktop GPU driving the display
+# ROS domain 78 and gz partition drcsim_docker by default (override with
+# DRCSIM_ROS_DOMAIN_ID / DRCSIM_GZ_PARTITION): host networking means any
+# other simulation on the same domain/partition would mix into this one.
 # Then: docker/sim.sh, docker/gui.sh, docker/teleop.sh, docker/shell.sh.
 set -e
 NAME="${DRCSIM_CONTAINER:-drcsim}"
@@ -18,7 +21,8 @@ docker run -d --name "$NAME" \
   -e NVIDIA_DRIVER_CAPABILITIES=all \
   -e DRCSIM_PRIME_OFFLOAD="${DRCSIM_PRIME_OFFLOAD:-1}" \
   -e DISPLAY="${DISPLAY:-:0}" \
-  -e ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-77}" \
+  -e ROS_DOMAIN_ID="${DRCSIM_ROS_DOMAIN_ID:-78}" \
+  -e GZ_PARTITION="${DRCSIM_GZ_PARTITION:-drcsim_docker}" \
   -v /tmp/.X11-unix:/tmp/.X11-unix:rw \
   ${XAUTHORITY:+-e XAUTHORITY=/tmp/.Xauthority -v "$XAUTHORITY":/tmp/.Xauthority:ro} \
   --net host --ipc host \
