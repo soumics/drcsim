@@ -2123,6 +2123,101 @@ and gives every visual a PBR car-paint material: pearl body panels, piano
 black trim, graphite hands, an ultra-red head. It is used only for VRCPlugin's
 spawn; RViz keeps the URDF.
 
+### Five-finger SVH hands, live sensors in RViz, glam skin, demo video (2026-09-29)
+
+**SCHUNK SVH hands (default `hands:=svh`).**
+- **Licensing.** The dex-urdf table claims Apache-2.0, but the actual
+  `package.xml`/LICENSE say **GPL-3.0-or-later**. The user chose to keep it
+  *out of this repo*:
+  - `docker/fetch_external.sh` clones SCHUNK-SE-Co-KG/schunk_svh_ros_driver
+    (ros2) into `<ws>/src/external/`, adding COLCON_IGNORE on the driver
+    packages.
+  - The Dockerfile runs it and rosdeps only `src/drcsim` plus the
+    description.
+  - `atlas_svh_hands` (Apache-2.0) holds only the attachment xacro, the
+    mount test, collision boxes and a gz resource-path hook.
+- **Mount.** Fingers +z, palm +y, thumb +x in the SVH frame. The mount
+  gives palms down / fingers outward in the T-pose; the same origin works
+  for the left because SVH's left model is mirrored (`side=-1`). Verified
+  by `test_svh_mounts.py` and screenshots.
+  - The svh macro also applies its origin block to base_link's own visual,
+    so a non-zero mount drew the wrist flange a second time (a floating
+    "puck"). Our own `*_svh_mount` fixed joint carries the transform; the
+    macro gets zero.
+- **Controller.** New `HandJointController` (generic gz plugin): PD on every
+  revolute joint under `<joint_prefix>`.
+  - Mimic followers track multiplier·leader+offset. Couplings come from
+    `<mimic>` entries in the plugin config (the launch moves the URDF
+    `<mimic>` tags there: DART has no mimic constraints and gz logs an
+    error per joint) or from `sdf::JointAxis::Mimic()`.
+  - ROS: `svh_hands/<left|right>/command` and `/joint_states`.
+  - Measured: 9 actuated + 11 mimic joints per hand; followers track (for
+    example j14 = 1.045 × distal).
+- **Collisions.** DART's ODE backend **segfaulted** on the SVH collision
+  DAEs (degenerate 2-vertex submeshes). The launch (`_svh_for_gz`) swaps
+  them for bounding boxes (`atlas_svh_hands/config/svh_collision_boxes.yaml`,
+  from `tools/dae_bbox.py`, a scene-graph-aware COLLADA bbox reader).
+- **Resource path.** The external package has no gz resource-path hook, so
+  its meshes weren't found. `atlas_svh_hands` ships a dsv hook adding
+  `../schunk_svh_description/share` (isolated install layout), which also
+  covers the GUI.
+- **Launch.** Strips Classic `lib*.so` plugins from third-party URDFs
+  (`_strip_classic_plugins`).
+- **Teleop.** Hands now have open / relaxed / closed poses per model
+  (`teleop_extras.HAND_POSES`). They rest *relaxed* while walking; `g`
+  grips/relaxes and `h` opens flat.
+
+**Sensors (the user asked if all were active: they weren't).**
+- The MultiSense stereo pair was a Classic `multicamera` sensor, which
+  gz-sim doesn't have, so it silently produced nothing. It is now two
+  camera sensors (0.07 m baseline).
+- The IMUs had no data because the world lacked `gz-sim-imu-system`.
+- The lidar spindle defaults to 0; `lidar_spindle_speed:=1.5` comes via the
+  plugin's new `spindle_speed` param (its node now uses
+  `RosNodeOptionsFromEnv`).
+- Every sensor has `<topic>` and `<gz_frame_id>` and is bridged by
+  `config/sensors_bridge.yaml`. `config/atlas.rviz` shows the point cloud
+  (4 s decay), scan and camera images.
+- MultiSenseSLPlugin's own head-IMU path never worked: `head_imu_link` is
+  merged by fixed-joint reduction. The bridged gz IMU sensor provides
+  `multisense/imu` instead.
+
+**Performance.** The torso cameras were 1280×1024 @ 60 Hz each, now
+640×512 @ 15 Hz. Even so, RTF is about 0.6 with everything on:
+
+| Configuration | RTF |
+|---|---|
+| Physics with SVH hands | 0.85 |
+| + rendered sensors | ~0.65 |
+| + IMU system | ~0.6 |
+
+The server really renders on the NVIDIA GPU (`libnvidia-eglcore` mapped);
+the CPU-side readback and sync cost is what adds up.
+
+**Skin "pearl & rose gold" (user's choice)** plus emissive cyan visor and
+chest disc (`ACCENT_LIGHTS`).
+- **Lesson:** in Ogre2 PBR without an environment map, metalness 1.0
+  renders black, so metalness is kept at ≤0.15 for colours. The Xvfb
+  snapshots (Ogre 1, no PBR) did not show this; always check a GPU-rendered
+  frame (`demo_camera`).
+- The world got a `<scene>` with sky and ambient light, and an angled sun.
+
+**Video.**
+- `drcsim_record_demo` records `demo_camera:=true` (a chase camera on the
+  pelvis, server-rendered, recorded in sim time with
+  `drcsim_record_topic ... sim`) and RViz on Xvfb :98 (x11grab, then
+  retimed by the measured RTF). It hstacks both with labels.
+- The gz GUI VideoRecorder plugin loads (`config/gui.config`) but exposes no
+  record service in gz-sim 8, so it isn't used.
+- Output: `video/atlas_demo.mp4` (the .mp4 is git-ignored).
+
+**Tests.** plugins 168, atlas_svh_hands 3, drcsim_gazebo 14, walking demo
+57, atlas_description 57, multisense 15, model resources 120: 0 failures.
+
+**Lesson.** A replace-between-markers edit of `atlas.launch.py` silently
+deleted five helper functions added in between. Grep the `def`s after such
+edits.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

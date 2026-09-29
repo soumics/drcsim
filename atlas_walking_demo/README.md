@@ -1,7 +1,8 @@
 # atlas_walking_demo
 
 Keyboard teleoperation for Atlas. It walks in every direction, turns, grasps
-with its Sandia hands and can be kicked. This is new tutorial content built
+with its five-finger SCHUNK SVH hands (or Sandia hands) and can be kicked. The
+hands rest in a natural relaxed curl while standing and walking. This is new tutorial content built
 on top of the ported `drcsim` packages, not a port of anything from the
 original repo.
 
@@ -31,7 +32,8 @@ torque (see `CLAUDE.md`, bug #8).
 | `z` / `c` | walk forward curving left / right |
 | `space` / `x` | stop (finishes the step, then stands) |
 | `+` / `-` | speed 25–100% (applies to the next walking key) |
-| `g`, `[` / `]` | open/close both hands; left / right hand only |
+| `g`, `[` / `]` | grip / relax both hands; left / right hand only |
+| `h` | open both hands flat (`g` relaxes them again) |
 | `k` / `l` / `j` | kick Atlas from the right / front / behind (900 N, 0.2 s) |
 | Ctrl-C | quit (the harness stays on) |
 

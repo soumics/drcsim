@@ -1,7 +1,8 @@
 #!/bin/bash
 # Open the Gazebo GUI and RViz (Atlas view, sim time) on $DISPLAY.
-gz sim -g -v 2 > /tmp/gz_gui.log 2>&1 &
-rviz2 -d "$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config/atlas.rviz" \
+CONFIG="$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config"
+gz sim -g -v 2 --gui-config "$CONFIG/gui.config" > /tmp/gz_gui.log 2>&1 &
+rviz2 -d "$CONFIG/atlas.rviz" \
   --ros-args -p use_sim_time:=true > /tmp/rviz.log 2>&1 &
 sleep 8
 # Keep the camera on Atlas while it walks.

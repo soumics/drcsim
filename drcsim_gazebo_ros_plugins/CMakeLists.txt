@@ -40,6 +40,22 @@ install(TARGETS ContactModelPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(HandJointController SHARED src/HandJointController.cpp)
+target_link_libraries(HandJointController
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-common5::gz-common5
+)
+ament_target_dependencies(HandJointController
+  rclcpp
+  sensor_msgs
+)
+install(TARGETS HandJointController
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 add_library(SandiaHandPlugin SHARED src/SandiaHandPlugin.cpp)
 target_link_libraries(SandiaHandPlugin
   gz-sim8::gz-sim8
@@ -243,6 +259,8 @@ if(BUILD_TESTING)
   set(AMENT_LINT_PORTED
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/ContactModelPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/ContactModelPlugin.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/HandJointController.hpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/HandJointController.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/SandiaHandPlugin.hpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/SandiaHandPlugin.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/include/${PROJECT_NAME}/IRobotHandPlugin.hpp"

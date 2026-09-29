@@ -36,16 +36,36 @@ WALK_KEYS = {
 STOP_KEYS = (' ', 'x')
 SPEED_STEPS = (0.25, 0.5, 0.75, 1.0)
 
-# Sandia hand finger joints, in the order SandiaHandPlugin expects:
-# f0..f2 = index/middle/ring, f3 = thumb; j0 = spread, j1/j2 = curl.
-# Grasp poses from the original drcsim atlas_teleop tutorial.
-HAND_JOINT_NAMES = [
+# Hand poses, per hand model, as leader joint targets (radians).
+# 'relaxed' is the natural resting hand -- fingers gently curled, more so
+# toward the little finger, thumb slightly in -- used while standing and
+# walking; 'closed' is a power grasp; 'open' a flat hand.
+#
+# Sandia (SandiaHandPlugin order): f0..f2 = index/middle/ring, f3 = thumb;
+# j0 spread, j1/j2 curl. Its closed pose is the original drcsim atlas_teleop
+# tutorial's 'cyl' grasp.
+SANDIA_JOINT_NAMES = [
     'f0_j0', 'f0_j1', 'f0_j2', 'f1_j0', 'f1_j1', 'f1_j2',
     'f2_j0', 'f2_j1', 'f2_j2', 'f3_j0', 'f3_j1', 'f3_j2',
 ]
-GRASP_OPEN = [0.0] * 12
-GRASP_CLOSED = [0, 1.5, 1.7, 0, 1.5, 1.7, 0, 1.5, 1.7, -0.2, 0.8, 1.7]  # 'cyl'
-GRIP_TIME = 1.0  # s to fully open or close
+# SCHUNK SVH motors (HandJointController drives the coupled joints).
+SVH_JOINT_NAMES = [
+    'Thumb_Flexion', 'Thumb_Opposition', 'Index_Finger_Distal', 'Index_Finger_Proximal',
+    'Middle_Finger_Proximal', 'Middle_Finger_Distal', 'Ring_Finger', 'Pinky', 'Finger_Spread',
+]
+HAND_POSES = {
+    'sandia': {
+        'open': [0.0] * 12,
+        'relaxed': [0.0, 0.35, 0.45, 0.0, 0.4, 0.5, 0.0, 0.45, 0.55, -0.1, 0.3, 0.3],
+        'closed': [0, 1.5, 1.7, 0, 1.5, 1.7, 0, 1.5, 1.7, -0.2, 0.8, 1.7],
+    },
+    'svh': {
+        'open': [0.05, 0.3, 0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.35],
+        'relaxed': [0.25, 0.45, 0.45, 0.3, 0.32, 0.5, 0.45, 0.5, 0.12],
+        'closed': [0.9, 0.9, 1.3, 0.79, 0.79, 1.3, 0.98, 0.98, 0.2],
+    },
+}
+HAND_SPEED = 1.5  # rad/s, fastest any finger joint moves between poses
 
 
 def walk_command(key, speed, max_vx, max_vx_back, max_vy, max_wz):
@@ -59,20 +79,33 @@ def walk_command(key, speed, max_vx, max_vx_back, max_vy, max_wz):
 
 
 class Gripper:
-    """One hand's grasp level (0 open .. 1 closed), moved at a limited rate."""
+    """
+    One hand's pose ('open', 'relaxed' or 'closed'), reached at a limited rate.
+
+    Starts relaxed. sample(dt, hand) returns the joint targets for the given
+    hand model ('sandia' or 'svh'), in that model's joint order.
+    """
 
     def __init__(self):
-        self.level = 0.0
-        self.target = 0.0
+        self.pose = 'relaxed'
+        self._current = {hand: list(poses['relaxed']) for hand, poses in HAND_POSES.items()}
 
     def toggle(self):
-        self.target = 0.0 if self.target > 0.5 else 1.0
+        """Close the hand, or relax it if it is already closing/closed."""
+        self.pose = 'relaxed' if self.pose == 'closed' else 'closed'
 
-    def sample(self, dt):
-        """Advance by dt; return the 12 finger joint targets."""
-        step = dt / GRIP_TIME
-        self.level += max(-step, min(step, self.target - self.level))
-        return [o + self.level * (c - o) for o, c in zip(GRASP_OPEN, GRASP_CLOSED)]
+    def sample(self, dt, hand):
+        current, target = self._current[hand], HAND_POSES[hand][self.pose]
+        step = HAND_SPEED * dt
+        for i, goal in enumerate(target):
+            current[i] += max(-step, min(step, goal - current[i]))
+        return list(current)
+
+    def closure(self, hand='svh'):
+        """Return how closed the hand is, 0 (open) .. 1 (closed), for display."""
+        poses = HAND_POSES[hand]
+        span = sum(c - o for o, c in zip(poses['open'], poses['closed']))
+        return sum(v - o for v, o in zip(self._current[hand], poses['open'])) / span
 
 
 def kick_commands(direction, force=900.0, link='atlas::utorso'):

@@ -69,6 +69,7 @@ import rclpy
 from rclpy.executors import SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.parameter import Parameter
+from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 import teleop_extras as tx
 
@@ -93,7 +94,8 @@ atlas_walking_demo -- keyboard teleop (Atlas in a harness)
   w / s     walk forward / backward        a / d   side-step left / right
   q / e     turn left / right              z / c   curve forward left / right
   space, x  stop (finishes the step)       + / -   speed up / down
-  g         open/close both hands          [ / ]   left / right hand
+  g         grip / relax both hands        [ / ]   grip / relax left / right hand
+  h         open both hands flat (relax again with g)
   k / l / j push Atlas: from the right / front / behind
   Ctrl-C    quit
 Also follows geometry_msgs/Twist on atlas_walk/cmd_vel.
@@ -136,9 +138,14 @@ class WalkKeyboardNode(Node):
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.mode_pub = self.create_publisher(String, 'atlas/mode', 10)
         self.cmd_vel_pub = self.create_publisher(Twist, 'atlas/cmd_vel', 10)
-        self.hand_pubs = {
+        # Both hand models' command topics; only the spawned one listens.
+        self.sandia_pubs = {
             side: self.create_publisher(
                 JointCommands, f'sandia_hands/{side}_hand/joint_commands', 10)
+            for side in ('l', 'r')}
+        self.svh_pubs = {
+            side: self.create_publisher(
+                JointState, f'svh_hands/{"left" if side == "l" else "right"}/command', 10)
             for side in ('l', 'r')}
         self.create_subscription(AtlasState, 'atlas/atlas_state', self._on_state, 10)
         self.create_subscription(Twist, 'atlas_walk/cmd_vel', self._on_twist, 10)
@@ -206,11 +213,15 @@ class WalkKeyboardNode(Node):
             twist.linear.x, twist.linear.y, twist.linear.z, twist.angular.z = velocity
             self.cmd_vel_pub.publish(twist)
         for side, gripper in self.grippers.items():
-            hand = JointCommands()
-            hand.name = [f'{"left" if side == "l" else "right"}_{j}'
-                         for j in tx.HAND_JOINT_NAMES]
-            hand.position = gripper.sample(dt)
-            self.hand_pubs[side].publish(hand)
+            sandia = JointCommands()
+            sandia.name = [f'{"left" if side == "l" else "right"}_{j}'
+                           for j in tx.SANDIA_JOINT_NAMES]
+            sandia.position = gripper.sample(dt, 'sandia')
+            self.sandia_pubs[side].publish(sandia)
+            svh = JointState()
+            svh.name = list(tx.SVH_JOINT_NAMES)
+            svh.position = gripper.sample(dt, 'svh')
+            self.svh_pubs[side].publish(svh)
         self._log_diagnostics()
 
     def _apply_twist(self):
@@ -235,7 +246,7 @@ class WalkKeyboardNode(Node):
             self.get_logger().info(
                 f'[{self.gait.phase_name}] vx={vx:+.2f} vy={vy:+.2f} m/s '
                 f'wz={wz:+.2f} rad/s  speed {int(self.speed * 100)}%  '
-                f'hands L/R {self.grippers["l"].level:.0%}/{self.grippers["r"].level:.0%}')
+                f'hands L/R {self.grippers["l"].pose}/{self.grippers["r"].pose}')
         else:
             self.get_logger().info(f'[{self.gait.phase_name}]')
 
@@ -263,15 +274,19 @@ class WalkKeyboardNode(Node):
             self.speed_index = max(0, min(len(tx.SPEED_STEPS) - 1, self.speed_index + step))
             self.get_logger().info(f'Speed {int(self.speed * 100)}% (applies to the next key).')
         elif key == 'g':
-            closing = max(g.target for g in self.grippers.values()) < 0.5
+            gripping = any(g.pose != 'closed' for g in self.grippers.values())
             for gripper in self.grippers.values():
-                gripper.target = 1.0 if closing else 0.0
-            self.get_logger().info(f'{"Closing" if closing else "Opening"} both hands.')
+                gripper.pose = 'closed' if gripping else 'relaxed'
+            self.get_logger().info(f'{"Gripping" if gripping else "Relaxing"} both hands.')
+        elif key == 'h':
+            for gripper in self.grippers.values():
+                gripper.pose = 'open'
+            self.get_logger().info('Opening both hands flat.')
         elif key in ('[', ']'):
             side = 'l' if key == '[' else 'r'
             self.grippers[side].toggle()
             self.get_logger().info(
-                f'{"Closing" if self.grippers[side].target else "Opening"} '
+                f'{"Gripping" if self.grippers[side].pose == "closed" else "Relaxing"} '
                 f'{"left" if side == "l" else "right"} hand.')
         elif key in tx.KICK_KEYS:
             self._kick(tx.KICK_KEYS[key])

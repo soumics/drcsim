@@ -164,6 +164,8 @@
   <gazebo reference="head_hokuyo_frame">
     <sensor type="gpu_ray" name="head_hokuyo_sensor">
       <pose>0 0 0 0 0 0</pose>
+      <topic>multisense/lidar_scan</topic>
+      <gz_frame_id>head_hokuyo_frame</gz_frame_id>
       <visualize>false</visualize>
       <update_rate>40</update_rate>
       <ray>
@@ -213,37 +215,16 @@
     <child link="left_camera_optical_frame"/>
   </joint>
   <link name="left_camera_optical_frame"/>
+  <!-- The stereo pair was one Classic "multicamera" sensor (left camera at
+       left_camera_frame, right one 7 cm to its right); gz-sim has no such
+       sensor type, so it silently produced nothing. Two ordinary cameras on
+       the existing left/right camera frames (the same 0.07 m baseline). -->
   <gazebo reference="left_camera_frame">
-    <sensor type="multicamera" name="stereo_camera">
-      <!-- see MultiSenseSLPlugin.h for available modes -->
+    <sensor type="camera" name="left_camera_sensor">
       <update_rate>10.0</update_rate>
+      <topic>multisense/left/image_raw</topic>
+      <gz_frame_id>left_camera_optical_frame</gz_frame_id>
       <camera name="left">
-        <!-- Spec sheet says 80deg X 45deg @ 1024x544pix.  Based on feedback
-             from teams, we're instead doing 80deg X 80deg @ 800x800pix. -->
-        <horizontal_fov>1.3962634</horizontal_fov>
-        <image>
-          <width>1024</width>
-          <height>544</height>
-          <format>R8G8B8</format>
-        </image>
-        <clip>
-          <near>0.02</near>
-          <far>300</far>
-        </clip>
-        <noise>
-          <type>gaussian</type>
-          <!-- Noise is sampled independently per pixel on each frame.  
-               That pixel's noise value is added to each of its color
-               channels, which at that point lie in the range [0,1].
-               The stddev value of 0.007 is based on experimental data 
-               from a camera in a Sandia hand pointed at a static scene
-               in a couple of different lighting conditions.  -->
-          <mean>0.0</mean>
-          <stddev>0.007</stddev>
-        </noise>
-      </camera>
-      <camera name="right">
-        <pose>0 -0.07 0 0 0 0</pose>
         <!-- Spec sheet says 80deg X 45deg @ 1024x544pix. -->
         <horizontal_fov>1.3962634</horizontal_fov>
         <image>
@@ -257,12 +238,7 @@
         </clip>
         <noise>
           <type>gaussian</type>
-          <!-- Noise is sampled independently per pixel on each frame.  
-               That pixel's noise value is added to each of its color
-               channels, which at that point lie in the range [0,1].
-               The stddev value of 0.007 is based on experimental data 
-               from a camera in a Sandia hand pointed at a static scene
-               in a couple of different lighting conditions.  -->
+          <!-- stddev 0.007: experimental data from a camera in a Sandia hand. -->
           <mean>0.0</mean>
           <stddev>0.007</stddev>
         </noise>
@@ -289,6 +265,32 @@
     <child link="right_camera_optical_frame"/>
   </joint>
   <link name="right_camera_optical_frame"/>
+  <gazebo reference="right_camera_frame">
+    <sensor type="camera" name="right_camera_sensor">
+      <update_rate>10.0</update_rate>
+      <topic>multisense/right/image_raw</topic>
+      <gz_frame_id>right_camera_optical_frame</gz_frame_id>
+      <camera name="right">
+        <!-- Spec sheet says 80deg X 45deg @ 1024x544pix. -->
+        <horizontal_fov>1.3962634</horizontal_fov>
+        <image>
+          <width>1024</width>
+          <height>544</height>
+          <format>R8G8B8</format>
+        </image>
+        <clip>
+          <near>0.02</near>
+          <far>300</far>
+        </clip>
+        <noise>
+          <type>gaussian</type>
+          <!-- stddev 0.007: experimental data from a camera in a Sandia hand. -->
+          <mean>0.0</mean>
+          <stddev>0.007</stddev>
+        </noise>
+      </camera>
+    </sensor>
+  </gazebo>
 
   <joint name="center_top_led_frame_joint" type="fixed">
     <origin xyz="0.01125 0.0 0.0105"/>
@@ -374,6 +376,8 @@
     <!-- todo: this is working with gazebo 1.4, need to write a unit test -->
     <sensor name="head_imu_sensor" type="imu">
       <always_on>1</always_on>
+      <topic>multisense/imu</topic>
+      <gz_frame_id>head_imu_link</gz_frame_id>
       <update_rate>1000.0</update_rate>
       <imu>
         <noise>

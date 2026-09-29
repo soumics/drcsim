@@ -35,12 +35,13 @@ the DRCSIM_ROS_PARAMS_FILE environment variable at it before gz-sim
 (and therefore every plugin loaded into it) ever starts.
 """
 
+import math
 import os
 import subprocess
 import tempfile
 import xml.etree.ElementTree as ET
 
-from ament_index_python.packages import get_package_share_directory
+from ament_index_python.packages import get_package_share_directory, PackageNotFoundError
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
@@ -56,6 +57,10 @@ import yaml
 
 
 HAND_XACROS = {
+    # Five-finger SCHUNK SVH hands (atlas_svh_hands + the separately fetched,
+    # GPL-3.0 schunk_svh_description; docker/fetch_external.sh). Falls back
+    # to Sandia when not installed.
+    'svh': 'atlas_v5_svh_hands.urdf.xacro',
     'sandia': 'atlas_v5_sandia_hands.urdf.xacro',
     # Robotiq's finger linkages are closed kinematic loops; DART (gz-sim's
     # physics) drops the loop-closing joints, so the passive bars get no
@@ -70,30 +75,131 @@ HAND_XACROS = {
 
 # Joint-state topics each hand plugin publishes outside atlas/joint_states.
 HAND_JOINT_STATE_TOPICS = {
+    'svh': [f'svh_hands/{s}/joint_states' for s in ('left', 'right')],
     'sandia': [f'sandia_hands/{s}_hand/joint_states' for s in ('l', 'r')],
     'robotiq': [f'robotiq_hands/{s}_hand/joint_states' for s in ('left', 'right')],
     'irobot': [f'irobot_hands/{s}_hand/joint_states' for s in ('l', 'r')],
 }
 
-# skin:=modern -- a "brand-new car" paint job: physically based materials
-# (gz-sim/Ogre2 PBR) replacing the meshes' old textures. Each entry is
-# (diffuse RGB, metalness, roughness): pearl-white multi-coat body panels,
-# gloss piano-black joints and trim, graphite-metallic hands, an "ultra
-# red" head as the badge.
+# skin:=modern -- "pearl & rose gold": physically based materials (gz-sim/
+# Ogre2 PBR) replacing the meshes' old textures. Each paint is (diffuse RGB,
+# metalness, roughness): pearlescent white gloss body panels, polished
+# rose-gold joints/trim and fingers, gloss-black head and feet for contrast.
+# ACCENT_LIGHTS adds glowing cyan (emissive) details on top.
 PAINTS = {
-    'pearl': ((0.92, 0.93, 0.95), 0.25, 0.12),
-    'piano_black': ((0.02, 0.02, 0.025), 0.2, 0.08),
-    'graphite': ((0.20, 0.21, 0.23), 0.85, 0.28),
-    'ultra_red': ((0.62, 0.02, 0.04), 0.45, 0.15),
+    # Metalness stays moderate: the world has no environment map, and a fully
+    # metallic Ogre2 PBR surface takes nearly all its colour from reflecting
+    # one -- rose gold at metalness 1.0 rendered black on the GPU.
+    'pearl': ((0.97, 0.96, 0.94), 0.05, 0.18),
+    'rose_gold': ((1.0, 0.72, 0.62), 0.15, 0.25),
+    'gloss_black': ((0.02, 0.02, 0.025), 0.1, 0.12),
 }
-# First matching substring of the link/visual name wins.
+# First matching substring of the visual/link name wins.
 PAINT_RULES = [
-    (('hokuyo',), 'piano_black'),
-    (('head', 'multisense'), 'ultra_red'),
-    (('palm', '_f0', '_f1', '_f2', '_f3', 'finger', 'irobot', 'robotiq', 'base_link'),
-     'graphite'),
+    (('svh_e1', 'svh_e2', 'svh_base', 'palm'), 'pearl'),
+    (('head', 'hokuyo', 'multisense', 'foot'), 'gloss_black'),
+    (('svh', '_f0', '_f1', '_f2', '_f3', 'finger'), 'rose_gold'),
     (('utorso', 'pelvis', 'uleg', 'lleg', 'uarm', 'larm', 'ufarm'), 'pearl'),
 ]
+DEFAULT_PAINT = 'rose_gold'
+# (link, name, pose "x y z r p y", geometry element, emissive RGB).
+ACCENT_LIGHTS = [
+    ('head', 'visor_light', '0.055 0 0.028 0 0 0', ('box', {'size': '0.006 0.16 0.012'}),
+     (0.0, 0.85, 1.0)),
+    ('utorso', 'chest_light', '0.27 0 0.33 0 1.5708 0',
+     ('cylinder', {'radius': '0.05', 'length': '0.008'}), (0.0, 0.85, 1.0)),
+]
+
+
+def _hand_xacro(hands):
+    """Return the robot xacro for a `hands` choice (SVH falls back to Sandia)."""
+    if hands == 'svh':
+        try:
+            return os.path.join(get_package_share_directory('atlas_svh_hands'), 'robots',
+                                HAND_XACROS['svh'])
+        except PackageNotFoundError:
+            print('[atlas.launch.py] hands:=svh needs atlas_svh_hands and the separately '
+                  'fetched schunk_svh_description (docker/fetch_external.sh); using Sandia.')
+            hands = 'sandia'
+    return os.path.join(
+        get_package_share_directory('atlas_description'), 'robots', HAND_XACROS[hands])
+
+
+def _strip_classic_plugins(robot_description):
+    """
+    Drop Gazebo Classic <plugin filename="lib*.so"> blocks from a URDF.
+
+    Third-party descriptions (e.g. the SVH's gazebo_ros_control and mimic
+    joint plugins) still carry them; gz-sim would only log a load error for
+    each. This repo's own plugins are all in gz-sim form already.
+    """
+    root = ET.fromstring(robot_description)
+    for gazebo in root.findall('gazebo'):
+        for plugin in gazebo.findall('plugin'):
+            filename = plugin.get('filename', '')
+            if filename.startswith('lib') and filename.endswith('.so'):
+                gazebo.remove(plugin)
+        if not len(gazebo) and not (gazebo.text or '').strip():
+            root.remove(gazebo)
+    return ET.tostring(root, encoding='unicode')
+
+
+def _rpy_matrix(roll, pitch, yaw):
+    cr, sr, cp, sp = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch)
+    cy, sy = math.cos(yaw), math.sin(yaw)
+    return [[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+            [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+            [-sp, cp * sr, cp * cr]]
+
+
+def _svh_for_gz(robot_description):
+    """
+    Adapt the SCHUNK SVH hands in a URDF for gz-sim (spawn only).
+
+    * Collision meshes become their bounding boxes
+      (atlas_svh_hands/config/svh_collision_boxes.yaml): DART's ODE
+      collision backend segfaults on the meshes' degenerate submeshes.
+    * <mimic> couplings move into each hand's HandJointController config:
+      DART has no mimic constraints (gz logs an error per joint and ignores
+      them); the controller enforces them instead.
+    """
+    if 'package://schunk_svh_description/' not in robot_description:
+        return robot_description
+    with open(os.path.join(get_package_share_directory('atlas_svh_hands'), 'config',
+                           'svh_collision_boxes.yaml')) as boxes_file:
+        boxes = yaml.safe_load(boxes_file)
+    root = ET.fromstring(robot_description)
+    for collision in root.iter('collision'):
+        mesh = collision.find('geometry/mesh')
+        if mesh is None or 'schunk_svh_description' not in mesh.get('filename', ''):
+            continue
+        cx, cy, cz, sx, sy, sz = boxes[os.path.basename(mesh.get('filename'))]
+        scale = [float(v) for v in mesh.get('scale', '1 1 1').split()]
+        center = [c * k for c, k in zip((cx, cy, cz), scale)]
+        origin = collision.find('origin')
+        if origin is None:
+            origin = ET.SubElement(collision, 'origin')
+        xyz = [float(v) for v in origin.get('xyz', '0 0 0').split()]
+        rot = _rpy_matrix(*[float(v) for v in origin.get('rpy', '0 0 0').split()])
+        xyz = [x + sum(rot[i][k] * center[k] for k in range(3)) for i, x in enumerate(xyz)]
+        origin.set('xyz', ' '.join(f'{v:.6f}' for v in xyz))
+        geometry = collision.find('geometry')
+        geometry.remove(mesh)
+        ET.SubElement(geometry, 'box', size=' '.join(
+            f'{max(abs(s * k), 0.002):.5f}' for s, k in zip((sx, sy, sz), scale)))
+    controllers = [p for p in root.iter('plugin') if p.findtext('joint_prefix')]
+    for joint in root.findall('joint'):
+        mimic = joint.find('mimic')
+        if mimic is None:
+            continue
+        for plugin in controllers:
+            if joint.get('name').startswith(plugin.findtext('joint_prefix')):
+                ET.SubElement(plugin, 'mimic', joint=joint.get('name'),
+                              leader=mimic.get('joint'),
+                              multiplier=mimic.get('multiplier', '1'),
+                              offset=mimic.get('offset', '0'))
+        joint.remove(mimic)
+    return ET.tostring(root, encoding='unicode')
 
 
 def _fix_robotiq_passive_joints(robot_description):
@@ -116,11 +222,37 @@ def _fix_robotiq_passive_joints(robot_description):
     return ET.tostring(root, encoding='unicode')
 
 
+def _add_demo_camera(robot_description):
+    """
+    Add a chase camera riding with the pelvis: front-right, looking back at Atlas.
+
+    It is part of the robot model, so it follows every step and turn, and
+    the gz server renders it (Ogre2, GPU, full PBR look) -- unlike a GUI
+    user camera, which needs a screen and its record button.
+    """
+    root = ET.fromstring(robot_description)
+    gazebo = ET.SubElement(root, 'gazebo', reference='pelvis')
+    sensor = ET.SubElement(gazebo, 'sensor', type='camera', name='demo_camera')
+    ET.SubElement(sensor, 'pose').text = '3.3 -2.8 0.3 0 0.06 2.44'
+    ET.SubElement(sensor, 'update_rate').text = '25'
+    ET.SubElement(sensor, 'topic').text = 'demo_camera/image'
+    camera = ET.SubElement(sensor, 'camera')
+    ET.SubElement(camera, 'horizontal_fov').text = '1.0'
+    image = ET.SubElement(camera, 'image')
+    ET.SubElement(image, 'width').text = '960'
+    ET.SubElement(image, 'height').text = '540'
+    ET.SubElement(image, 'format').text = 'R8G8B8'
+    clip = ET.SubElement(camera, 'clip')
+    ET.SubElement(clip, 'near').text = '0.1'
+    ET.SubElement(clip, 'far').text = '100'
+    return ET.tostring(root, encoding='unicode')
+
+
 def _paint_for(name):
     for keys, paint in PAINT_RULES:
         if any(key in name for key in keys):
             return paint
-    return 'piano_black'
+    return DEFAULT_PAINT
 
 
 def _modern_skin_sdf(robot_description):
@@ -154,6 +286,19 @@ def _modern_skin_sdf(robot_description):
             metal = ET.SubElement(ET.SubElement(material, 'pbr'), 'metal')
             ET.SubElement(metal, 'metalness').text = str(metalness)
             ET.SubElement(metal, 'roughness').text = str(roughness)
+    links = {link.get('name'): link for link in root.iter('link')}
+    for link_name, name, pose, (shape, attrs), rgb in ACCENT_LIGHTS:
+        if link_name not in links:
+            continue
+        visual = ET.SubElement(links[link_name], 'visual', name=name)
+        ET.SubElement(visual, 'pose').text = pose
+        geometry = ET.SubElement(ET.SubElement(visual, 'geometry'), shape)
+        for key, value in attrs.items():
+            ET.SubElement(geometry, key).text = value
+        glow = ' '.join(f'{c:.3f}' for c in rgb) + ' 1'
+        material = ET.SubElement(visual, 'material')
+        for tag in ('ambient', 'diffuse', 'emissive'):
+            ET.SubElement(material, tag).text = glow
     return ET.tostring(root, encoding='unicode')
 
 
@@ -189,13 +334,13 @@ def generate_launch_description():
                 get_package_share_directory('drcsim_model_resources'), 'worlds', 'atlas.world'),
             description='Path to the gz-sim world file to load.'),
         DeclareLaunchArgument(
-            'hands', default_value='sandia', choices=list(HAND_XACROS),
-            description='Hands on Atlas: Sandia (4 fingers), Robotiq (3-finger '
-                        'gripper), or none.'),
+            'hands', default_value='svh', choices=list(HAND_XACROS),
+            description='Hands on Atlas: SCHUNK SVH (5 fingers), Sandia (4 '
+                        'fingers), Robotiq (3-finger gripper), or none.'),
         DeclareLaunchArgument(
             'skin', default_value='modern', choices=['modern', 'classic'],
-            description="Atlas's look in Gazebo: modern car-paint PBR materials "
-                        'or the original textures.'),
+            description="Atlas's look in Gazebo: pearl & rose gold PBR paint with "
+                        'cyan accent lights, or the original textures.'),
         DeclareLaunchArgument(
             'robot_xacro', default_value='',
             description='Path to the robot xacro file VRCPlugin will spawn '
@@ -219,6 +364,13 @@ def generate_launch_description():
         # Sets VRC_CHEATS_ENABLED, gating VRCPlugin extras including the
         # atlas/cmd_vel warp-move topic.
         DeclareLaunchArgument('cheats_enabled', default_value='true'),
+        DeclareLaunchArgument(
+            'demo_camera', default_value='false',
+            description='Add a chase camera riding with the pelvis (demo_camera/image, '
+                        '960x540 @ 25 Hz, rendered by the gz server) for demo videos.'),
+        DeclareLaunchArgument(
+            'lidar_spindle_speed', default_value='1.5',
+            description='MultiSense lidar spin rate (rad/s); 0 keeps it still (a 2D scan).'),
     ]
 
     return LaunchDescription(declared_arguments + [OpaqueFunction(function=_launch_setup)])
@@ -227,8 +379,7 @@ def generate_launch_description():
 def _launch_setup(context, *args, **kwargs):
     world = LaunchConfiguration('world').perform(context)
     hands = LaunchConfiguration('hands').perform(context)
-    robot_xacro = LaunchConfiguration('robot_xacro').perform(context) or os.path.join(
-        get_package_share_directory('atlas_description'), 'robots', HAND_XACROS[hands])
+    robot_xacro = LaunchConfiguration('robot_xacro').perform(context) or _hand_xacro(hands)
     startup_mode = LaunchConfiguration('startup_mode').perform(context)
     gz_verbosity = LaunchConfiguration('gz_verbosity').perform(context)
     headless = LaunchConfiguration('headless').perform(context).lower() in ('true', '1')
@@ -239,10 +390,13 @@ def _launch_setup(context, *args, **kwargs):
         for axis in ('x', 'y', 'z', 'roll', 'pitch', 'yaw')
     }
 
-    robot_description = xacro.process_file(robot_xacro).toxml()
+    robot_description = _strip_classic_plugins(xacro.process_file(robot_xacro).toxml())
     skin = LaunchConfiguration('skin').perform(context)
+    gz_description = _svh_for_gz(robot_description)
+    if LaunchConfiguration('demo_camera').perform(context).lower() in ('true', '1'):
+        gz_description = _add_demo_camera(gz_description)
     spawn_description = (
-        _modern_skin_sdf(robot_description) if skin == 'modern' else robot_description)
+        _modern_skin_sdf(gz_description) if skin == 'modern' else gz_description)
     rsp_description = (
         _fix_robotiq_passive_joints(robot_description)
         if 'robotiq_hands' in os.path.basename(robot_xacro) else robot_description)
@@ -274,6 +428,10 @@ def _launch_setup(context, *args, **kwargs):
     if 'sandia_hands' in os.path.basename(robot_xacro):
         combined_params.update(_sandia_hand_gains())
 
+    combined_params.setdefault('multisense_sl_plugin', {}).setdefault(
+        'ros__parameters', {})['spindle_speed'] = float(
+            LaunchConfiguration('lidar_spindle_speed').perform(context))
+
     params_fd, params_path = tempfile.mkstemp(
         prefix='drcsim_gazebo_ros_params_', suffix='.yaml')
     with os.fdopen(params_fd, 'w') as params_file:
@@ -303,6 +461,19 @@ def _launch_setup(context, *args, **kwargs):
                 'config_file:=' + os.path.join(
                     get_package_share_directory('drcsim_gazebo'), 'config', 'clock_bridge.yaml'),
             ],
+            output='screen'),
+        # Atlas's sensors (MultiSense stereo pair, spinning lidar, IMUs,
+        # torso cameras) into ROS -- see config/sensors_bridge.yaml.
+        Node(
+            package='ros_gz_bridge',
+            executable='parameter_bridge',
+            name='sensors_bridge',
+            parameters=[{
+                'config_file': os.path.join(
+                    get_package_share_directory('drcsim_gazebo'), 'config',
+                    'sensors_bridge.yaml'),
+                'use_sim_time': True,
+            }],
             output='screen'),
         Node(
             package='robot_state_publisher',

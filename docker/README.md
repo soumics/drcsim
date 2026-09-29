@@ -15,9 +15,10 @@ A self-contained image for the whole repository:
 ## Quick start
 
 ```bash
-docker/build.sh          # build the image drcsim:jazzy (first time: several minutes)
+docker/build.sh          # build the image drcsim:jazzy (first time: several minutes;
+                         # fetches the GPL-3.0 SCHUNK SVH hand model next to the repo)
 docker/run.sh            # start the container "drcsim" in the background
-docker/sim.sh            # start the simulation (Atlas, Sandia hands, modern skin)
+docker/sim.sh            # (re)start the simulation (Atlas, SVH five-finger hands, glam skin)
 docker/gui.sh            # Gazebo GUI + RViz on your screen, camera following Atlas
 docker/teleop.sh         # drive Atlas from the keyboard (Ctrl-C quits)
 docker/stop.sh           # remove the container
@@ -26,9 +27,10 @@ docker/stop.sh           # remove the container
 `docker/sim.sh` passes its arguments to `atlas.launch.py`:
 
 ```bash
+docker/sim.sh hands:=sandia             # Sandia four-finger hands
 docker/sim.sh hands:=robotiq            # Robotiq 3-finger grippers
-docker/sim.sh hands:=irobot             # iRobot hands
 docker/sim.sh hands:=none skin:=classic # the original look, no hands
+docker/sim.sh demo_camera:=true         # add the chase camera used for demo videos
 ```
 
 `docker/shell.sh` opens a shell with ROS and the workspace sourced.
@@ -40,7 +42,19 @@ Inside the container these commands are on `PATH`:
 | `drcsim_sim` | launch the simulation |
 | `drcsim_gui` | Gazebo GUI + RViz |
 | `drcsim_teleop` | keyboard teleop |
-| `drcsim_snapshot DIR` | save Gazebo/RViz screenshots (overview, each hand) from a private virtual display |
+| `drcsim_snapshot DIR` | save Gazebo/RViz screenshots (overview, each hand, front) from a private virtual display |
+| `drcsim_record_demo DIR` | record the side-by-side Gazebo + RViz demo video (needs `demo_camera:=true`) |
+| `drcsim_record_topic TOPIC OUT.mp4` | record any image topic to MP4 |
+
+## Third-party hand model
+
+- The default hands are the **SCHUNK SVH** (five fingers, 9 motors, 20 joints).
+- Their description (`schunk_svh_description`) is **GPL-3.0-or-later**. It is never copied into
+  this Apache-2.0 repository: `docker/fetch_external.sh` clones it next to the repo
+  (`<workspace>/src/external/`), and the image build runs it.
+- `atlas_svh_hands` (Apache-2.0) only references it. Check the GPL terms before distributing a
+  combined product.
+- Outside Docker, run `docker/fetch_external.sh` once before `colcon build`.
 
 ## Graphics
 

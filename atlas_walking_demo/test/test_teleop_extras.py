@@ -36,15 +36,29 @@ def test_walk_keys_scale_by_speed_and_axis_limits():
     assert tx.walk_command('g', 1.0, 0.4, 0.3, 0.2, 0.4) is None
 
 
-def test_gripper_closes_at_a_limited_rate_and_toggles_open():
+def test_gripper_starts_relaxed_and_moves_between_poses_at_a_limited_rate():
     gripper = tx.Gripper()
+    for hand in ('sandia', 'svh'):
+        assert gripper.sample(0.0, hand) == pytest.approx(tx.HAND_POSES[hand]['relaxed'])
     gripper.toggle()
-    half = gripper.sample(tx.GRIP_TIME / 2.0)
-    assert half == pytest.approx([c / 2.0 for c in tx.GRASP_CLOSED])
-    assert gripper.sample(tx.GRIP_TIME) == pytest.approx(tx.GRASP_CLOSED)
+    assert gripper.pose == 'closed'
+    first = gripper.sample(0.1, 'svh')
+    relaxed, closed = tx.HAND_POSES['svh']['relaxed'], tx.HAND_POSES['svh']['closed']
+    for value, start, goal in zip(first, relaxed, closed):
+        assert abs(value - start) <= tx.HAND_SPEED * 0.1 + 1e-12
+        assert min(start, goal) - 1e-12 <= value <= max(start, goal) + 1e-12
+    assert gripper.sample(5.0, 'svh') == pytest.approx(closed)
+    assert gripper.closure('svh') == pytest.approx(1.0)
     gripper.toggle()
-    assert gripper.sample(tx.GRIP_TIME) == pytest.approx(tx.GRASP_OPEN)
-    assert len(tx.GRASP_CLOSED) == len(tx.HAND_JOINT_NAMES) == 12
+    assert gripper.sample(5.0, 'svh') == pytest.approx(relaxed)
+    gripper.pose = 'open'
+    assert gripper.sample(5.0, 'sandia') == pytest.approx(tx.HAND_POSES['sandia']['open'])
+
+
+def test_hand_poses_match_each_models_joint_list():
+    for hand, names in (('sandia', tx.SANDIA_JOINT_NAMES), ('svh', tx.SVH_JOINT_NAMES)):
+        for pose in ('open', 'relaxed', 'closed'):
+            assert len(tx.HAND_POSES[hand][pose]) == len(names)
 
 
 def test_kick_pushes_the_torso_then_clears_it():

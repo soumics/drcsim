@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>atlas_svh_hands</name>
+  <version>0.1.0</version>
+  <description>
+    Atlas v5 with SCHUNK SVH five-finger hands. Only the attachment lives
+    here; the hand model is the separately fetched schunk_svh_description
+    package (GPL-3.0-or-later), see README.md.
+  </description>
+  <maintainer email="maintainer@example.com">Open Source Robotics Foundation</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>atlas_description</exec_depend>
+  <exec_depend>multisense_sl_description</exec_depend>
+  <exec_depend>schunk_svh_description</exec_depend>
+  <exec_depend>drcsim_gazebo_ros_plugins</exec_depend>
+
+  <test_depend>ament_cmake_pytest</test_depend>
+  <test_depend>xacro</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

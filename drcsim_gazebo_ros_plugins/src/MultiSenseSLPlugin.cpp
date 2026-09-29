@@ -30,6 +30,8 @@
 #include <gz/sim/Link.hh>
 #include <gz/sim/components/Name.hh>
 
+#include "drcsim_gazebo_ros_plugins/RosNodeOptions.hpp"
+
 using drcsim_gazebo_ros_plugins::MultiSenseSLPlugin;
 
 //////////////////////////////////////////////////
@@ -126,10 +128,12 @@ void MultiSenseSLPlugin::Load(gz::sim::EntityComponentManager & _ecm)
   this->jointStates.velocity.assign(1, 0.0);
   this->jointStates.effort.assign(1, 0.0);
 
-  if (_ecm.EntityByComponents(gz::sim::components::Name("stereo_camera")) ==
-    gz::sim::kNullEntity)
-  {
-    gzerr << "multicamera sensor not found" << std::endl;
+  // The stereo pair is two camera sensors in gz-sim (Classic's single
+  // "multicamera" sensor type does not exist here; see multisense_sl_v4.urdf).
+  for (const char * camera : {"left_camera_sensor", "right_camera_sensor"}) {
+    if (_ecm.EntityByComponents(gz::sim::components::Name(camera)) == gz::sim::kNullEntity) {
+      gzerr << "stereo camera sensor [" << camera << "] not found" << std::endl;
+    }
   }
   if (_ecm.EntityByComponents(
       gz::sim::components::Name("head_hokuyo_sensor")) == gz::sim::kNullEntity)
@@ -143,7 +147,8 @@ void MultiSenseSLPlugin::Load(gz::sim::EntityComponentManager & _ecm)
   if (!rclcpp::ok()) {
     rclcpp::init(0, nullptr);
   }
-  this->rosNode = std::make_shared<rclcpp::Node>("multisense_sl_plugin");
+  this->rosNode = std::make_shared<rclcpp::Node>(
+    "multisense_sl_plugin", drcsim_gazebo_ros_plugins::RosNodeOptionsFromEnv());
 
   const int atlasVersion = this->rosNode->declare_parameter("atlas_version", 5);
   if (atlasVersion == 1) {
@@ -163,6 +168,15 @@ void MultiSenseSLPlugin::Load(gz::sim::EntityComponentManager & _ecm)
     this->rosNamespace + "/joint_states", 10);
   this->pubImu = this->rosNode->create_publisher<sensor_msgs::msg::Imu>(
     this->rosNamespace + "/imu", 10);
+
+  // Spindle speed to start with (rad/s), clamped like set_spindle_speed.
+  // 0 (the original's behaviour) leaves the lidar still -- a fixed 2D scan
+  // plane; atlas.launch.py spins it so RViz builds a 3D point cloud.
+  {
+    auto initial = std::make_shared<std_msgs::msg::Float64>();
+    initial->data = this->rosNode->declare_parameter("spindle_speed", 0.0);
+    this->SetSpindleSpeed(initial);
+  }
 
   this->subSetSpindleSpeed =
     this->rosNode->create_subscription<std_msgs::msg::Float64>(

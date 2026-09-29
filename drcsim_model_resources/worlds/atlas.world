@@ -48,6 +48,8 @@
     <!-- Pushes/kicks: /world/default/wrench (atlas_walking_demo's 'k' key)
          and the GUI's Apply Force/Torque tool. -->
     <plugin filename="gz-sim-apply-link-wrench-system" name="gz::sim::systems::ApplyLinkWrench"/>
+    <!-- IMU sensors (pelvis, MultiSense head) only produce data with this. -->
+    <plugin filename="gz-sim-imu-system" name="gz::sim::systems::Imu"/>
 
     <!-- A global light source. Inlined (was <include><uri>model://sun
          </uri></include>); that relied on Gazebo Fuel to resolve
@@ -56,10 +58,17 @@
          hand-authored world in this migration is already fully
          self-contained for the same reason. Content matches gz-sim's
          own shipped empty.sdf template. -->
+    <!-- A sky and soft ambient light for the showroom look (skin:=modern). -->
+    <scene>
+      <ambient>0.45 0.45 0.5 1</ambient>
+      <background>0.72 0.82 0.95 1</background>
+      <sky></sky>
+      <shadows>true</shadows>
+    </scene>
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
       <pose>0 0 10 0 0 0</pose>
-      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <diffuse>0.95 0.93 0.9 1</diffuse>
       <specular>0.2 0.2 0.2 1</specular>
       <attenuation>
         <range>1000</range>
@@ -67,7 +76,7 @@
         <linear>0.01</linear>
         <quadratic>0.001</quadratic>
       </attenuation>
-      <direction>-0.5 0.1 -0.9</direction>
+      <direction>-0.5 0.35 -0.8</direction>
     </light>
     <!-- A ground plane. Inlined for the same reason as the sun above. -->
     <model name="ground_plane">

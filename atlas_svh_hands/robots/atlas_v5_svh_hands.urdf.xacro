@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<!--
+  Atlas v5 with SCHUNK SVH five-finger hands.
+
+  The SVH model comes from the separately fetched schunk_svh_description
+  package (GPL-3.0-or-later, https://github.com/SCHUNK-SE-Co-KG/schunk_svh_ros_driver,
+  cloned by docker/fetch_external.sh); this file only references it.
+
+  Mounts: fingers along the arm, palms facing down with the arms straight
+  out (the T-pose), thumbs forward. The right mount was set from the SVH
+  kinematics (fingers +z, palm +y), the left one derived as its mirror image
+  and checked by test/test_svh_mounts.py.
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="atlas">
+  <xacro:include filename="$(find atlas_description)/urdf/atlas_v5_simple_shapes.urdf" />
+  <xacro:include filename="$(find schunk_svh_description)/urdf/svh.urdf.xacro" />
+
+  <!-- The svh macro also applies its origin block to the base link's own
+       visual/collision (fine for its zero-origin standalone use); a
+       non-zero mount would draw the wrist flange twice as far out, so the
+       mount transform lives on our own fixed joint and the macro gets zero. -->
+  <xacro:macro name="svh_mount" params="side sign *origin">
+    <joint name="${side}_svh_mount_joint" type="fixed">
+      <xacro:insert_block name="origin"/>
+      <parent link="${side}_hand"/>
+      <child link="${side}_svh_mount"/>
+    </joint>
+    <link name="${side}_svh_mount"/>
+    <xacro:svh parent="${side}_svh_mount" name="${side}_svh" side="${sign}">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+    </xacro:svh>
+  </xacro:macro>
+  <xacro:svh_mount side="r" sign="1">
+    <origin xyz="0 -0.10 0" rpy="-1.5708 0 3.14159"/>
+  </xacro:svh_mount>
+  <xacro:svh_mount side="l" sign="-1">
+    <origin xyz="0 -0.10 0" rpy="-1.5708 0 3.14159"/>
+  </xacro:svh_mount>
+
+  <gazebo>
+    <plugin filename="HandJointController" name="drcsim_gazebo_ros_plugins::HandJointController">
+      <joint_prefix>r_svh_</joint_prefix>
+      <ros_namespace>svh_hands/right</ros_namespace>
+    </plugin>
+    <plugin filename="HandJointController" name="drcsim_gazebo_ros_plugins::HandJointController">
+      <joint_prefix>l_svh_</joint_prefix>
+      <ros_namespace>svh_hands/left</ros_namespace>
+    </plugin>
+  </gazebo>
+
+  <xacro:include filename="$(find atlas_description)/urdf/atlas_v5.gazebo" />
+  <xacro:include filename="$(find multisense_sl_description)/urdf/multisense_sl_v4.urdf" />
+</robot>

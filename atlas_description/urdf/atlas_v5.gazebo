@@ -37,6 +37,8 @@
     <!-- todo: this is working with gazebo 1.4, need to write a unit test -->
     <sensor name="imu_sensor" type="imu">
       <always_on>1</always_on>
+      <topic>atlas/imu</topic>
+      <gz_frame_id>imu_link</gz_frame_id>
       <update_rate>1000.0</update_rate>
       <imu>
         <noise>
@@ -332,7 +334,12 @@
   <!-- new situational awareness cameras -->
   <gazebo reference="r_situational_awareness_camera_link">
     <sensor type="camera" name="r_situational_awareness_camera_sensor">
-      <update_rate>60.0</update_rate>
+      <topic>atlas/r_situational_awareness_camera/image_raw</topic>
+      <gz_frame_id>r_situational_awareness_camera_optical_frame</gz_frame_id>
+      <!-- 1280x1024 @ 60 Hz (the real camera's spec) cost ~160 MB/s of
+           render readback for the pair and halved the real-time factor in
+           simulation; 640x512 @ 15 Hz keeps the view at a fraction. -->
+      <update_rate>15.0</update_rate>
       <camera name="r_situational_awareness_camera">
         <pose>0 0 0 0 0 0</pose>
         <!-- Spec sheet says 185deg HFOV @ 1280x1024pi @ 60 hz.
@@ -341,8 +348,8 @@
         -->
         <horizontal_fov>2.0</horizontal_fov>
         <image>
-          <width>1280</width>
-          <height>1024</height>
+          <width>640</width>
+          <height>512</height>
           <format>R8G8B8</format>
         </image>
         <clip>
@@ -365,7 +372,12 @@
   </gazebo>
   <gazebo reference="l_situational_awareness_camera_link">
     <sensor type="camera" name="l_situational_awareness_camera_sensor">
-      <update_rate>60.0</update_rate>
+      <topic>atlas/l_situational_awareness_camera/image_raw</topic>
+      <gz_frame_id>l_situational_awareness_camera_optical_frame</gz_frame_id>
+      <!-- 1280x1024 @ 60 Hz (the real camera's spec) cost ~160 MB/s of
+           render readback for the pair and halved the real-time factor in
+           simulation; 640x512 @ 15 Hz keeps the view at a fraction. -->
+      <update_rate>15.0</update_rate>
       <camera name="l_situational_awareness_camera">
         <pose>0 0 0 0 0 0</pose>
         <!-- Spec sheet says 185deg HFOV @ 1280x1024pi @ 60 hz.
@@ -374,8 +386,8 @@
         -->
         <horizontal_fov>2.0</horizontal_fov>
         <image>
-          <width>1280</width>
-          <height>1024</height>
+          <width>640</width>
+          <height>512</height>
           <format>R8G8B8</format>
         </image>
         <clip>

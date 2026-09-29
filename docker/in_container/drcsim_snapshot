@@ -2,11 +2,11 @@
 # Screenshot Gazebo and RViz views of the running simulation on a private
 # virtual display (Xvfb :99), without touching the real screen.
 #   drcsim_snapshot OUT_DIR [VIEW ...]
-# Views: overview, left_hand, right_hand (default: all three). Writes
+# Views: overview, left_hand, right_hand, front (default: all four). Writes
 # OUT_DIR/gazebo_<view>.png and OUT_DIR/rviz_<view>.png.
 set -e
 OUT="${1:-/tmp/snapshots}"; shift || true
-VIEWS="${*:-overview left_hand right_hand}"
+VIEWS="${*:-overview left_hand right_hand front}"
 mkdir -p "$OUT"
 export DISPLAY=:99
 unset __NV_PRIME_RENDER_OFFLOAD __GLX_VENDOR_LIBRARY_NAME
@@ -22,9 +22,11 @@ declare -A GZ_EYE GZ_AT RV_FOCUS RV_DIST RV_YAW RV_PITCH
 GZ_EYE[overview]="2.6 -2.2 1.6";   GZ_AT[overview]="0 0 0.9"
 GZ_EYE[left_hand]="0.9 1.3 1.6";   GZ_AT[left_hand]="0.1 0.95 1.3"
 GZ_EYE[right_hand]="0.9 -1.3 1.6"; GZ_AT[right_hand]="0.1 -0.95 1.3"
+GZ_EYE[front]="1.9 0.35 1.55";     GZ_AT[front]="0 0 1.25"
 RV_FOCUS[overview]="0 0 -0.1";     RV_DIST[overview]=3.2;   RV_YAW[overview]=0.8;  RV_PITCH[overview]=0.3
 RV_FOCUS[left_hand]="0.1 0.95 0.4"; RV_DIST[left_hand]=0.9; RV_YAW[left_hand]=0.9; RV_PITCH[left_hand]=0.5
 RV_FOCUS[right_hand]="0.1 -0.95 0.4"; RV_DIST[right_hand]=0.9; RV_YAW[right_hand]=-0.9; RV_PITCH[right_hand]=0.5
+RV_FOCUS[front]="0.1 0 0.35";      RV_DIST[front]=2.0;      RV_YAW[front]=0.15;    RV_PITCH[front]=0.2
 
 grab() {  # grab OUTFILE
   python3 -c "

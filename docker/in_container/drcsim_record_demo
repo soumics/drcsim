@@ -1,0 +1,71 @@
+#!/bin/bash
+# Record a Gazebo + RViz side-by-side demo video of Atlas.
+#   drcsim_record_demo [OUT_DIR]      (default /tmp/video; needs a running
+#                                      simulation started with demo_camera:=true,
+#                                      e.g. drcsim_sim demo_camera:=true)
+# The Gazebo side is the chase camera riding with Atlas (rendered by the gz
+# server on the GPU, full PBR look), recorded frame by frame in simulation
+# time; RViz runs on a private virtual display (Xvfb :98), screen-recorded in
+# wall time and then retimed by the measured sim/wall ratio. So both play
+# the simulation at true speed and stay in sync, even though Atlas with all
+# its sensors simulates below real time. A scripted teleop session drives
+# Atlas meanwhile; the two are joined side by side (OUT_DIR/atlas_demo.mp4).
+set -e
+OUT="${1:-/tmp/video}"
+mkdir -p "$OUT"
+CONFIG="$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config"
+FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+
+# RViz on its own virtual display, software rendering.
+if ! pgrep -f "Xvfb :98" > /dev/null; then
+  Xvfb :98 -screen 0 1280x720x24 > /tmp/xvfb98.log 2>&1 &
+  sleep 2
+fi
+sed -e 's/Width: 1280/Width: 1280/' -e 's/Height: 900/Height: 720/' \
+  "$CONFIG/atlas.rviz" > /tmp/demo.rviz
+DISPLAY=:98 LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LIBRARY_NAME=mesa __NV_PRIME_RENDER_OFFLOAD=0 \
+  rviz2 -d /tmp/demo.rviz --ros-args -p use_sim_time:=true > /tmp/demo_rviz.log 2>&1 &
+RVIZ=$!
+sleep 12
+
+# Start both recordings.
+rm -f "$OUT/gazebo.mp4" "$OUT/rviz.mp4"
+sim_now() {
+  gz topic -e -t /stats -n 1 | awk '/sim_time/{f=1} f&&/^ *sec:/{s=$2} f&&/nsec:/{print s + $2 / 1e9; exit}'
+}
+drcsim_record_topic /demo_camera/image "$OUT/gazebo.mp4" 25 sim &
+GZ_REC=$!
+ffmpeg -loglevel error -y -f x11grab -draw_mouse 0 -framerate 25 -video_size 1280x720 -i :98 \
+  -c:v libx264 -preset veryfast -pix_fmt yuv420p "$OUT/rviz.mp4" < /dev/null &
+FFMPEG=$!
+SIM0=$(python3 -c "import time; print(time.time())")
+SIMT0=$(sim_now)
+echo "Recording..."
+
+# The show: relaxed hands, grip, open, walk, curve, side-step, back, kick, turn.
+( sleep 6; printf g; sleep 3; printf h; sleep 3; printf g; sleep 3; printf g
+  sleep 2; printf w; sleep 8; printf z; sleep 6; printf ' '; sleep 4; printf d; sleep 5
+  printf s; sleep 5; printf w; sleep 3; printf k; sleep 4; printf ' '; sleep 4
+  printf q; sleep 6; printf ' '; sleep 4; printf g; sleep 4; printf '\003'
+) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py" /dev/null > /tmp/demo_teleop.log 2>&1
+
+SIMT1=$(sim_now)
+SIM1=$(python3 -c "import time; print(time.time())")
+kill -INT $GZ_REC $FFMPEG; wait $GZ_REC $FFMPEG 2> /dev/null || true
+# Simulated seconds per wall second while recording (the real-time factor).
+RTF=$(python3 -c "print(max(0.05, min(1.5, ($SIMT1 - $SIMT0) / ($SIM1 - $SIM0))))")
+echo "Real-time factor while recording: $RTF"
+ffmpeg -loglevel error -y -i "$OUT/rviz.mp4" -vf "setpts=PTS*$RTF,fps=25" \
+  -c:v libx264 -preset veryfast -pix_fmt yuv420p "$OUT/rviz_simtime.mp4"
+kill $RVIZ 2> /dev/null || true
+
+# Side by side, both scaled to 720 px high, trimmed to the shorter one.
+DUR=$(for f in gazebo rviz_simtime; do
+  ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/$f.mp4"; done | sort -n | head -1)
+LABEL="fontfile=$FONT:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x=24:y=20"
+ffmpeg -loglevel error -y -i "$OUT/gazebo.mp4" -i "$OUT/rviz_simtime.mp4" -t "$DUR" -filter_complex \
+  "[0:v]scale=-2:720,fps=25,drawtext=text='Gazebo Harmonic':$LABEL[g];\
+[1:v]scale=-2:720,fps=25,drawtext=text='RViz 2 - sensors + TF':$LABEL[r];\
+[g][r]hstack=inputs=2" \
+  -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p "$OUT/atlas_demo.mp4"
+echo "Demo video: $OUT/atlas_demo.mp4 (${DUR%.*} s)"

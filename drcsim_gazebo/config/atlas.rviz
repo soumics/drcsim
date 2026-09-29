@@ -1,11 +1,19 @@
 Panels:
   - Class: rviz_common/Displays
     Name: Displays
+    Help Height: 0
+    Tree Height: 260
 Visualization Manager:
+  Class: ""
   Displays:
     - Class: rviz_default_plugins/Grid
       Name: Grid
       Enabled: true
+      Reference Frame: <Fixed Frame>
+      Cell Size: 1
+      Plane Cell Count: 20
+      Offset: {X: 0, Y: 0, Z: -0.93}
+      Color: 160; 160; 164
     - Class: rviz_default_plugins/RobotModel
       Name: RobotModel
       Enabled: true
@@ -13,15 +21,62 @@ Visualization Manager:
       Description Topic:
         Value: /robot_description
         Durability Policy: Transient Local
+    - Class: rviz_default_plugins/PointCloud2
+      Name: MultiSense lidar (3D, spinning)
+      Enabled: true
+      Topic:
+        Value: /multisense/lidar_points
+        Reliability Policy: Best Effort
+        Depth: 100
+      Decay Time: 4
+      Style: Points
+      Size (Pixels): 2
+      Color Transformer: AxisColor
+      Axis: Z
+      Use Fixed Frame: true
+    - Class: rviz_default_plugins/LaserScan
+      Name: MultiSense lidar (scan)
+      Enabled: true
+      Topic:
+        Value: /multisense/lidar_scan
+        Reliability Policy: Best Effort
+        Depth: 100
+      Style: Points
+      Size (Pixels): 3
+      Color Transformer: FlatColor
+      Color: 255; 170; 0
+    - Class: rviz_default_plugins/Image
+      Name: MultiSense left camera
+      Enabled: true
+      Topic:
+        Value: /multisense/left/image_raw
+        Reliability Policy: Best Effort
+    - Class: rviz_default_plugins/Image
+      Name: Torso camera (left)
+      Enabled: true
+      Topic:
+        Value: /atlas/l_situational_awareness_camera/image_raw
+        Reliability Policy: Best Effort
     - Class: rviz_default_plugins/TF
       Name: TF
       Enabled: false
   Global Options:
     Fixed Frame: pelvis
+    Background Color: 38; 40; 46
+    Frame Rate: 30
   Views:
     Current:
       Class: rviz_default_plugins/Orbit
-      Distance: 3.5
-      Focal Point: {X: 0, Y: 0, Z: -0.2}
-      Pitch: 0.2
-      Yaw: 0.8
+      Distance: 4.5
+      Focal Point: {X: 0.4, Y: 0, Z: -0.1}
+      Pitch: 0.35
+      Yaw: 3.6
+Window Geometry:
+  Width: 1280
+  Height: 900
+  Displays:
+    collapsed: false
+  MultiSense left camera:
+    collapsed: false
+  Torso camera (left):
+    collapsed: false
