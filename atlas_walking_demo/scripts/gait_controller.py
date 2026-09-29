@@ -136,19 +136,35 @@ WALK_CYCLE = [
 # With the pelvis held by VRCPlugin's harness ("pinned_with_gravity" on
 # atlas/mode), nothing has to balance, so the legs can follow a real
 # human-like swing/stance cycle instead of the cautious lean-lift-plant
-# above. Each leg pose is an absolute (hpy, kny, aky) offset from neutral,
-# chosen so hpy + kny + aky == 0 wherever the foot is on (or about to touch)
-# the ground: the sole stays parallel to the floor. Measured under the
-# harness: the LIFTED pose clears the floor completely (swing-foot Fz ~0)
-# while the pelvis stays within ~4 degrees of upright.
+# above. Each leg pose is an absolute (hpy, kny, aky) offset from neutral;
+# hpy + kny + aky is the sole's pitch (positive = toe up). The harness
+# holds the pelvis at standing height, so a straight leg swung 0.3 rad
+# fore/aft would lift its foot ~3.6 cm off the floor; FRONT (heel strike,
+# toe up) and BACK/PUSH_OFF (toe pressing down) use the ankle to reach the
+# floor anyway. Measured: each foot loaded ~46% of the walk this way, vs
+# ~37% with flat soles at FRONT/BACK. LIFTED clears the floor completely.
 HARNESS_LEG_POSES = {
     'MID': (0.0, 0.0, 0.0),            # straight under the hip
     'LIFTED': (-0.5, 0.9, -0.4),       # knee up, foot clear of the floor
     'REACH': (-0.7, 0.7, -0.1),        # thigh forward, toe up: heel strike next
-    'FRONT': (-0.3, 0.15, 0.15),       # planted ahead of the hip
-    'BACK': (0.3, 0.1, -0.4),          # planted behind the hip, about to push off
-    'PUSH_OFF': (0.2, 0.3, -0.5),      # heel rising as stance ends
+    'FRONT': (-0.3, 0.0, 0.4),         # heel strike ahead of the hip, toe up
+    'BACK': (0.3, 0.0, -0.6),          # behind the hip, toe pressing down
+    'PUSH_OFF': (0.2, 0.3, -0.8),      # toe-off: heel up, knee starting to bend
 }
+
+# Atlas's arms are straight out sideways (a T-pose) at joint zero. Harness
+# mode lowers them to hang with a slightly bent elbow, and swings each one
+# opposite its diagonal leg like a human: arm shz = ARM_SWING_GAIN * the
+# *other* leg's hpy offset. Signs measured live (TF pelvis->hand):
+# l_arm_shx -1.2 / r_arm_shx +1.2 lowers the arms; negative l_arm_shz or
+# positive r_arm_shz moves that hand forward (~15 cm per 0.5 rad); ely
+# 1.57 turns elx into a forward elbow bend.
+HARNESS_ARM_REST = {
+    'l_arm_shx': -1.3, 'r_arm_shx': 1.3,
+    'l_arm_ely': 1.57, 'r_arm_ely': 1.57,
+    'l_arm_elx': 0.5, 'r_arm_elx': -0.5,
+}
+ARM_SWING_GAIN = 0.8
 
 HARNESS_LIFT_DURATION = 0.4
 HARNESS_SWING_DURATION = 0.4
@@ -220,7 +236,13 @@ class GaitController:
         self._phase_index = None  # None means idle (not in WALK_CYCLE)
         self._elapsed = 0.0
         self._prev_pose = dict(self.neutral_pose)
+        if harness:
+            # Lower the arms: idle-interpolate from the pose Atlas is
+            # holding into the harness rest pose over IDLE_DURATION.
+            for name, delta in HARNESS_ARM_REST.items():
+                self.neutral_pose[name] += delta
         self._target_pose = dict(self.neutral_pose)
+        self._current_pose = dict(self._prev_pose)
 
     def start_walking(self):
         self._stop_requested = False
@@ -239,6 +261,7 @@ class GaitController:
             if self._phase_index is not None else IDLE_DURATION)
         alpha = min(1.0, self._elapsed / duration)
         pose = _lerp_pose(self._prev_pose, self._target_pose, alpha)
+        self._current_pose = pose
         if alpha >= 1.0:
             self._advance()
         return [pose[name] for name in ATLAS_JOINT_NAMES]
@@ -263,6 +286,12 @@ class GaitController:
                               (phase.support, phase.stance_pose)):
                 for joint, delta in zip(('hpy', 'kny', 'aky'), HARNESS_LEG_POSES[key]):
                     pose[f'{side}_leg_{joint}'] += delta
+            # Left arm forward (negative shz) with the right leg forward
+            # (negative hpy), and vice versa.
+            r_hpy = pose['r_leg_hpy'] - self.neutral_pose['r_leg_hpy']
+            l_hpy = pose['l_leg_hpy'] - self.neutral_pose['l_leg_hpy']
+            pose['l_arm_shz'] += ARM_SWING_GAIN * r_hpy
+            pose['r_arm_shz'] -= ARM_SWING_GAIN * l_hpy
             return pose
         lean_sign = 1.0 if phase.support == 'l' else -1.0
         pose['l_leg_hpx'] += lean_sign * LEAN_HPX
@@ -281,13 +310,13 @@ class GaitController:
     def _begin_phase(self, index):
         self._phase_index = index
         self._elapsed = 0.0
-        self._prev_pose = dict(self._target_pose)
+        self._prev_pose = dict(self._current_pose)
         self._target_pose = self._target_pose_for(self.cycle[index])
 
     def _begin_idle(self):
         self._phase_index = None
         self._elapsed = 0.0
-        self._prev_pose = dict(self._target_pose)
+        self._prev_pose = dict(self._current_pose)
         self._target_pose = dict(self.neutral_pose)
         self.walking = False
 

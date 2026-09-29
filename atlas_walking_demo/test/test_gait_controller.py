@@ -115,15 +115,18 @@ def test_stop_walking_returns_to_idle_only_at_a_shift_boundary():
     assert gait.walking is False
 
 
-def test_harness_cycle_alternates_legs_and_keeps_planted_soles_flat():
+def test_harness_cycle_alternates_legs_with_heel_strike_and_toe_off():
     names = [phase.name for phase in gait_controller_script.HARNESS_CYCLE]
     assert names == [
         'LIFT_RIGHT', 'SWING_RIGHT', 'PLANT_RIGHT',
         'LIFT_LEFT', 'SWING_LEFT', 'PLANT_LEFT',
     ]
     poses = gait_controller_script.HARNESS_LEG_POSES
-    for key in ('MID', 'LIFTED', 'FRONT', 'BACK', 'PUSH_OFF'):
-        assert abs(sum(poses[key])) < 1e-9, key
+    for key in ('MID', 'LIFTED'):
+        assert abs(sum(poses[key])) < 1e-9, key  # sole flat
+    assert sum(poses['FRONT']) > 0.0  # toe up: heel strike
+    assert sum(poses['BACK']) < 0.0  # toe down: push-off
+    assert sum(poses['PUSH_OFF']) < 0.0
 
 
 def test_harness_swing_right_moves_right_leg_forward_and_left_leg_back():
@@ -140,6 +143,24 @@ def test_harness_swing_right_moves_right_leg_forward_and_left_leg_back():
     assert position[names.index('l_leg_hpy')] == back[0]
     # No lateral lean under the harness.
     assert position[names.index('l_leg_hpx')] == 0.0
+
+
+def test_harness_lowers_arms_smoothly_then_swings_them_opposite_the_legs():
+    names = gait_controller_script.ATLAS_JOINT_NAMES
+    gait = gait_controller_script.GaitController(_zero_pose(), harness=True)
+    rest = gait_controller_script.HARNESS_ARM_REST
+
+    first = gait.sample(0.01)  # starts from the T-pose, no snap
+    assert 0.0 > first[names.index('l_arm_shx')] > rest['l_arm_shx']
+    lowered = gait.sample(gait_controller_script.IDLE_DURATION)
+    assert lowered[names.index('l_arm_shx')] == rest['l_arm_shx']
+
+    gait.start_walking()
+    gait.sample(gait_controller_script.HARNESS_LIFT_DURATION)
+    position = gait.sample(gait_controller_script.HARNESS_SWING_DURATION)  # right leg reaching
+    # Right leg forward -> left arm forward (negative shz), right arm back.
+    assert position[names.index('l_arm_shz')] < 0.0
+    assert position[names.index('r_arm_shz')] < 0.0
 
 
 def test_harness_stop_returns_to_idle_after_a_plant_phase():

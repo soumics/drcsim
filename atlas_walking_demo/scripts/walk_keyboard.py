@@ -66,6 +66,18 @@ from rclpy.node import Node
 from std_msgs.msg import String
 
 PUBLISH_RATE_HZ = 30.0
+
+# (kp, kd) sent in AtlasCommand for the leg yaw/roll joints while walking
+# in the harness. atlas_v5_gains.yaml's values (hpz p=5, hpx p=900, akx
+# p=300) leave them nearly limp: measured over a harness walk, foot
+# friction swung hip yaw across its whole +-45 deg range and hip roll
+# +-24 deg while both were commanded 0 -- the "drunk" gait. The gait never
+# moves these joints, so they only need to hold still.
+HARNESS_GAIN_OVERRIDES = {
+    'hpz': (1000.0, 10.0),
+    'hpx': (2500.0, 10.0),
+    'akx': (1000.0, 3.0),
+}
 DIAG_PERIOD_SEC = 1.0
 
 INSTRUCTIONS = """
@@ -113,7 +125,13 @@ class WalkKeyboardNode(Node):
         if len(msg.position) != len(ATLAS_JOINT_NAMES):
             return  # plugin not fully initialized yet
         setpoint = reconstruct_setpoint(msg)
+        self.kp = list(msg.kp_position)
+        self.kd = list(msg.kd_position)
         if self.harness:
+            for i, name in enumerate(ATLAS_JOINT_NAMES):
+                joint = name.rsplit('_', 1)[1]
+                if '_leg_' in name and joint in HARNESS_GAIN_OVERRIDES:
+                    self.kp[i], self.kd[i] = HARNESS_GAIN_OVERRIDES[joint]
             # VRCPlugin holds the pelvis where it is right now, gravity on.
             self.mode_pub.publish(String(data='pinned_with_gravity'))
         self.gait = GaitController(setpoint, harness=self.harness)
@@ -132,6 +150,9 @@ class WalkKeyboardNode(Node):
         command.position = self.gait.sample(1.0 / PUBLISH_RATE_HZ)
         command.effort = [0.0] * len(ATLAS_JOINT_NAMES)
         command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
+        # AtlasPlugin replaces its live gains with any full-length array.
+        command.kp_position = self.kp
+        command.kd_position = self.kd
         self.pub.publish(command)
         if self.harness and self.gait.phase_name != 'IDLE':
             # VRCPlugin stops the warp 0.1 s after the last message, so

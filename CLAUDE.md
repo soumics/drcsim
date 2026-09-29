@@ -1893,10 +1893,30 @@ harness first**; balance control (CoM/ZMP) is the next project.
     yaw +0.39 rad.
   - The warp now integrates from `pinHoldPose` while pinned.
   - After the fix: 25 s walk → x +9.08 m, y −0.02 m, yaw −0.002 rad.
-- Joints track the harness keyframes within ~0.05–0.1 rad. Hip roll
-  (`hpx`, commanded 0) wobbles up to ±0.3 rad from foot friction while the
-  pelvis advances. That is cosmetic; the fix would be to stiffen hpx or
-  match `forward_speed` more precisely.
+- "Drunk" gait root cause, measured with `docker_ws/walk_stats.py`:
+  - The pelvis was held throughout (roll/pitch/yaw ±1°, z ±1 mm).
+  - The legs were not: hip yaw hit its ±45° limits and hip roll swung
+    ±24°, both commanded 0.
+  - `atlas_v5_gains.yaml` has `hpz` p=5, `hpx` p=900, `akx` p=300, so
+    foot friction twists the legs freely.
+  - Fix: `walk_keyboard.py` sends full `kp_position`/`kd_position` arrays
+    in AtlasCommand; AtlasPlugin adopts full-length gain arrays. In harness
+    mode it overrides hpz (1000, 10), hpx (2500, 10), akx (1000, 3).
+  - Result: hpz/hpx within ±6°.
+- Arms: at joint zero Atlas is in a T-pose. Harness mode lowers the arms
+  (`HARNESS_ARM_REST`) over `IDLE_DURATION` and swings `shz` against the
+  opposite leg's hpy.
+  - Signs were measured with TF pelvis→hand: negative `l_arm_shz` and
+    positive `r_arm_shz` move the hand forward.
+- Foot contact: with the pelvis held at standing height, fore/aft leg
+  poses lift the foot.
+  - Heel-strike FRONT and toe-down BACK/PUSH_OFF raised per-foot loaded
+    time from ~37% to ~46%.
+- `GaitController` phase transitions now start from the last *sampled*
+  pose, not the previous target, so pressing `w` mid-interpolation (e.g.
+  while the arms are lowering) never snaps.
+- RViz was blank because `docker_ws/start_gui.sh` ran `rviz2` without
+  `-d /root/atlas.rviz` and without `use_sim_time`.
 - `walk_keyboard.py` quit abort ("terminate called without an active
   exception") came from destroying the node under a still-spinning
   executor thread. Fixed by joining the spin thread first.
