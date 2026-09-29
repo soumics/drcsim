@@ -5,7 +5,9 @@
 - **Hands:** relaxed five-finger SCHUNK SVH hands, then gripping, opening flat and relaxing.
 - **Walking:** forward, curving, side-stepping, backward, a kick from the side, and a turn in
   place.
-- **Look:** the pearl & rose-gold skin with cyan accent lights.
+- **Look:** Atlas's original black & white textures and Boston Dynamics logo, with rose-gold
+  hands and cyan visor and chest lights (`skin:=accents`).
+- **Views:** Gazebo and RViz both look at Atlas from the front-right.
 - **RViz:** the spinning MultiSense lidar's 3D point cloud and scan, plus the head and torso
   camera feeds.
 

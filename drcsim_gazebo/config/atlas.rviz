@@ -66,11 +66,13 @@ Visualization Manager:
     Frame Rate: 30
   Views:
     Current:
+      # Same view as the demo chase camera (atlas.launch.py demo_camera):
+      # front-right of Atlas, 4.3 m out, slightly above the pelvis.
       Class: rviz_default_plugins/Orbit
-      Distance: 4.5
-      Focal Point: {X: 0.4, Y: 0, Z: -0.1}
-      Pitch: 0.35
-      Yaw: 3.6
+      Distance: 4.3
+      Focal Point: {X: 0, Y: 0, Z: 0}
+      Pitch: 0.07
+      Yaw: -0.7
 Window Geometry:
   Width: 1280
   Height: 900

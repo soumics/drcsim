@@ -2218,6 +2218,26 @@ chest disc (`ACCENT_LIGHTS`).
 deleted five helper functions added in between. Grep the `def`s after such
 edits.
 
+### Look and views follow-up (2026-09-29)
+
+- **User feedback:** the Gazebo and RViz views differed (RViz and the GUI
+  follow camera looked from *behind*); the repaint had removed the Boston
+  Dynamics logo (it lives in the mesh textures); and RViz, which can't show
+  the gz PBR paint, showed a different-looking robot.
+- **User's choice:** `skin:=accents`, the new default. The original
+  textures and logo stay untouched; only the hands are painted, plus the
+  cyan visor and chest lights. `skin:=glam` keeps the full pearl & rose-gold
+  repaint; `classic` is plain.
+- **Views:** RViz Orbit yaw −0.7, distance 4.3 and `drcsim_gui`'s follow
+  offset (3.3, −2.8, 0.3) now match the demo chase camera (front-right).
+- **Remaining difference:** RViz draws the SVH hands in their mesh colours
+  (the rose gold is gz-only).
+- **Open:** the RViz point-cloud status still flashes red at moments while
+  walking (cloud before TF); `Depth: 100` didn't remove it.
+- **Tooling:** `drcsim_grab_frame TOPIC OUT.png` saves a GPU-rendered frame
+  (e.g. `/demo_camera/image`). Use it to judge PBR colours; the Xvfb
+  snapshots can't show them.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

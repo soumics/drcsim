@@ -81,11 +81,14 @@ HAND_JOINT_STATE_TOPICS = {
     'irobot': [f'irobot_hands/{s}_hand/joint_states' for s in ('l', 'r')],
 }
 
-# skin:=modern -- "pearl & rose gold": physically based materials (gz-sim/
-# Ogre2 PBR) replacing the meshes' old textures. Each paint is (diffuse RGB,
-# metalness, roughness): pearlescent white gloss body panels, polished
-# rose-gold joints/trim and fingers, gloss-black head and feet for contrast.
-# ACCENT_LIGHTS adds glowing cyan (emissive) details on top.
+# Skins (gz only; RViz always shows the URDF's own textures):
+# - accents (default): Atlas's original black & white textures and Boston
+#   Dynamics logo untouched -- so Gazebo and RViz show the same body -- plus
+#   rose-gold/pearl hands and glowing cyan (emissive) visor and chest light.
+# - glam: "pearl & rose gold" -- every visual repainted with physically
+#   based materials (gz-sim/Ogre2 PBR); replaces the textures, logo included.
+# - classic: the original model, nothing added.
+# Each paint is (diffuse RGB, metalness, roughness).
 PAINTS = {
     # Metalness stays moderate: the world has no environment map, and a fully
     # metallic Ogre2 PBR surface takes nearly all its colour from reflecting
@@ -102,6 +105,8 @@ PAINT_RULES = [
     (('utorso', 'pelvis', 'uleg', 'lleg', 'uarm', 'larm', 'ufarm'), 'pearl'),
 ]
 DEFAULT_PAINT = 'rose_gold'
+# Visuals the accents skin paints (the hands); glam paints everything.
+HAND_VISUAL_KEYS = ('svh', 'palm', '_f0', '_f1', '_f2', '_f3', 'finger')
 # (link, name, pose "x y z r p y", geometry element, emissive RGB).
 ACCENT_LIGHTS = [
     ('head', 'visor_light', '0.055 0 0.028 0 0 0', ('box', {'size': '0.006 0.16 0.012'}),
@@ -255,9 +260,12 @@ def _paint_for(name):
     return DEFAULT_PAINT
 
 
-def _modern_skin_sdf(robot_description):
+def _skin_sdf(robot_description, paint_body):
     """
-    Convert the URDF to SDF and give every visual a PBR car-paint material.
+    Convert the URDF to SDF, paint visuals with PBR materials, add accent lights.
+
+    paint_body=False (skin:=accents) paints only the hands and keeps the
+    body's own textures; True (skin:=glam) repaints every visual.
 
     Only VRCPlugin's spawn (gz) sees this; robot_state_publisher/RViz keep
     the plain URDF. gz sdf -p is the same URDF->SDF conversion VRCPlugin's
@@ -275,7 +283,10 @@ def _modern_skin_sdf(robot_description):
     root = ET.fromstring(sdf[sdf.index('<sdf'):])
     for link in root.iter('link'):
         for visual in link.findall('visual'):
-            rgb, metalness, roughness = PAINTS[_paint_for(visual.get('name', link.get('name')))]
+            name = visual.get('name', link.get('name'))
+            if not paint_body and not any(key in name for key in HAND_VISUAL_KEYS):
+                continue
+            rgb, metalness, roughness = PAINTS[_paint_for(name)]
             for old in visual.findall('material'):
                 visual.remove(old)
             color = ' '.join(f'{c:.3f}' for c in rgb) + ' 1'
@@ -338,9 +349,10 @@ def generate_launch_description():
             description='Hands on Atlas: SCHUNK SVH (5 fingers), Sandia (4 '
                         'fingers), Robotiq (3-finger gripper), or none.'),
         DeclareLaunchArgument(
-            'skin', default_value='modern', choices=['modern', 'classic'],
-            description="Atlas's look in Gazebo: pearl & rose gold PBR paint with "
-                        'cyan accent lights, or the original textures.'),
+            'skin', default_value='accents', choices=['accents', 'glam', 'classic'],
+            description="Atlas's look in Gazebo: accents (original textures and logo + "
+                        'rose-gold hands and cyan lights), glam (pearl & rose gold '
+                        'repaint) or classic.'),
         DeclareLaunchArgument(
             'robot_xacro', default_value='',
             description='Path to the robot xacro file VRCPlugin will spawn '
@@ -396,7 +408,8 @@ def _launch_setup(context, *args, **kwargs):
     if LaunchConfiguration('demo_camera').perform(context).lower() in ('true', '1'):
         gz_description = _add_demo_camera(gz_description)
     spawn_description = (
-        _modern_skin_sdf(gz_description) if skin == 'modern' else gz_description)
+        _skin_sdf(gz_description, paint_body=skin == 'glam') if skin != 'classic'
+        else gz_description)
     rsp_description = (
         _fix_robotiq_passive_joints(robot_description)
         if 'robotiq_hands' in os.path.basename(robot_xacro) else robot_description)

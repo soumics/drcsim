@@ -5,9 +5,10 @@ gz sim -g -v 2 --gui-config "$CONFIG/gui.config" > /tmp/gz_gui.log 2>&1 &
 rviz2 -d "$CONFIG/atlas.rviz" \
   --ros-args -p use_sim_time:=true > /tmp/rviz.log 2>&1 &
 sleep 8
-# Keep the camera on Atlas while it walks.
+# Keep the camera on Atlas while it walks: front-right, the same view as
+# RViz and the demo chase camera.
 gz service -s /gui/follow/offset --reqtype gz.msgs.Vector3d --reptype gz.msgs.Boolean \
-  --timeout 5000 --req "x: -1.5, y: -3.5, z: 1.2" > /dev/null
+  --timeout 5000 --req "x: 3.3, y: -2.8, z: 0.3" > /dev/null
 gz service -s /gui/follow --reqtype gz.msgs.StringMsg --reptype gz.msgs.Boolean \
   --timeout 5000 --req 'data: "atlas"' > /dev/null
 echo "Gazebo GUI and RViz started (logs: /tmp/gz_gui.log, /tmp/rviz.log)."

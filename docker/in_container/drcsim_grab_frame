@@ -1,0 +1,20 @@
+#!/usr/bin/env python3
+"""Save one frame of a sensor_msgs/Image topic as a PNG: drcsim_grab_frame TOPIC OUT.png"""
+import sys
+import time
+
+from PIL import Image as PILImage
+import rclpy
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import Image
+
+rclpy.init()
+node = rclpy.create_node('grab_frame')
+got = {}
+node.create_subscription(Image, sys.argv[1], lambda m: got.__setitem__('m', m), qos_profile_sensor_data)
+t0 = time.time()
+while 'm' not in got and time.time() - t0 < 20:
+    rclpy.spin_once(node, timeout_sec=0.1)
+m = got['m']
+PILImage.frombytes('RGB', (m.width, m.height), bytes(m.data)).save(sys.argv[2])
+print('saved', m.width, m.height)

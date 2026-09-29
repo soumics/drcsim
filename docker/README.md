@@ -18,7 +18,7 @@ A self-contained image for the whole repository:
 docker/build.sh          # build the image drcsim:jazzy (first time: several minutes;
                          # fetches the GPL-3.0 SCHUNK SVH hand model next to the repo)
 docker/run.sh            # start the container "drcsim" in the background
-docker/sim.sh            # (re)start the simulation (Atlas, SVH five-finger hands, glam skin)
+docker/sim.sh            # (re)start the simulation (Atlas, SVH five-finger hands, classic look + accents)
 docker/gui.sh            # Gazebo GUI + RViz on your screen, camera following Atlas
 docker/teleop.sh         # drive Atlas from the keyboard (Ctrl-C quits)
 docker/stop.sh           # remove the container
@@ -30,6 +30,7 @@ docker/stop.sh           # remove the container
 docker/sim.sh hands:=sandia             # Sandia four-finger hands
 docker/sim.sh hands:=robotiq            # Robotiq 3-finger grippers
 docker/sim.sh hands:=none skin:=classic # the original look, no hands
+docker/sim.sh skin:=glam                # pearl & rose gold repaint (no logo)
 docker/sim.sh demo_camera:=true         # add the chase camera used for demo videos
 ```
 
