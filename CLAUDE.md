@@ -2283,7 +2283,7 @@ The user asked to remove the harness and walk free-standing.
 tested in `test/test_zmp_walk.py`) now walk Atlas **without the harness**:
 10 × 0.15 m repeatably with the defaults, 16 × 0.15 m at SS 1.0 / DS 0.5.
 0.20 m steps still fall. Teleop (`walk_keyboard.py`) still uses the harness;
-the free walk is a scripted straight line.
+the free walk is a scripted straight line (superseded by v2 below).
 
 Pieces (details in the package README):
 - Kajita preview control: LIPM, CoM 1.12 m, 200 Hz sim time, 1.6 s preview,
@@ -2315,6 +2315,60 @@ a fall; `timeout` around `ros2 run` prints a harmless RCLError at shutdown.
 The image is built with tests off: rebuild with
 `--cmake-args -DBUILD_TESTING=ON` before `colcon test` in the container.
 Tests: atlas_walking_demo 71/71.
+
+### Free-standing walking v2: any direction, teleop, getting up (2026-09-30)
+
+User: "overcome limits" (straight line only, teleop harness-only, 0.20 m
+fell, restart after a fall). All four done:
+
+- **Online walker.** `zmp_walk.ZmpWalker` is velocity-driven:
+  `set_velocity(vx, vy, wz)` / `stop()`, footsteps planned online just far
+  enough ahead for the preview. It keeps a body pose, and each step moves it
+  by the command. Side steps and turns are taken only by the leading foot
+  (2× per leading step), so the feet never cross. `stop()` adds one closing
+  step, bringing the feet side by side. Poses carry yaw; the pelvis heading
+  is the feet's mean, and IK gets each foot's relative yaw.
+  - Offline ZMP tracking: max 14 mm, mean 1 mm.
+  - `START_DELAY` must stay about PREVIEW: 0.8 s gave 5× the ZMP error,
+    0.4 s 20×. So commands take effect about 2.6 s later.
+- **`balance_controller.FreeWalkController`** (no rclpy, tested with a fake
+  AtlasState) holds the takeover, crouch, stabilizers, CoM feedback, fall
+  detection and recovery.
+  - `free_walk.py`: scripted N steps (`side_speed`, `turn_speed` too).
+  - `walk_keyboard.py -p harness:=false`: teleop at 200 Hz. The old
+    `GaitController` keyframe gait is no longer used; hands now publish from
+    their own 30 Hz timer.
+  - With no tty it follows `atlas_walk/cmd_vel` only; `docker exec`
+    without `-t` has no tty.
+- **Step length.** 0.25 m works; the old "0.20 falls" no longer reproduces,
+  likely thanks to CoM feedback during settle. 0.30 m falls at step 10, so
+  `MAX_STEP` is 0.25.
+- **Getting up.** New VRCPlugin mode `recover`: pelvis upright at its
+  current x, y and heading, **spawn z + 0.15 m**, spring harness with
+  gravity (ApplyHarness teleports there).
+  - The controller blends the legs to the stance in the air (1.5 s), lowers
+    via `atlas/cmd_vel` linear.z to STAND_Z − 5 mm (1.5 s; STAND_Z = 0.074
+    sole + 0.837 ankle = 0.911 m, matches the measured stand), holds, then
+    publishes `nominal` at 4 s.
+  - Failures on the way (measured with `docker_ws/leg_probe.py`):
+    - Recovering at spawn height let a fallen-pose foot drag and stick
+      (hip roll held −0.17 rad against a ~0 command).
+    - A harness 3.6 cm too low pressed 2140 N into the feet for 1760 N of
+      weight.
+    - Both fell again on release.
+  - Now 4/4 pushes (2500 N × 0.6 s, side, front and back) recovered first
+    try, and walking resumed.
+- **Measured** (10 steps each, all standing at the end):
+  - 0.15 m → 1.37 m; 0.20 → 1.8 m; 0.25 → 2.3 m.
+  - Faster timing (SS 0.6 / DS 0.3) is fine.
+  - Side 0.21 m; turn 43° in 6 steps; curve 58°.
+  - Teleop over Twist: 1.5 m forward, then side + turn 96°, stopped on
+    timeout.
+- **Testing pitfall.** `docker cp` of scripts into `install/.../lib`
+  drops the exec bit (the sources aren't +x; `install(PROGRAMS)` sets it),
+  and `ros2 run` then says "No executable found". chmod after copying.
+- Tests: atlas_walking_demo + drcsim_gazebo_ros_plugins 249, 0 failures
+  (35 skipped).
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

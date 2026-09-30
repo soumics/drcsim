@@ -20,7 +20,8 @@ docker/build.sh          # build the image drcsim:jazzy (first time: several min
 docker/run.sh            # start the container "drcsim" in the background
 docker/sim.sh            # (re)start the simulation (Atlas, SVH five-finger hands, classic look + accents)
 docker/gui.sh            # Gazebo GUI + RViz on your screen, camera following Atlas
-docker/teleop.sh         # drive Atlas from the keyboard (Ctrl-C quits)
+docker/teleop.sh         # drive Atlas from the keyboard, in the harness (Ctrl-C quits)
+docker/teleop.sh --ros-args -p harness:=false   # ...free-standing, no harness
 docker/stop.sh           # remove the container
 ```
 

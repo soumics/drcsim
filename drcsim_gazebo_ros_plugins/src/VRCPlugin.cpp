@@ -413,6 +413,22 @@ void VRCPlugin::DoSetRobotMode(
     this->PinAtlas(_ecm, _eventMgr, true);
   } else if (_str == "nominal") {
     this->UnpinAtlas(_ecm, _eventMgr);
+  } else if (_str == "recover") {
+    // Get Atlas back up after a fall: stand the pelvis upright where it
+    // lies, at its current heading and kRecoverLift above its spawn height
+    // (so legs still in their fallen pose clear the floor: at spawn height
+    // a foot dragged and stuck while the controller straightened the legs),
+    // and hold it there in the spring harness, with gravity. ApplyHarness()
+    // teleports it there on the next tick, since the error is large. The
+    // controller then lowers the harness (atlas/cmd_vel linear.z) and
+    // publishes "nominal" to let go.
+    constexpr double kRecoverLift = 0.15;
+    const gz::math::Pose3d actual = gz::sim::worldPose(this->atlas.pinLinkEntity, _ecm);
+    const double z = kRecoverLift + (this->atlas.spawnPose.Pos().Z() > 0.0 ?
+      this->atlas.spawnPose.Pos().Z() : 0.95);
+    this->PinAtlas(_ecm, _eventMgr, true);
+    this->atlas.pinHoldPose = gz::math::Pose3d(
+      actual.Pos().X(), actual.Pos().Y(), z, 0.0, 0.0, actual.Rot().Yaw());
   } else if (_str == "harnessed") {
     // "harnessed" relied on Classic's downward-raycast ground-height query
     // (Entity::GetNearestEntityBelow()). gz-sim's raycast mechanism
@@ -454,7 +470,7 @@ void VRCPlugin::DoSetRobotMode(
   } else {
     RCLCPP_INFO(
       this->rosNode->get_logger(), "available modes:no_gravity, feet, pinned, "
-      "nominal");
+      "pinned_with_gravity, nominal, recover");
   }
 }
 

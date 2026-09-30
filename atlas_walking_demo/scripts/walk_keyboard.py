@@ -40,10 +40,13 @@ integration matches VRCPlugin's. Besides the keys below it follows any
 geometry_msgs/Twist on atlas_walk/cmd_vel (joystick, teleop_twist_keyboard,
 a planner), which takes priority while messages keep arriving.
 
-harness:=false runs the free-standing lean/lift/plant WALK_CYCLE instead
-(w and space only); without a balance controller it manages a step or two.
-The harness stays on when the node quits; publish "nominal" on atlas/mode
-to release it.
+harness:=false walks free-standing instead, with no harness:
+balance_controller.py's ZMP preview control and balance feedback, at
+200 Hz of sim time. Same keys (slower: about 0.15 m steps), plus r to get
+up after a fall (automatic after 2 s unless auto_recover:=false). Walk
+commands take effect after about 2.6 s: the preview plans that far ahead.
+In harness mode the harness stays on when the node quits; publish
+"nominal" on atlas/mode to release it.
 
 ROS spinning runs on its own executor thread, decoupled from the blocking
 keyboard read in main(). Raw keypress reading follows ROS 2's
@@ -60,7 +63,8 @@ import time
 import tty
 
 from atlas_msgs.msg import AtlasCommand, AtlasState
-from gait_controller import ATLAS_JOINT_NAMES, GaitController
+import balance_controller
+from gait_controller import ATLAS_JOINT_NAMES
 from geometry_msgs.msg import Twist
 import harness_gait
 from harness_gait import HarnessGait
@@ -72,10 +76,12 @@ from rclpy.parameter import Parameter
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 import teleop_extras as tx
+import zmp_walk
 
 PUBLISH_RATE_HZ = 30.0
 DIAG_PERIOD_SEC = 2.0
 TWIST_TIMEOUT_SEC = 0.5
+RECOVER_WAIT_SEC = 2.0  # free-standing: lying still this long before getting up
 
 # (kp, kd) sent in AtlasCommand for the leg yaw/roll joints while walking
 # in the harness. atlas_v5_gains.yaml's values (hpz p=5, hpx p=900, akx
@@ -90,13 +96,14 @@ HARNESS_GAIN_OVERRIDES = {
 }
 
 INSTRUCTIONS = """
-atlas_walking_demo -- keyboard teleop (Atlas in a harness)
+atlas_walking_demo -- keyboard teleop (harness:=false to walk free-standing)
   w / s     walk forward / backward        a / d   side-step left / right
   q / e     turn left / right              z / c   curve forward left / right
   space, x  stop (finishes the step)       + / -   speed up / down
   g         grip / relax both hands        [ / ]   grip / relax left / right hand
   h         open both hands flat (relax again with g)
   k / l / j push Atlas: from the right / front / behind
+  r         get up after a fall (free-standing mode)
   Ctrl-C    quit
 Also follows geometry_msgs/Twist on atlas_walk/cmd_vel.
 """
@@ -133,7 +140,9 @@ class WalkKeyboardNode(Node):
         self.speed_index = 2
         self.grippers = {'l': tx.Gripper(), 'r': tx.Gripper()}
         self.harness = self.declare_parameter('harness', True).value
-        if self.harness and not self.get_parameter('use_sim_time').value:
+        self.auto_recover = self.declare_parameter('auto_recover', True).value
+        self._fell_at = None
+        if not self.get_parameter('use_sim_time').value:
             self.set_parameters([Parameter('use_sim_time', value=True)])
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.mode_pub = self.create_publisher(String, 'atlas/mode', 10)
@@ -149,7 +158,9 @@ class WalkKeyboardNode(Node):
             for side in ('l', 'r')}
         self.create_subscription(AtlasState, 'atlas/atlas_state', self._on_state, 10)
         self.create_subscription(Twist, 'atlas_walk/cmd_vel', self._on_twist, 10)
-        self.create_timer(1.0 / PUBLISH_RATE_HZ, self._tick)
+        self.create_timer(1.0 / PUBLISH_RATE_HZ if self.harness else zmp_walk.DT, self._tick)
+        self.create_timer(1.0 / PUBLISH_RATE_HZ, self._hands_tick)
+        self._last_hands_time = None
 
     @property
     def speed(self):
@@ -161,6 +172,12 @@ class WalkKeyboardNode(Node):
             return
         if len(msg.position) != len(ATLAS_JOINT_NAMES):
             return  # plugin not fully initialized yet
+        if not self.harness:
+            self.gait = balance_controller.FreeWalkController(msg)
+            self.get_logger().info(
+                'Took over the current PID setpoint -- free-standing: crouching and '
+                'settling (5 s), then ready.')
+            return
         setpoint = reconstruct_setpoint(msg)
         self.kp = list(msg.kp_position)
         self.kd = list(msg.kd_position)
@@ -171,11 +188,10 @@ class WalkKeyboardNode(Node):
                     self.kp[i], self.kd[i] = HARNESS_GAIN_OVERRIDES[joint]
             # VRCPlugin holds the pelvis where it is right now, gravity on.
             self.mode_pub.publish(String(data='pinned_with_gravity'))
-        self.gait = HarnessGait(setpoint) if self.harness else GaitController(setpoint)
+        self.gait = HarnessGait(setpoint)
         self.get_logger().info(
-            'Took over the current PID setpoint'
-            f'{" and put Atlas in the harness (crouching in 3 s)" if self.harness else ""}'
-            ' -- ready.')
+            'Took over the current PID setpoint and put Atlas in the harness '
+            '(crouching in 3 s) -- ready.')
 
     def _on_twist(self, msg):
         self._twist = (msg.linear.x, msg.linear.y, msg.angular.z)
@@ -191,12 +207,12 @@ class WalkKeyboardNode(Node):
         self._last_tick_time = now
         if dt <= 0.0:
             return
-        velocity = (0.0, 0.0, 0.0, 0.0)
-        if self.harness:
-            self._apply_twist()
-            positions, velocity = self.gait.sample(dt)
-        else:
-            positions = self.gait.sample(dt)
+        self._apply_twist()
+        if not self.harness:
+            self._free_tick(now.nanoseconds / 1e9)
+            self._log_diagnostics()
+            return
+        positions, velocity = self.gait.sample(dt)
         command = AtlasCommand()
         command.header.stamp = now.to_msg()
         command.position = positions
@@ -212,6 +228,50 @@ class WalkKeyboardNode(Node):
             twist = Twist()
             twist.linear.x, twist.linear.y, twist.linear.z, twist.angular.z = velocity
             self.cmd_vel_pub.publish(twist)
+        self._log_diagnostics()
+
+    def _free_tick(self, t):
+        """Free-standing mode: one balance_controller tick, getting up after falls."""
+        controller = self.gait
+        was_fallen = controller.status == 'fallen'
+        out = controller.update(self._last_state, t)
+        if controller.status == 'fallen':
+            if not was_fallen:
+                self._fell_at = t
+                self.get_logger().error(
+                    f'Fell ({controller.fall_info}); '
+                    + ('getting up in 2 s.' if self.auto_recover else 'press r to get up.'))
+            elif self.auto_recover and t - self._fell_at >= RECOVER_WAIT_SEC:
+                self._recover()
+            return
+        if out.mode:
+            self.mode_pub.publish(String(data=out.mode))
+            if out.mode == 'nominal':
+                self.get_logger().info('Back on its feet; harness released.')
+        if out.harness_vz:
+            twist = Twist()
+            twist.linear.z = out.harness_vz
+            self.cmd_vel_pub.publish(twist)
+        command = AtlasCommand()
+        command.position, command.effort = out.position, out.effort
+        command.k_effort = [255] * len(ATLAS_JOINT_NAMES)
+        command.kp_position, command.kd_position = out.kp, out.kd
+        self.pub.publish(command)
+
+    def _recover(self):
+        if self.gait.status == 'fallen':
+            self.get_logger().info('Getting up: harness on, legs into the stance, lower, let go.')
+            self.gait.stop()
+            self.gait.recover()
+
+    def _hands_tick(self):
+        now = self.get_clock().now()
+        dt = 1.0 / PUBLISH_RATE_HZ
+        if self._last_hands_time is not None:
+            dt = (now - self._last_hands_time).nanoseconds / 1e9
+        self._last_hands_time = now
+        if dt <= 0.0:
+            return
         for side, gripper in self.grippers.items():
             sandia = JointCommands()
             sandia.name = [f'{"left" if side == "l" else "right"}_{j}'
@@ -222,7 +282,6 @@ class WalkKeyboardNode(Node):
             svh.name = list(tx.SVH_JOINT_NAMES)
             svh.position = gripper.sample(dt, 'svh')
             self.svh_pubs[side].publish(svh)
-        self._log_diagnostics()
 
     def _apply_twist(self):
         """Follow atlas_walk/cmd_vel while it is fresh; stop when it goes stale."""
@@ -248,20 +307,19 @@ class WalkKeyboardNode(Node):
                 f'wz={wz:+.2f} rad/s  speed {int(self.speed * 100)}%  '
                 f'hands L/R {self.grippers["l"].pose}/{self.grippers["r"].pose}')
         else:
-            self.get_logger().info(f'[{self.gait.phase_name}]')
+            c = self.gait
+            vx, vy, wz = c.walker.command
+            self.get_logger().info(
+                f'[{c.status} {c.walker.phase}] vx={vx:+.2f} vy={vy:+.2f} m/s '
+                f'wz={wz:+.2f} rad/s  speed {int(self.speed * 100)}%')
 
     def handle_key(self, key):
         if self.gait is None:
             return
-        if not self.harness:
-            if key == 'w':
-                self.gait.start_walking()
-            elif key in tx.STOP_KEYS:
-                self.gait.stop_walking()
-            return
-        command = tx.walk_command(
-            key, self.speed, harness_gait.MAX_VX, harness_gait.MAX_VX_BACK,
-            harness_gait.MAX_VY, harness_gait.MAX_WZ)
+        limits = (harness_gait.MAX_VX, harness_gait.MAX_VX_BACK,
+                  harness_gait.MAX_VY, harness_gait.MAX_WZ) if self.harness else (
+            zmp_walk.max_velocity())
+        command = tx.walk_command(key, self.speed, *limits)
         if command is not None:
             self.get_logger().info(
                 f'Walk: vx={command[0]:+.2f} vy={command[1]:+.2f} wz={command[2]:+.2f}')
@@ -290,6 +348,8 @@ class WalkKeyboardNode(Node):
                 f'{"left" if side == "l" else "right"} hand.')
         elif key in tx.KICK_KEYS:
             self._kick(tx.KICK_KEYS[key])
+        elif key == 'r' and not self.harness:
+            self._recover()
 
     def _kick(self, body_direction):
         """Push the torso (direction given in Atlas's own frame)."""
@@ -326,9 +386,16 @@ def main(args=None):
     spin_thread = threading.Thread(target=executor.spin, daemon=True)
     spin_thread.start()
 
-    stdin_settings = termios.tcgetattr(sys.stdin.fileno())
+    # Without a terminal (a launch file, docker exec) follow
+    # atlas_walk/cmd_vel only.
+    stdin_settings = termios.tcgetattr(sys.stdin.fileno()) if sys.stdin.isatty() else None
+    if stdin_settings is None:
+        node.get_logger().info('No terminal: following atlas_walk/cmd_vel only.')
     try:
         while rclpy.ok():
+            if stdin_settings is None:
+                time.sleep(0.1)
+                continue
             key = _read_key(stdin_settings, timeout_sec=0.05)
             if key == '\x03':  # Ctrl-C
                 break
@@ -337,7 +404,8 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
-        termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, stdin_settings)
+        if stdin_settings is not None:
+            termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, stdin_settings)
         # Stop and join the spin thread before tearing the node down;
         # destroying it under a still-spinning executor aborts the process
         # ("terminate called without an active exception").
