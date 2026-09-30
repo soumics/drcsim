@@ -9,7 +9,10 @@ install(PROGRAMS
   scripts/gait_controller.py
   scripts/harness_gait.py
   scripts/teleop_extras.py
+  scripts/torque_balance.py
+  scripts/torque_stand.py
   scripts/walk_keyboard.py
+  scripts/wbc.py
   scripts/zmp_walk.py
   DESTINATION lib/${PROJECT_NAME}
 )
@@ -27,12 +30,16 @@ if(BUILD_TESTING)
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/gait_controller.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/harness_gait.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/teleop_extras.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/torque_balance.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/torque_stand.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/walk_keyboard.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/scripts/wbc.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/scripts/zmp_walk.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_balance_controller.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_gait_controller.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_harness_gait.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_teleop_extras.py"
+    "${CMAKE_CURRENT_SOURCE_DIR}/test/test_wbc.py"
     "${CMAKE_CURRENT_SOURCE_DIR}/test/test_zmp_walk.py"
   )
   ament_copyright(${AMENT_LINT_PORTED})
@@ -46,6 +53,7 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_gait_controller test/test_gait_controller.py)
   ament_add_pytest_test(test_harness_gait test/test_harness_gait.py)
   ament_add_pytest_test(test_teleop_extras test/test_teleop_extras.py)
+  ament_add_pytest_test(test_wbc test/test_wbc.py)
   ament_add_pytest_test(test_zmp_walk test/test_zmp_walk.py)
 endif()
 

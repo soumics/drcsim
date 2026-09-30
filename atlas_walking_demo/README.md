@@ -158,6 +158,38 @@ Parameters (both nodes): `stabilizer_kp`/`kd` (ankle pitch),
 `step_length`, `side_speed`, `turn_speed`, `single_support`,
 `double_support`, `zmp_y_inset`.
 
+## Torque control (whole-body QP)
+
+`torque_stand.py` stands Atlas under **torque control** instead of joint PD:
+a whole-body QP (`wbc.py`, Pinocchio + ProxQP, ~0.5 ms per solve) computes
+the joint torques every AtlasState (1 kHz of sim time) from a DCM
+(capture-point) balance law (`torque_balance.py`). AtlasPlugin gets
+`kp_position = 0`, a little joint damping and the torques as effort.
+
+```bash
+ros2 run atlas_walking_demo torque_stand.py     # crouches (position mode), then torque mode
+drcsim_push 0 525 0.2                           # in the Docker image: a precise 106 N s shove
+```
+
+QP: joint accelerations + both foot wrenches; floating-base dynamics,
+no-slip feet, friction/CoP-in-sole cones, torque limits; tasks for CoM
+acceleration, pelvis orientation, posture and -- for a foot that lifts
+(foot load cells, with hysteresis) -- setting it back down level.
+
+Measured, precise 0.2 s pushes on the torso (`drcsim_push`):
+
+| Push | torque (`torque_stand.py`) | position (`free_walk.py`, standing) |
+|---|---|---|
+| sideways 90 N s | ok | ok |
+| sideways 106 / 121 N s | ok (121: 2 of 3) | fell at 121 |
+| forward 75 N s | ok | ok |
+| forward 90 N s | fell | fell |
+| backward 75 N s | ok | fell |
+
+Bigger pushes need a step -- next milestone (stepping on top of this QP).
+`free_walk.py`'s capture-point stepping in position mode (`push_recovery`,
+off by default) detects pushes but does not catch them; see `CLAUDE.md`.
+
 The original keyframe gait (`gait_controller.py`'s lean/lift/plant
 `WALK_CYCLE`, no balance control) is no longer used by the nodes; it
 fell within a step or two free-standing.

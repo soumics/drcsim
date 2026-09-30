@@ -19,10 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       ros-jazzy-rmw-cyclonedds-cpp \
       ros-jazzy-teleop-twist-keyboard \
       python3-colcon-common-extensions \
-      python3-pil \
+      python3-pil python3-pip \
+      ros-jazzy-pinocchio \
       git ffmpeg \
       xvfb xauth mesa-utils x11-utils \
     && rm -rf /var/lib/apt/lists/*
+# QP solvers for the whole-body (torque) controller; no Ubuntu packages.
+RUN pip install --break-system-packages --no-cache-dir proxsuite quadprog
 
 # The workspace, with every repo dependency resolved by rosdep.
 WORKDIR /root/ros2_ws

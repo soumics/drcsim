@@ -1,0 +1,54 @@
+#!/bin/bash
+# Push Atlas's torso precisely (sim time), e.g. to test balance:
+#   drcsim_push FX FY DURATION [DELAY]      forces in N (world), times in s of sim time
+# Starts ros_gz_bridge for ApplyLinkWrench's topics if it isn't running: the
+# gz CLI takes 0.3-0.8 s to start, so pushes timed with it last 2-3x too long.
+if ! pgrep -f "wrench/persistent@ros_gz_interfaces" > /dev/null; then
+  nohup ros2 run ros_gz_bridge parameter_bridge \
+    '/world/default/wrench/persistent@ros_gz_interfaces/msg/EntityWrench]gz.msgs.EntityWrench' \
+    '/world/default/wrench/clear@ros_gz_interfaces/msg/Entity]gz.msgs.Entity' \
+    > /tmp/drcsim_push_bridge.log 2>&1 &
+  sleep 2
+fi
+exec python3 - "$@" <<'PY'
+import sys
+
+import rclpy
+from rclpy.parameter import Parameter
+from ros_gz_interfaces.msg import Entity, EntityWrench
+
+fx, fy, dur = (float(a) for a in sys.argv[1:4])
+delay = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0
+rclpy.init()
+node = rclpy.create_node('drcsim_push', parameter_overrides=[Parameter('use_sim_time', value=True)])
+apply = node.create_publisher(EntityWrench, '/world/default/wrench/persistent', 10)
+clear = node.create_publisher(Entity, '/world/default/wrench/clear', 10)
+while (node.get_clock().now().nanoseconds == 0 or apply.get_subscription_count() == 0
+       or clear.get_subscription_count() == 0):
+    rclpy.spin_once(node, timeout_sec=0.05)
+
+
+def now():
+    return node.get_clock().now().nanoseconds / 1e9
+
+
+def wait(seconds):
+    start = now()
+    while now() - start < seconds:
+        rclpy.spin_once(node, timeout_sec=0.001)
+
+
+wait(delay)
+w = EntityWrench()
+w.entity.name, w.entity.type = 'atlas::utorso', Entity.LINK
+w.wrench.force.x, w.wrench.force.y = fx, fy
+apply.publish(w)
+t1 = now()
+wait(dur)
+e = Entity()
+e.name, e.type = 'atlas::utorso', Entity.LINK
+clear.publish(e)
+t2 = now()
+wait(0.05)
+print(f'pushed ({fx:.0f}, {fy:.0f}) N for {t2 - t1:.3f} s = {abs(complex(fx, fy)) * (t2 - t1):.0f} N s')
+PY

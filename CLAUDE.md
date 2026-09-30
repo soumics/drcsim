@@ -2438,6 +2438,52 @@ and the `trace_push` parameter.
 policy (RL in MuJoCo/Isaac, then transferred); the user leans toward the
 learned route.
 
+### Torque-level whole-body control (2026-09-30)
+
+User's order: torque control → learned policy → self-diagnosis
+"intelligence" → dance.
+
+**M1, model check.** Pinocchio 4.1 from `/robot_description`, with a free
+flyer and the finger/lidar joints locked, gives 179.7 kg.
+`docker_ws/gravcomp_test.py` compares hanging holding torques (position
+mode) with `computeGeneralizedGravity`: they agree within about 1 N·m on the
+legs and back, and within 5 N·m on the shoulders.
+- Elbow flex measured 0 against a model 26 N·m because the straight elbow
+  rests on its joint stop.
+- The arm axial joints (`ely`, `wry`) have near-zero gravity torque and
+  drift under damping alone; the posture task holds them.
+- Side find: `zmp_walk.gravity_feedforward`'s hip-roll term has the wrong
+  sign (+15 against the model's −16.5 N·m). It's not fixed yet and may
+  explain earlier lateral sway.
+
+**M2, torque stand.** `wbc.py` (ProxQP dense, 48 variables, about 0.5 ms),
+`torque_balance.py` and the `torque_stand.py` node. In torque mode
+AtlasPlugin gets `kp_position` 0, `kd_position` 1, a constant position
+target and `effort` = τ.
+- Hold the position target constant: the plugin's kd acts on
+  d(error)/dt, so moving the target makes spikes.
+- Findings, in order:
+  - A CoM PD (Kp 30) was too weak. DCM feedback (CMP = ξ + 2(ξ − ξ_d)) with
+    `w_com` 1000 and `w_rot` 10 fixed it.
+  - The QP and the estimator must drop a lifted foot from the contact set
+    (load cells, hysteresis 60/20 N), otherwise it is pinned to the floor
+    in the model.
+  - The free lifted leg was then used by the CoM task and held up; a
+    high-weight task (5000) sets the foot down level where it left.
+  - CoP limits: sole 0.100 back and 0.130 forward of its centre (toe pad).
+- **Push testing:** use `drcsim_push` (ros_gz_bridge plus sim-time
+  timing). The gz CLI takes 0.3–0.8 s to start, so its "0.3 s" pushes
+  lasted 2–3× longer and every earlier threshold here was wrong.
+- Results are in the package README table: torque control is ≥ position
+  control in every direction and better sideways (to about 120 N·s) and
+  backward.
+
+**Docker:** `ros-jazzy-pinocchio` via apt, plus `pip install proxsuite
+quadprog` in the Dockerfile.
+
+**Next (M3):** stepping on top of the QP (a swing-foot task, capture-point
+footstep), then the learned policy.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`
