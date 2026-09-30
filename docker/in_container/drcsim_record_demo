@@ -1,8 +1,12 @@
 #!/bin/bash
 # Record a Gazebo + RViz side-by-side demo video of Atlas.
-#   drcsim_record_demo [OUT_DIR]      (default /tmp/video; needs a running
-#                                      simulation started with demo_camera:=true,
-#                                      e.g. drcsim_sim demo_camera:=true)
+#   drcsim_record_demo [OUT_DIR] [harness|free]
+#     OUT_DIR  default /tmp/video; needs a running simulation started with
+#              demo_camera:=true, e.g. drcsim_sim demo_camera:=true
+#     harness  (default) walking in the harness, grasping, a kick
+#              -> OUT_DIR/atlas_demo.mp4
+#     free     free-standing walking (no harness), a push that knocks Atlas
+#              over, getting back up -> OUT_DIR/atlas_free_demo.mp4
 # The Gazebo side is the chase camera riding with Atlas (rendered by the gz
 # server on the GPU, full PBR look), recorded frame by frame in simulation
 # time; RViz runs on a private virtual display (Xvfb :98), screen-recorded in
@@ -12,6 +16,8 @@
 # Atlas meanwhile; the two are joined side by side (OUT_DIR/atlas_demo.mp4).
 set -e
 OUT="${1:-/tmp/video}"
+MODE="${2:-harness}"
+NAME=$([ "$MODE" = free ] && echo atlas_free_demo || echo atlas_demo)
 mkdir -p "$OUT"
 CONFIG="$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config"
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
@@ -51,12 +57,38 @@ SIM0=$(python3 -c "import time; print(time.time())")
 SIMT0=$(sim_now)
 echo "Recording..."
 
-# The show: relaxed hands, grip, open, walk, curve, side-step, back, kick, turn.
-( sleep 6; printf g; sleep 3; printf h; sleep 3; printf g; sleep 3; printf g
-  sleep 2; printf w; sleep 8; printf z; sleep 6; printf ' '; sleep 4; printf d; sleep 5
-  printf s; sleep 5; printf w; sleep 3; printf k; sleep 4; printf ' '; sleep 4
-  printf q; sleep 6; printf ' '; sleep 4; printf g; sleep 4; printf '\003'
-) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py" /dev/null > /tmp/demo_teleop.log 2>&1
+# Wait for this many seconds of *simulation* time (the sim runs below real
+# time, so wall-clock sleeps would shorten the free-standing moves).
+sim_sleep() {
+  local end
+  end=$(python3 -c "print($(sim_now) + $1)")
+  while python3 -c "import sys; sys.exit(0 if $(sim_now) < $end else 1)"; do sleep 0.5; done
+}
+# A hard shove on the torso (world frame), enough to knock Atlas over.
+shove() {
+  gz topic -t /world/default/wrench/persistent -m gz.msgs.EntityWrench \
+    -p "entity: {name: \"atlas::utorso\", type: LINK}, wrench: {force: {x: $1, y: $2, z: 0}}"
+  sim_sleep 0.6
+  gz topic -t /world/default/wrench/clear -m gz.msgs.Entity -p 'name: "atlas::utorso", type: LINK'
+}
+
+if [ "$MODE" = free ]; then
+  # Free-standing: walk commands start ~2.6 s after the key (the ZMP
+  # preview plans that far ahead), so every move gets time to show.
+  ( sim_sleep 7; printf w; sim_sleep 16; printf z; sim_sleep 14; printf ' '; sim_sleep 7
+    printf d; sim_sleep 12; printf ' '; sim_sleep 6; printf q; sim_sleep 14; printf ' '
+    sim_sleep 7; shove 0 2500; sim_sleep 12; printf w; sim_sleep 14; printf ' '
+    sim_sleep 7; printf '\003'
+  ) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p harness:=false" \
+    /dev/null > /tmp/demo_teleop.log 2>&1
+else
+  # The show: relaxed hands, grip, open, walk, curve, side-step, back, kick, turn.
+  ( sleep 6; printf g; sleep 3; printf h; sleep 3; printf g; sleep 3; printf g
+    sleep 2; printf w; sleep 8; printf z; sleep 6; printf ' '; sleep 4; printf d; sleep 5
+    printf s; sleep 5; printf w; sleep 3; printf k; sleep 4; printf ' '; sleep 4
+    printf q; sleep 6; printf ' '; sleep 4; printf g; sleep 4; printf '\003'
+  ) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py" /dev/null > /tmp/demo_teleop.log 2>&1
+fi
 
 SIMT1=$(sim_now)
 SIM1=$(python3 -c "import time; print(time.time())")
@@ -73,8 +105,8 @@ DUR=$(for f in gazebo rviz_simtime; do
   ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/$f.mp4"; done | sort -n | head -1)
 LABEL="fontfile=$FONT:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x=24:y=20"
 ffmpeg -loglevel error -y -i "$OUT/gazebo.mp4" -i "$OUT/rviz_simtime.mp4" -t "$DUR" -filter_complex \
-  "[0:v]scale=-2:720,fps=25,drawtext=text='Gazebo Harmonic':$LABEL[g];\
+  "[0:v]scale=-2:720,fps=25,drawtext=text='Gazebo Harmonic$([ "$MODE" = free ] && echo ' - free-standing, no harness')':$LABEL[g];\
 [1:v]scale=-2:720,fps=25,drawtext=text='RViz 2 - sensors + TF':$LABEL[r];\
 [g][r]hstack=inputs=2" \
-  -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p "$OUT/atlas_demo.mp4"
-echo "Demo video: $OUT/atlas_demo.mp4 (${DUR%.*} s)"
+  -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p "$OUT/$NAME.mp4"
+echo "Demo video: $OUT/$NAME.mp4 (${DUR%.*} s)"
