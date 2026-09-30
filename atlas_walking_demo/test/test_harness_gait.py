@@ -93,6 +93,7 @@ def test_leg_ik_3d_round_trips_through_an_independent_fk(side, dx, dy, dz, yaw):
     target = (hg.FOOT_X0 + dx, sign * hg.FOOT_Y0 + dy, hg.FOOT_Z0 + dz)
     hpz, hpx, hpy, kny, aky, akx = hg.leg_ik_3d(side, *target, yaw)
     assert _leg_fk_3d(side, hpz, hpx, hpy, kny) == pytest.approx(target, abs=1e-9)
+    assert hg.leg_fk_3d(side, hpz, hpx, hpy, kny) == pytest.approx(target, abs=1e-9)
     assert hpz == yaw
     assert akx == -hpx and hpy + kny + aky == pytest.approx(0.0)  # sole level
 

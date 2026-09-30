@@ -179,6 +179,17 @@ def leg_ik_3d(side, x, y, z, yaw=0.0):
     return yaw, hpx, hpy, kny, aky, -hpx
 
 
+def leg_fk_3d(side, hpz, hpx, hpy, kny):
+    """Return the ankle (x, y, z) in the pelvis frame: the inverse of leg_ik_3d."""
+    sign = SIDE_SIGN[side]
+    sx, sz = leg_fk(hpy, kny)
+    x, y, z = HPY_ORIGIN[0] + sx, sign * HPY_ORIGIN[1], HPY_ORIGIN[2] + sz
+    c, s = math.cos(hpx), math.sin(hpx)
+    y, z = y * c - z * s, y * s + z * c
+    c, s = math.cos(hpz), math.sin(hpz)
+    return x * c - y * s, sign * HIP_Y + x * s + y * c, z
+
+
 class HarnessGait:
     """
     Tick-driven omnidirectional gait; call sample(dt) at a steady rate.

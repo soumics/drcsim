@@ -6,10 +6,11 @@ hands rest in a natural relaxed curl while standing and walking. This is new tut
 on top of the ported `drcsim` packages, not a port of anything from the
 original repo.
 
-Walking runs in a **harness**, like a lab gantry: `VRCPlugin` holds the
-pelvis with a stiff spring-damper, and the legs carry the weight. There is
-no free-standing balance controller in this codebase yet (see
-`src/drcsim/CLAUDE.md`).
+Teleop walking runs in a **harness**, like a lab gantry: `VRCPlugin` holds
+the pelvis with a stiff spring-damper, and the legs carry the weight.
+Walking **without the harness** is a separate, scripted node,
+`free_walk.py` (ZMP preview control plus balance feedback). See
+[Free-standing walking](#free-standing-walking-free_walkpy) below.
 
 ## Run it
 
@@ -82,7 +83,54 @@ Measured in the simulator (30 Hz commands, sim time):
 `WALK_CYCLE` in `gait_controller.py` instead (only `w` and `space`).
 Without a balance controller it only manages a step or two before falling.
 
-## Free-standing mode: tuning, one milestone at a time
+## Free-standing walking (`free_walk.py`)
+
+Walks a fixed number of steps straight ahead with no harness. It uses
+position-controlled ZMP walking: plan where the centre of pressure must
+go, then move the body so it goes there, and correct from the IMU and leg
+kinematics.
+
+```bash
+ros2 launch drcsim_gazebo atlas.launch.py           # let Atlas stand (~10 s)
+ros2 run atlas_walking_demo free_walk.py --ros-args -p steps:=10
+```
+
+It takes over the standing controller, crouches 2.5 cm (3 s), settles
+(2 s), then walks. It stops commanding if Atlas tilts past 35°. Restart
+the sim after a fall.
+
+| Layer | What it does | File |
+|---|---|---|
+| Footstep plan | half first step, `step_length` steps, feet together at the end | `zmp_walk.footstep_plan` |
+| ZMP reference | on the stance foot (4 cm inside the ankle) in single support, ramping across in double support | `zmp_walk.zmp_reference` |
+| Preview control | Kajita 2003: LIPM, CoM 1.12 m, 1.6 s preview, 200 Hz | `zmp_walk.ZmpWalker` |
+| Leg IK | pelvis = CoM − body offset; `harness_gait.leg_ik_3d` for both feet | `ZmpWalker.sample` |
+| Gravity feedforward | model-based joint torques for each leg's planned load at its planned CoP | `zmp_walk.gravity_feedforward` |
+| Ankle / hip stabilizer | `aky`, `akx`, `hpx` from IMU pitch/roll on the loaded legs | `free_walk.py` |
+| CoM feedback | measured CoM (leg FK + IMU) vs plan, blended by load; shifts the pelvis target | `free_walk._com_feedback` |
+
+Measured (Docker, sim time, defaults): 10 × 0.15 m repeatably, 16 × 0.15 m
+at `single_support:=1.0 double_support:=0.5`, pelvis tilt within about 3°.
+**0.20 m steps still fall** after 5–6 steps.
+
+What it took, for anyone tuning further:
+- Gravity feedforward must be *model-based*. Feeding back the measured foot
+  load made a load → torque → lift oscillation. The ankle term is needed
+  too; without it Atlas tipped onto its toes in single support.
+- The preview must see a still reference at t=0 (`START_HOLD`), or the CoM
+  jerks at the start.
+- **Lateral CoM feedback is what made it walk** (`com_kp_y` 1.0,
+  `com_kd_y` 0.1). Without it a sideways sway grew each step and Atlas fell
+  after 2–4 steps; the IMU hip/ankle roll stabilizers alone did not stop
+  it (akx has little authority with both feet down, measured). The
+  wider 4 cm ZMP inset helped too.
+
+Parameters: `steps`, `step_length`, `single_support`, `double_support`,
+`zmp_y_inset`, `stabilizer_kp`/`kd` (ankle pitch), `stabilizer_kp_roll`/
+`kd_roll`, `hip_roll_kp`/`kd`, `com_kp`/`com_kd` (fore-aft),
+`com_kp_y`/`com_kd_y` (lateral), `debug`.
+
+## Free-standing keyframe mode: tuning, one milestone at a time
 
 `atlas/debug/{l,r}_foot_contact` (`geometry_msgs/WrenchStamped`, already
 published by `AtlasPlugin` whenever cheats are enabled — on by default in

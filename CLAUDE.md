@@ -1872,10 +1872,10 @@ they were assumed to.
 
 ### Harness walking (✅ verified 2026-09-29, in the `drcsim_jazzy` container)
 
-Free-standing stepping still falls ~2 s after `w` (open-loop, sway ±3.5°
-at ~2 s period; P-only ankle feedback `aky += 0.5*pitch` halves sway, any D
-term or Kp ≥ 1 falls). Per the user's choice, walking now runs **in a
-harness first**; balance control (CoM/ZMP) is the next project.
+Free-standing *keyframe* stepping still falls ~2 s after `w` (open-loop,
+sway ±3.5° at ~2 s period). Per the user's choice, teleop walking runs **in a
+harness**; free-standing walking came later with ZMP control (see "Free-standing
+walking" below).
 
 - `walk_keyboard.py` (default `harness:=true`) publishes
   `pinned_with_gravity` on `atlas/mode` at takeover.
@@ -2275,6 +2275,46 @@ edits.
 
 **Tooling:** `xdotool` was used ad hoc to expand RViz status rows on Xvfb
 while debugging; it is not in the image.
+
+### Free-standing walking: ZMP preview control (2026-09-30)
+
+The user asked to remove the harness and walk free-standing.
+`atlas_walking_demo/scripts/free_walk.py` (node) + `zmp_walk.py` (pure,
+tested in `test/test_zmp_walk.py`) now walk Atlas **without the harness**:
+10 × 0.15 m repeatably with the defaults, 16 × 0.15 m at SS 1.0 / DS 0.5.
+0.20 m steps still fall. Teleop (`walk_keyboard.py`) still uses the harness;
+the free walk is a scripted straight line.
+
+Pieces (details in the package README):
+- Kajita preview control: LIPM, CoM 1.12 m, 200 Hz sim time, 1.6 s preview,
+  integral-augmented LQR (`scipy.linalg.solve_discrete_are`).
+- Pelvis = planned CoM − CoM offset (0.029, 0, 0.234 in the pelvis frame,
+  179.7 kg with SVH hands); legs via `harness_gait.leg_ik_3d`;
+  `harness_gait.leg_fk_3d` added (inverse, tested).
+- Takeover as in `walk_keyboard.py` (setpoint = position + effort/kp), with
+  the same hpz/hpx/akx gain overrides.
+
+Measured facts (don't re-derive):
+- IMU pitch < 0 = leaning back; the ankle stabilizer is
+  `aky += KP*pitch + KD*rate` (KP 0.3, KD 0.02; KP 0.4 or any integral fell).
+- `hpx` +0.05 on both legs → pelvis roll ≈ −0.7°. `akx` ±0.05 with both
+  feet down barely changes roll.
+- Gravity feedforward must be model-based (measured-load feedback
+  oscillated) and must include the ankle at the planned CoP (else Atlas
+  tipped onto its toes). Pitch joints hold +r_x·N, roll joints −r_y·N.
+- Preview start-up spike: hold still for one preview horizon first
+  (`START_HOLD`).
+- CoM feedback must blend both feet's estimates by load share; switching
+  the reference foot outright turned landing errors into steps.
+- **The fix that made it walk: lateral CoM feedback** (`com_kp_y` 1.0,
+  `com_kd_y` 0.1) plus a 4 cm ZMP inset. Before: a lateral sway grew each
+  step and it fell after 2–4 steps; larger hip-roll gains made it worse.
+
+Testing notes: `docker/sim.sh` then wait 30 s; always restart the sim after
+a fall; `timeout` around `ros2 run` prints a harmless RCLError at shutdown.
+The image is built with tests off: rebuild with
+`--cmake-args -DBUILD_TESTING=ON` before `colcon test` in the container.
+Tests: atlas_walking_demo 71/71.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
