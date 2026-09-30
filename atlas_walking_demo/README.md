@@ -186,9 +186,23 @@ Measured, precise 0.2 s pushes on the torso (`drcsim_push`):
 | forward 90 N s | fell | fell |
 | backward 75 N s | ok | fell |
 
-Bigger pushes need a step -- next milestone (stepping on top of this QP).
+**Stepping** (`stepping`, on by default): when the capture point leaves
+the feet (for 15 ms), the unloaded foot steps to where it will be at
+touchdown -- predicted from the stance foot's edge, replanned every tick
+during the first 70% of the 0.35 s swing (the push may still be acting),
+limited per direction; the balance target then walks from where the
+capture point lands to mid-stance. Measured (precise pushes, same as above):
+
+| Push | standing only | with stepping |
+|---|---|---|
+| 60-75 N s any direction, sideways 106 N s | ok | ok (no step taken) |
+| forward 90 N s | fell | 2 of 3 caught |
+| backward 90 N s | fell | ~3 of 4 caught |
+| sideways 150 N s | fell | fell (crossover steps don't catch yet) |
+
+Work in progress; see `CLAUDE.md` for what each fix changed.
 `free_walk.py`'s capture-point stepping in position mode (`push_recovery`,
-off by default) detects pushes but does not catch them; see `CLAUDE.md`.
+off by default) detects pushes but does not catch them.
 
 The original keyframe gait (`gait_controller.py`'s lean/lift/plant
 `WALK_CYCLE`, no balance control) is no longer used by the nodes; it

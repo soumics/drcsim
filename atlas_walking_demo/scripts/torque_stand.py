@@ -37,6 +37,7 @@ from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import String
 import torque_balance as tb
+import zmp_walk as zw
 
 N = bc.N
 
@@ -54,6 +55,7 @@ class TorqueStandNode(Node):
         self.torque = None
         self.fallen = False
         self.last_log = -1.0
+        self.last_position_tick = -1.0
         self.pub = self.create_publisher(AtlasCommand, 'atlas/atlas_command', 10)
         self.create_subscription(
             String, '/robot_description', self._on_urdf,
@@ -82,6 +84,12 @@ class TorqueStandNode(Node):
         cmd = AtlasCommand()
         cmd.k_effort = [255] * len(N)
         if self.torque is None:
+            # balance_controller advances its walker one zmp_walk.DT per call:
+            # run it at that rate, not at AtlasState's 1 kHz (it crouched 5x
+            # too fast and fell).
+            if t - self.last_position_tick < zw.DT - 1e-4:
+                return
+            self.last_position_tick = t
             out = self.position.update(s, t)
             cmd.position, cmd.effort = out.position, out.effort
             cmd.kp_position, cmd.kd_position = out.kp, out.kd
@@ -89,7 +97,9 @@ class TorqueStandNode(Node):
                 self.torque = tb.TorqueBalance(self.urdf, N, s, self.params)
                 self.get_logger().info('Standing; switched to torque control.')
         else:
-            tau = self.torque.update(s)
+            tau = self.torque.update(s, t)
+            while self.torque.messages:
+                self.get_logger().warn(self.torque.messages.pop(0))
             cmd.position = [0.0] * len(N)
             cmd.effort = [float(x) for x in tau]
             cmd.kp_position = [0.0] * len(N)

@@ -2484,6 +2484,45 @@ quadprog` in the Dockerfile.
 **Next (M3):** stepping on top of the QP (a swing-foot task, capture-point
 footstep), then the learned policy.
 
+### M3: stepping under torque control (in progress, 2026-09-30)
+
+`torque_balance.py` has `stepping` (on). Tests use
+`docker_ws/tq_push.sh FX FY DUR` (torque_stand plus `drcsim_push` 12 s in),
+`tq_video.sh` and `trace:=true`.
+
+Fixes, in order, each measured:
+- `torque_stand.py` ran `balance_controller` on every 1 kHz AtlasState.
+  Its walker advances one DT (5 ms) per call, so it crouched 5× too fast
+  and fell before torque mode; now throttled to 200 Hz.
+- The trigger needs the support polygon of every foot on the ground,
+  loaded or not. With loaded feet only, a capture point between the feet
+  after a touchdown made the other foot step back.
+- The kinematic CoM velocity jumps at contact changes (−1.6 m/s glitches),
+  so it is low-passed (30 ms) and the capture point must stay outside for
+  15 ms. There is a settle window of 0.4 s after landing, plus 5 cm of
+  extra margin for 1 s.
+- The height target drops to the actual CoM height at landing, because a
+  split stance can't reach standing height.
+- Swing: stiffer foot task (kp 1600), down by 85 % of the swing, then
+  press 5 cm down. A landing only counts after 85 % (mid-swing scuffs
+  counted as short landings).
+- After landing, balance at the capture point (clamped into the new
+  support) and walk the target to mid-stance at 0.1 m/s; snapping it to
+  the midpoint yanked the body back.
+- Predict from the stance foot's edge (sideways drift included) and limit
+  x and y separately.
+- **Replan the landing spot every tick for the first 70 % of the swing:**
+  the push is often still acting when the step starts.
+
+**Results:** see the README table; roughly 60–75 % catch at 90 N·s
+forward/back, where standing falls. Smaller pushes trigger no steps.
+
+**Open:**
+- Sideways 150 N·s crossover steps don't catch.
+- Success varies run to run.
+- Ideas: pelvis/torso orientation freedom, a swing-foot timing
+  adaptation, a second step policy.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`
