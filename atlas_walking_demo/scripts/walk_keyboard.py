@@ -247,6 +247,8 @@ class WalkKeyboardNode(Node):
             elif self.auto_recover and t - self._fell_at >= RECOVER_WAIT_SEC:
                 self._recover()
             return
+        while controller.messages:
+            self.get_logger().warn(controller.messages.pop(0))
         if out.mode:
             self.mode_pub.publish(String(data=out.mode))
             if out.mode == 'nominal':

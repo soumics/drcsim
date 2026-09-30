@@ -66,6 +66,11 @@ DEFAULT_PARAMS = {
     'stabilizer_kp_roll': 0.3, 'stabilizer_kd_roll': 0.02,
     'hip_roll_kp': 0.5, 'hip_roll_kd': 0.03,
     'com_kp': 0.0, 'com_kd': 0.05, 'com_kp_y': 1.0, 'com_kd_y': 0.1,
+    'push_recovery': False,  # experimental: the steps don't catch a push yet
+    # How far (m) the capture point may leave the support polygon before a
+    # recovery step: slack for estimation noise while walking.
+    'push_margin': 0.0,
+    'trace_push': False,  # log the CoM estimate for 2 s after each push
 }
 
 
@@ -108,6 +113,9 @@ class FreeWalkController:
             if '_leg_' in name and joint in GAIN_OVERRIDES:
                 self.gains_p[i], self.gains_d[i] = GAIN_OVERRIDES[joint]
         self.status = 'crouch'
+        self.messages = []  # human-readable events for the node to log
+        self.trace_until = -1.0  # debug trace after a push (walker time)
+        self.tilt_rate = (0.0, 0.0)  # low-passed IMU (roll, pitch) rate for push detection
         self.t_start = None
         self.fall_info = ''
         self._velocity = (0.0, 0.0, 0.0)
@@ -180,7 +188,32 @@ class FreeWalkController:
         balancing = self.status != 'crouch'
         if balancing:
             self._com_feedback(state, roll, pitch)
+        walker = self.walker
+        if walker.t < self.trace_until and round(walker.t / zw.DT) % 10 == 0:
+            self.messages.append(
+                f'trace t={walker.t:6.2f} {walker.phase:8s} share=({self.share[0]:.2f},'
+                f'{self.share[1]:.2f}) err=({100 * self.com_err[0]:+5.1f},'
+                f'{100 * self.com_err[1]:+5.1f})cm rate=({self.com_rate[0]:+5.2f},'
+                f'{self.com_rate[1]:+5.2f}) plan_v=({walker.state[1][0]:+5.2f},'
+                f'{walker.state[1][1]:+5.2f}) roll={math.degrees(roll):+5.1f} '
+                f'pitch={math.degrees(pitch):+5.1f} Fz=({-state.l_foot.force.z:4.0f},'
+                f'{-state.r_foot.force.z:4.0f}) L=({walker.feet["l"][0]:+.2f},'
+                f'{walker.feet["l"][1]:+.2f},{walker.feet["l"][2]:.2f}) '
+                f'R=({walker.feet["r"][0]:+.2f},'
+                f'{walker.feet["r"][1]:+.2f},{walker.feet["r"][2]:.2f})')
+        # Touchdowns spike the IMU rate for a few ms; the push detector wants
+        # the body's tipping rate.
+        a = 0.2
+        self.tilt_rate = ((1 - a) * self.tilt_rate[0] + a * state.angular_velocity.x,
+                          (1 - a) * self.tilt_rate[1] + a * state.angular_velocity.y)
+        if (self.status == 'ready' and self.params['push_recovery'] and
+                walker.phase == 'double' and walker.t > walker.recovery_until):
+            self._check_push(roll, pitch)
+            if any(self._velocity) and walker.idle:
+                walker.set_velocity(*self._velocity)  # walk on after a recovery
         self.angles, self.share, self.info = self.walker.sample()
+        if balancing and self.walker.phase.startswith('swing'):
+            self._swing_in_world(roll, pitch)
         blend = min(1.0, elapsed / self.blend_time)
         target = self._target(self.angles)
         cmd = [a + blend * (b - a) for a, b in zip(self.blend_from, target)]
@@ -198,6 +231,72 @@ class FreeWalkController:
                 cmd[N.index(f'{side}_leg_hpx')] += frac * (
                     p['hip_roll_kp'] * roll + p['hip_roll_kd'] * rate_r)
         return Output(cmd, effort, self.gains_p, self.gains_d)
+
+    def _check_push(self, roll, pitch):
+        """
+        Step if the capture point has left the feet (push recovery).
+
+        A pushed robot tips over the edge of its feet as one rigid body, so
+        the CoM's departure from the plan is estimated from the pelvis IMU:
+        offset = COM_HEIGHT * sin(tilt), velocity = COM_HEIGHT * tilt rate
+        (pitch forward = +x, roll = -y), on top of the walker's planned CoM
+        and velocity. (The leg-kinematics estimate the CoM feedback uses
+        jumps at every touchdown, as the load moves to another foot; its
+        derivative triggered bogus second steps.) The capture point
+        xi = c + v / omega is where the ZMP would have to be to stop the
+        CoM; outside the support polygon, only a step can catch it.
+        """
+        walker = self.walker
+        yaw = walker.pelvis[2]
+        h = zw.COM_HEIGHT
+        ex, ey = zw._rot(h * math.sin(pitch), -h * math.sin(roll), yaw)
+        rx, ry = zw._rot(h * self.tilt_rate[1], -h * self.tilt_rate[0], yaw)
+        com = (walker.state[0][0] + ex, walker.state[0][1] + ey)
+        vel = (walker.state[1][0] + rx, walker.state[1][1] + ry)
+        xi = (com[0] + vel[0] / zw.OMEGA, com[1] + vel[1] / zw.OMEGA)
+        if zw._inside(xi, walker.support_polygon(), -self.params['push_margin']):
+            return
+        side = walker.recovery_step(com, vel)
+        if self.params.get('trace_push'):
+            self.trace_until = walker.t + 2.0
+        self.messages.append(
+            f'Push: capture point ({xi[0]:+.2f}, {xi[1]:+.2f}) m left the feet, '
+            f'CoM velocity ({vel[0]:+.2f}, {vel[1]:+.2f}) m/s; recovery step with the '
+            f'{"left" if side == "l" else "right"} foot.')
+        if self.params.get('trace_push'):
+            r = walker.last_recovery
+            self.messages.append(
+                'trace step: stance ({:+.2f}, {:+.2f}) xi ({:+.2f}, {:+.2f}) predicted '
+                '({:+.2f}, {:+.2f}) swing ankle -> ({:+.2f}, {:+.2f}); com ({:+.2f}, {:+.2f})'
+                .format(*r['stance'], *r['xi'], *r['target'], *r['end'], *com))
+
+    def _swing_in_world(self, roll, pitch):
+        """
+        Re-aim the swing foot for the pelvis's actual tilt.
+
+        The walker plans feet relative to a level pelvis. When the body
+        tips over the stance foot (a push), a swing foot planned 4 cm up in
+        the pelvis frame is on the floor -- it caught the ground mid-swing
+        and the step never arrived (measured). With the stance foot fixed,
+        the swing target in the tilted pelvis frame is
+        f = s + R^T (f_plan - s_plan), R the pelvis tilt (roll, pitch).
+        """
+        swing = self.walker.phase[-1]
+        stance = 'l' if swing == 'r' else 'r'
+        sp = self.walker.feet_in_pelvis[stance]
+        fp = self.walker.feet_in_pelvis[swing]
+        cr, sr, cp, sq = math.cos(roll), math.sin(roll), math.cos(pitch), math.sin(pitch)
+        d = [f - s for f, s in zip(fp, sp)]
+        # R = Ry(pitch) Rx(roll); apply R^T = Rx(-roll) Ry(-pitch).
+        x = cp * d[0] - sq * d[2]
+        z = sq * d[0] + cp * d[2]
+        y = cr * d[1] + sr * z
+        z = -sr * d[1] + cr * z
+        target = (sp[0] + x, sp[1] + y, sp[2] + z)
+        yaw = self.walker.feet[swing][3] - self.walker.pelvis[2]
+        ik = hg.leg_ik_3d(swing, *target, yaw)
+        for joint, value in zip(('hpz', 'hpx', 'hpy', 'kny', 'aky', 'akx'), ik):
+            self.angles[f'{swing}_leg_{joint}'] = value
 
     def _feedforward(self, scale):
         effort = [0.0] * len(N)

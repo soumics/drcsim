@@ -45,6 +45,7 @@ namespace drcsim_gazebo_plugins
 ///   <target_link>   link name (default "pelvis")
 ///   <offset>        pose in the follow frame (default "3.3 -2.8 0.3 0 0.06 2.44")
 ///   <time_constant> low-pass time constant in seconds (default 1.0)
+///   <follow_heading> false keeps the heading fixed at 0 (default true)
 class FollowCameraPlugin
   : public gz::sim::System,
   public gz::sim::ISystemConfigure,
@@ -73,6 +74,7 @@ private:
   std::string targetLinkName{"pelvis"};
   gz::math::Pose3d offset{3.3, -2.8, 0.3, 0.0, 0.06, 2.44};
   double timeConstant{1.0};
+  bool followHeading{true};
 
   bool initialized{false};
   gz::math::Vector2d position;

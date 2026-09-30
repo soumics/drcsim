@@ -2395,6 +2395,49 @@ walking, and pointed at the sky at 1:25 of the free-standing video.
   - For shoves in sim time: 1000 N × 0.4 s from the front knocks Atlas
     onto its back in view; 2500 N × 0.6 s threw it metres away.
 
+### Push recovery (capture-point stepping), experimental, off by default (2026-09-30)
+
+User's order: push recovery → real get-up → dance. They are interested in a
+learned ("intelligent") recovery.
+
+**Baseline, free standing:** survives 150 N × 0.3 s (wall time) on the torso;
+falls at 300 N × 0.3 s, from any direction (ankle and hip balance only).
+Tests use `docker_ws/push_test.sh`, `push_video.sh` (sim-time video frames)
+and the `trace_push` parameter.
+
+**Built (`push_recovery:=true` enables it; the default is off):**
+- `ZmpWalker.recovery_step()`: steps to the capture point predicted at
+  touchdown, `xi(T) = p + (xi - p) e^(ωT)`, with p the support polygon's
+  point nearest xi. The swing foot is the unloaded one; a lateral push
+  becomes a crossover step in front, with an x-first swing path.
+- `FreeWalkController._check_push()`: IMU-based CoM estimate,
+  `COM_HEIGHT · sin(tilt)` and `COM_HEIGHT · tilt rate` low-passed, plus the
+  plan.
+- `_swing_in_world()`: the swing foot is aimed with the pelvis tilt
+  compensated. It is always on and walking is unaffected (10 × 0.15 m and
+  10 × 0.25 m still finish).
+
+**Measured, each fixing one failure but not yet catching a 300 N push:**
+- Leg-FK velocity estimate: it jumps at every touchdown (load moves to
+  another foot), giving bogus second steps. Switched to the IMU, plus a
+  0.3 s settle window after touchdown, because touchdown spikes the IMU
+  rate.
+- Stepping with the loaded foot (lateral push) drops the body; hence the
+  crossover.
+- Resetting the planned CoM to the measured one makes the legs lean the
+  pelvis into the fall (the tip is counted twice). Letting the preview
+  chase the new support drove the pelvis at 0.8 m/s into the fall; the plan
+  now holds the CoM through the step, then eases it over.
+- A tipped body put the swing foot on the floor mid-swing (930 N at
+  x 0.21 of 0.39); fixed by `_swing_in_world`.
+- **Still:** the body tips over the stance toe as a rigid body (pitch
+  2° → 17° in 0.2 s) faster than a 0.25–0.4 s step can catch. PD joint
+  control without dynamics feedforward also lags on fast swings.
+
+**Likely next steps:** torque-level control (inverse dynamics) or a learned
+policy (RL in MuJoCo/Isaac, then transferred); the user leans toward the
+learned route.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

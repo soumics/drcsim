@@ -69,6 +69,20 @@ MAX_STEP = 0.25
 MAX_STEP_BACK = 0.10
 MAX_SIDE_STEP = 0.10
 MAX_TURN_STEP = 0.25
+# Push recovery: a quick step to where the capture point will be.
+OMEGA = math.sqrt(G / COM_HEIGHT)  # LIPM natural frequency (1/s)
+RECOVERY_SHIFT = 0.05    # s before lifting (the swing foot is the unloaded one)
+RECOVERY_SWING = 0.40    # s swing
+RECOVERY_SETTLE = 0.3    # s after touchdown before another recovery step
+RECOVERY_BEYOND = 0.25   # m past the predicted capture point, along the CoM velocity
+RECOVERY_HOLD = 0.5      # s after touchdown the planned CoM stays put
+RECOVERY_SHIFT_COM = 1.0  # s then easing it over the middle of the new stance
+SOLE_X = (-0.08, 0.15)   # sole extent along the foot from the ankle (m)
+SOLE_Y = 0.067           # sole half-width (m)
+RECOVERY_REACH_X = (-0.35, 0.45)  # swing ankle from the stance ankle, stance frame (m)
+RECOVERY_REACH_Y = (0.20, 0.45)   # sideways, toward the swing side (m)
+CROSS_AHEAD = 0.22       # a crossover step lands at least this far in front (m)
+CROSS_MAX = 0.20         # and at most this far across the stance foot (m)
 
 
 def preview_gains(dt=DT, zc=COM_HEIGHT, horizon=PREVIEW, q_error=1.0, r=1e-6):
@@ -122,6 +136,45 @@ def _compose(pose, dx, dy, dyaw=0.0):
     return (pose[0] + ox, pose[1] + oy, pose[2] + dyaw)
 
 
+def _hull(points):
+    """Return the convex hull of 2D points, counterclockwise (monotone chain)."""
+    pts = sorted(set(points))
+
+    def half(seq):
+        out = []
+        for p in seq:
+            while len(out) >= 2 and ((out[-1][0] - out[-2][0]) * (p[1] - out[-2][1]) -
+                                     (out[-1][1] - out[-2][1]) * (p[0] - out[-2][0])) <= 0:
+                out.pop()
+            out.append(p)
+        return out[:-1]
+    return half(pts) + half(reversed(pts))
+
+
+def _inside(point, hull, margin=0.0):
+    """Return True if point is inside a counterclockwise hull, `margin` in from its edges."""
+    for (ax, ay), (bx, by) in zip(hull, hull[1:] + hull[:1]):
+        length = math.hypot(bx - ax, by - ay)
+        if ((bx - ax) * (point[1] - ay) - (by - ay) * (point[0] - ax)) / length < margin:
+            return False
+    return True
+
+
+def _closest_on_hull(point, hull):
+    """Return the point of a convex polygon closest to `point` (itself if inside)."""
+    if _inside(point, hull):
+        return point
+    best, best_d = None, float('inf')
+    for (ax, ay), (bx, by) in zip(hull, hull[1:] + hull[:1]):
+        ex, ey = bx - ax, by - ay
+        u = max(0.0, min(1.0, ((point[0] - ax) * ex + (point[1] - ay) * ey) / (ex * ex + ey * ey)))
+        q = (ax + u * ex, ay + u * ey)
+        d = math.hypot(point[0] - q[0], point[1] - q[1])
+        if d < best_d:
+            best, best_d = q, d
+    return best
+
+
 def _inset(side):
     """ZMP reference offset from a foot's ankle, in the foot frame."""
     return (ZMP_X_OFFSET, -ZMP_Y_INSET if side == 'l' else ZMP_Y_INSET)
@@ -166,6 +219,7 @@ class ZmpWalker:
         self.feet_in_pelvis = {}
         self.cop_in_foot = {side: _inset(side) for side in 'lr'}
         self.phase = 'double'
+        self.recovery_until = -1.0  # end of the last recovery step (s)
 
     @property
     def t(self):
@@ -255,7 +309,7 @@ class ZmpWalker:
 
     def _update_feet(self):
         phase = 'double'
-        for t0, t1, swing, start, end in self.steps:
+        for t0, t1, swing, start, end, *kind in self.steps:
             if self.t < t0:
                 break
             if self.t >= t1:
@@ -263,8 +317,12 @@ class ZmpWalker:
                 continue
             s = (self.t - t0) / (t1 - t0)
             ease = 0.5 - 0.5 * math.cos(math.pi * s)
+            ease_y = ease
+            if kind:  # recovery step: forward first, then across (clears the other foot)
+                ease = 0.5 - 0.5 * math.cos(math.pi * min(1.0, 1.6 * s))
+                ease_y = 0.5 - 0.5 * math.cos(math.pi * max(0.0, (s - 0.3) / 0.7))
             self.feet[swing] = [start[0] + (end[0] - start[0]) * ease,
-                                start[1] + (end[1] - start[1]) * ease,
+                                start[1] + (end[1] - start[1]) * ease_y,
                                 SWING_HEIGHT * math.sin(math.pi * s) ** 2,
                                 start[2] + _wrap(end[2] - start[2]) * ease]
             phase = f'swing_{swing}'
@@ -326,6 +384,95 @@ class ZmpWalker:
                 'com': tuple(com), 'phase': phase}
         self.k += 1
         return angles, share, info
+
+    def support_polygon(self):
+        """Return the convex hull of the loaded soles (walk frame)."""
+        sides = {'swing_l': 'r', 'swing_r': 'l'}.get(self.phase, 'lr')
+        corners = []
+        for side in sides:
+            x, y, _, yaw = self.feet[side]
+            for dx in SOLE_X:
+                for dy in (-SOLE_Y, SOLE_Y):
+                    ox, oy = _rot(dx, dy, yaw)
+                    corners.append((x + ox, y + oy))
+        return _hull(corners)
+
+    def recovery_step(self, com, vel):
+        """
+        Catch a push: step to where the capture point will be, then close the feet.
+
+        `com`, `vel`: measured CoM position and velocity (walk frame, x, y).
+        The instantaneous capture point xi = com + vel / OMEGA is where the
+        ZMP must go to stop the CoM. It diverges from the stance foot's ZMP
+        p as xi(t) = p + (xi - p) exp(OMEGA t), so the swing foot aims where
+        it will be at touchdown (p: the support polygon's point nearest xi --
+        a pushed foot rolls onto that edge). Lateral pushes step with the foot on the
+        The swing foot is the one farther from xi -- the unloaded one: lifting
+        the foot Atlas is tipping over drops the body (measured). A sideways
+        push toward the stance foot so becomes a crossover step, in front of
+        it; the closing step uncrosses the feet. Any planned walking is
+        dropped. Returns the swing side.
+        """
+        xi = (com[0] + vel[0] / OMEGA, com[1] + vel[1] / OMEGA)
+        far = {s: math.hypot(xi[0] - f[0], xi[1] - f[1]) for s, f in self.feet.items()}
+        swing = max(far, key=far.get)
+        stance = 'r' if swing == 'l' else 'l'
+        sx, sy, _, syaw = self.feet[stance]
+        # Pushed, the ZMP saturates at the sole edge nearest the capture
+        # point; xi diverges from there.
+        p = _closest_on_hull(xi, self.support_polygon())
+        grow = math.exp(OMEGA * (RECOVERY_SHIFT + RECOVERY_SWING))
+        speed = math.hypot(vel[0], vel[1]) or 1.0
+        # Step past it: the pushed foot rolls, so the body tips faster than
+        # the model's ZMP-at-the-edge assumes (steps landed short, measured).
+        target = (p[0] + (xi[0] - p[0]) * grow + RECOVERY_BEYOND * vel[0] / speed,
+                  p[1] + (xi[1] - p[1]) * grow + RECOVERY_BEYOND * vel[1] / speed)
+        # Ankle so the capture point lands mid-sole, within the leg's reach.
+        rx, ry = _rot(target[0] - sx, target[1] - sy, -syaw)
+        sign = 1.0 if swing == 'l' else -1.0
+        rx = min(RECOVERY_REACH_X[1], max(RECOVERY_REACH_X[0], rx - ZMP_X_OFFSET))
+        side = sign * ry  # positive: on the swing foot's own side
+        if side < 0.0:    # across the stance foot: cross in front of it
+            side = max(-CROSS_MAX, side)
+            rx = max(CROSS_AHEAD, rx)
+        else:
+            side = min(RECOVERY_REACH_Y[1], max(RECOVERY_REACH_Y[0], side))
+        ry = sign * side
+        end = _compose((sx, sy, syaw), rx, ry)
+        start = (self.feet[swing][0], self.feet[swing][1], self.feet[swing][3])
+
+        t = self.t
+        com_plan = (float(self.state[0][0]), float(self.state[0][1]))
+        self.walking = False
+        self.command = (0.0, 0.0, 0.0)
+        # The plan (and with it the leg joints) stays continuous: the push
+        # tips the whole body over the feet, which the legs must not add to.
+        # Resetting the planned CoM to the measured one did exactly that --
+        # the pelvis leaned into the fall and each step made it worse.
+        self.planned = {side: (f[0], f[1], f[3]) for side, f in self.feet.items()}
+        self.steps = []
+        t0, t1 = t + RECOVERY_SHIFT, t + RECOVERY_SHIFT + RECOVERY_SWING
+        # The planned CoM (hence the pelvis) holds still through the step:
+        # the preview chasing a support that jumps forward drove the pelvis
+        # after it at 0.8 m/s -- the legs pushed the body on into the fall
+        # (measured). Only once the foot is down does it ease over the new
+        # stance.
+        self.events = [(t, com_plan), (t1 + RECOVERY_HOLD, com_plan)]
+        self.steps.append((t0, t1, swing, start, end, 'recovery'))
+        self.planned[swing] = end
+        self.planned_count += 1
+        self.next_swing = stance
+        self.body = _compose(end, 0.0, -sign * FOOT_Y)
+        self.recovery_until = t1 + RECOVERY_SETTLE
+        points = [_compose(self.planned[s], *_inset(s))[:2] for s in 'lr']
+        centre = ((points[0][0] + points[1][0]) / 2, (points[0][1] + points[1][1]) / 2)
+        self.events.append((t1 + RECOVERY_HOLD + RECOVERY_SHIFT_COM, centre))
+        self.last_recovery = {'xi': xi, 'target': target, 'stance': (sx, sy), 'end': end[:2]}
+        return swing
+
+    def _mid_pose_now(self):
+        (lx, ly, _, lyaw), (rx, ry, _, ryaw) = self.feet['l'], self.feet['r']
+        return ((lx + rx) / 2, (ly + ry) / 2, ryaw + _wrap(lyaw - ryaw) / 2)
 
     def com_from_foot(self, side):
         """Return the planned CoM relative to a foot's ankle, in the pelvis yaw frame."""

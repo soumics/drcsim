@@ -98,6 +98,8 @@ class FreeWalkNode(Node):
         if not self.stopped and c.walker.planned_count >= self.steps - 1:
             self.stopped = True
             c.stop()
+        while c.messages:
+            self.get_logger().warn(c.messages.pop(0))
         if out.mode:
             self.get_logger().info(f'atlas/mode: {out.mode}')
             self.mode_pub.publish(String(data=out.mode))

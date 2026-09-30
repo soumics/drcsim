@@ -52,6 +52,7 @@ void FollowCameraPlugin::Configure(
   this->targetLinkName = _sdf->Get<std::string>("target_link", this->targetLinkName).first;
   this->offset = _sdf->Get<gz::math::Pose3d>("offset", this->offset).first;
   this->timeConstant = _sdf->Get<double>("time_constant", this->timeConstant).first;
+  this->followHeading = _sdf->Get<bool>("follow_heading", this->followHeading).first;
 }
 
 //////////////////////////////////////////////////
@@ -80,7 +81,8 @@ void FollowCameraPlugin::PreUpdate(
   const gz::math::Vector2d measured(pose.Pos().X(), pose.Pos().Y());
   // Heading from the forward axis projected on the ground; held while it
   // points mostly up or down (a robot lying on its back or front).
-  const bool headingValid = std::hypot(forward.X(), forward.Y()) > 0.5;
+  const bool headingValid =
+    this->followHeading && std::hypot(forward.X(), forward.Y()) > 0.5;
   const double measuredYaw = std::atan2(forward.Y(), forward.X());
 
   if (!this->initialized) {
