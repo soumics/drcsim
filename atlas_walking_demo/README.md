@@ -196,11 +196,18 @@ capture point lands to mid-stance. Measured (precise pushes, same as above):
 | Push | standing only | with stepping |
 |---|---|---|
 | 60-75 N s any direction, sideways 106 N s | ok | ok (no step taken) |
-| forward 90 N s | fell | 2 of 3 caught |
-| backward 90 N s | fell | ~3 of 4 caught |
+| forward / backward 90 N s | fell | caught in roughly 1 run of 3 (varies 25-65%) |
 | sideways 150 N s | fell | fell (crossover steps don't catch yet) |
 
-Work in progress; see `CLAUDE.md` for what each fix changed.
+Stepping is **experimental**: it detects pushes and lands steps, but chains
+of short steps or a sideways runaway after landing still end in falls. Next
+approach: a learned policy (see the roadmap in the top-level README).
+
+**Lockstep for repeatable runs** (`sync_period_ms`): with
+`atlas.launch.py sync_max_per_window:=5.0 sync_max_per_step:=0.05` and
+`torque_stand.py --ros-args -p sync_period_ms:=2`, AtlasPlugin holds each
+physics step until the torque command for the newest state has arrived, so
+CPU load (e.g. recording video) can't delay the Python controller.
 `free_walk.py`'s capture-point stepping in position mode (`push_recovery`,
 off by default) detects pushes but does not catch them.
 

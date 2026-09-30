@@ -104,6 +104,12 @@ class TorqueStandNode(Node):
             cmd.effort = [float(x) for x in tau]
             cmd.kp_position = [0.0] * len(N)
             cmd.kd_position = [self.params['kd_joint']] * len(N)
+        # Stamped with the state it answers: AtlasPlugin's lockstep measures
+        # command age from this stamp (sync_period_ms).
+        cmd.header.stamp = s.header.stamp
+        # Torque mode only: the position-mode crouch commands at 200 Hz.
+        if self.torque is not None:
+            cmd.desired_controller_period_ms = int(self.params['sync_period_ms'])
         self.pub.publish(cmd)
         if self.torque is not None and t - self.last_log >= 1.0:
             self.last_log = t

@@ -2523,6 +2523,40 @@ forward/back, where standing falls. Smaller pushes trigger no steps.
 - Ideas: pelvis/torso orientation freedom, a swing-foot timing
   adaptation, a second step policy.
 
+### Push work wrapped up (2026-10-01)
+
+- **Recording push videos** (`drcsim_record_demo … push …`):
+  - Only the sideways standing video succeeded:
+    `video/atlas_push_sideways.mp4`, 106 N·s, balanced on the spot.
+  - Recorder bugs found and fixed:
+    - The node ignored SIGINT as a background job, so it is sent TERM.
+    - `set -e` plus a failing `kill` aborted takes early, and they looked
+      like falls.
+    - A trap now cleans up RViz and the recorders.
+  - The container's PID 1 is `sleep` and reaps nothing, so killed processes
+    stay zombies (harmless; `docker run --init` would fix it).
+  - `pkill -f X` inside `bash -c` matches its own shell; use
+    `pgrep -f 'X[.]py'`.
+  - A negative `nice` isn't permitted in the container.
+- **Lockstep:** AtlasPlugin's controller synchronisation now works
+  end-to-end.
+  - The budgets moved to the right node (`atlas_plugin`; they were under
+    `vrc_plugin`) and are exposed as the launch args `sync_max_per_step`
+    and `sync_max_per_window`.
+  - `torque_stand.py -p sync_period_ms:=2` stamps each command with its
+    state's stamp.
+  - With a 5 s window the sim runs at the controller's pace (RTF 0.75
+    unloaded, 0.06 while recording) and results are repeatable.
+- **Stepping under lockstep still fails most 90 N·s pushes**, so load was
+  not the (only) cause. Remaining failure modes: a sideways runaway after a
+  forward step, and chains of short steps after backward ones.
+  - Last fixes: the step margin now points along the CoM velocity;
+    mostly-sagittal travel uses normal stance width (a spurious sideways
+    spike at push onset made crossover steps); both feet count as planted
+    for 0.5 s after a landing.
+- **Decision:** stepping stays experimental and on (it never fires below
+  ~75 N·s). Next is the learned policy.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

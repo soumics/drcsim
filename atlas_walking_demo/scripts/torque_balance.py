@@ -49,6 +49,7 @@ DEFAULTS = {
     'w_foot': 5000.0, 'kp_foot': 1600.0, 'kd_foot': 80.0,
     'kd_joint': 1.0,       # AtlasPlugin joint damping in torque mode (N m s/rad)
     'com_ahead': 0.02,     # CoM target ahead of the soles' midpoint (m)
+    'sync_period_ms': 0,   # >0: ask AtlasPlugin to hold physics for fresh commands (lockstep)
     'trace': False,
     'stepping': True,      # take a recovery step when the capture point leaves the feet
     'step_margin': 0.0,    # how far outside the support polygon before stepping (m)
@@ -60,6 +61,7 @@ DEFAULTS = {
     'retarget_speed': 0.1,     # m/s the balance target walks to mid-stance after a step
     'step_persist': 0.015,     # s the capture point must stay outside before stepping
     'vcom_tau': 0.03,          # s low-pass on the CoM velocity estimate
+    'plant_time': 0.5,     # s both feet count as planted after a landing
     'step_width': 0.18,    # m min sideways distance from the stance foot
     'step_max_x': (-0.35, 0.50),  # m swing sole from the stance sole, stance frame
     'step_max_y': 0.30,           # m max sideways
@@ -117,6 +119,12 @@ class TorqueBalance:
         """Return the joint torques (AtlasCommand order) for this state at time t (s)."""
         self.t = t
         contacts = self.contacts(state)
+        if self.step is None and t < getattr(self, 'planted_until', -1.0):
+            # Just landed: both feet count as planted, so the QP brakes on the
+            # new foot; the landed foot unloaded again and Atlas ran on over
+            # the stance foot (measured).
+            contacts = 'lr'
+            self.in_contact.update({'l': True, 'r': True})
         if self.step is not None:
             contacts = self._stepping_contacts(contacts)
         q, v = self._state(state, contacts)
@@ -271,13 +279,26 @@ class TorqueBalance:
         grow = math.exp(OMEGA * horizon)
         v = np.array(xi) - np.array(edge)
         n = np.linalg.norm(v) or 1.0
-        target = np.array(edge) + v * grow + p['step_beyond'] * v / n
+        # Past the prediction along the CoM's travel: along (xi - edge) the
+        # margin pointed at the stance foot's corner -- sideways on a
+        # forward push -- and the step landed short (measured).
+        heading = self.vcom_f[:2]
+        hn = np.linalg.norm(heading)
+        heading = heading / hn if hn > 0.05 else v / n
+        target = np.array(edge) + v * grow + p['step_beyond'] * heading
         spos, syaw = soles[stance]
         # Keep it within reach of the stance foot, and not onto it.
         rel = target - spos[:2]
         c, s = math.cos(-syaw), math.sin(-syaw)
         lx, ly = c * rel[0] - s * rel[1], s * rel[0] + c * rel[1]
         sign = 1.0 if side == 'l' else -1.0
+        # Mostly fore/aft travel: normal stance width, the prediction only
+        # sets the step length. (The push hits the torso high up; its first
+        # instants spike the sideways estimate, and a forward push became a
+        # crossover step -- measured.)
+        vel = self.vcom_f[:2]
+        if abs(vel[1]) < 0.5 * abs(vel[0]):
+            ly = sign * 2 * zw.FOOT_Y
         # Limit each direction on its own: a combined reach limit shortened
         # forward steps when the sideways prediction was large (measured).
         lx = min(p['step_max_x'][1], max(p['step_max_x'][0], lx))
@@ -325,5 +346,6 @@ class TorqueBalance:
         self.step = None
         self.landed_at = self.t
         self.messages.append(f'Step landed after {elapsed:.2f} s.')
+        self.planted_until = self.t + self.p['plant_time']
         self._retarget = True
         return measured

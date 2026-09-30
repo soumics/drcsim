@@ -389,6 +389,14 @@ def generate_launch_description():
             description='Add a chase camera following Atlas (demo_camera/image, 960x540 '
                         '@ 25 Hz, rendered by the gz server) for demo videos.'),
         DeclareLaunchArgument(
+            'sync_max_per_step', default_value='0.025',
+            description='Controller lockstep: max wall time (s) one physics step waits for '
+                        'a fresh AtlasCommand (only when the controller asks for it).'),
+        DeclareLaunchArgument(
+            'sync_max_per_window', default_value='0.25',
+            description='Controller lockstep: max wall time (s) of waiting per 5 s window; '
+                        '5.0 lets the sim run fully in step with a slow controller.'),
+        DeclareLaunchArgument(
             'lidar_spindle_speed', default_value='1.5',
             description='MultiSense lidar spin rate (rad/s); 0 keeps it still (a 2D scan).'),
     ]
@@ -436,9 +444,16 @@ def _launch_setup(context, *args, **kwargs):
         'robot_initial_pose.yaw': pose['yaw'],
         'atlas.startup_mode': startup_mode,
         'atlas.time_to_unpin': 1.0,
+    })
+    # Controller lockstep (AtlasPlugin): a controller that sets
+    # AtlasCommand.desired_controller_period_ms makes each physics step wait
+    # for a command no older than that, within these wall-time budgets.
+    combined_params.setdefault('atlas_plugin', {}).setdefault('ros__parameters', {}).update({
         'atlas.delay_window_size': 5.0,
-        'atlas.delay_max_per_window': 0.25,
-        'atlas.delay_max_per_step': 0.025,
+        'atlas.delay_max_per_window': float(
+            LaunchConfiguration('sync_max_per_window').perform(context)),
+        'atlas.delay_max_per_step': float(
+            LaunchConfiguration('sync_max_per_step').perform(context)),
     })
 
     extra_joint_state_topics = ['multisense/joint_states']

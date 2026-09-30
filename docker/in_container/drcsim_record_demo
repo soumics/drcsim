@@ -80,7 +80,11 @@ if [ "$MODE" = push ]; then
   # The recorders above run niced (and software RViz on 2 threads): at equal
   # priority they starved this wall-clock Python controller and Atlas fell
   # on pushes it catches unrecorded (measured).
-  ros2 run atlas_walking_demo torque_stand.py > /tmp/demo_push.log 2>&1 &
+  # Lockstep (sync_period_ms): AtlasPlugin holds each physics step for a
+  # fresh torque command, so the recording's CPU load can't delay the
+  # controller (start the sim with sync_max_per_window:=5.0 for a full budget).
+  ros2 run atlas_walking_demo torque_stand.py --ros-args -p sync_period_ms:=2 \
+    > /tmp/demo_push.log 2>&1 &
   STAND=$!
   until grep -q 'switched to torque control' /tmp/demo_push.log; do sleep 0.5; done
   sim_sleep 3
