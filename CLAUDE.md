@@ -2370,6 +2370,24 @@ fell, restart after a fall). All four done:
 - Tests: atlas_walking_demo + drcsim_gazebo_ros_plugins 249, 0 failures
   (35 skipped).
 
+### Demo camera: follow, don't ride (2026-09-30)
+
+User: the Gazebo side of the videos rolled "like an earthquake" while
+walking, and pointed at the sky at 1:25 of the free-standing video.
+- **Cause:** `demo_camera` was a sensor fixed to the pelvis, 4.3 m out. Every
+  degree of pelvis sway moved it about 7 cm and tilted the view; when Atlas
+  was shoved over, the camera fell with it.
+- **Fix:** the new `drcsim_gazebo_plugins::FollowCameraPlugin` (no ROS) runs
+  on its own gravity-free model, spawned by `atlas.launch.py demo_camera:=true`
+  via `ros_gz_sim create`.
+  - Every step it moves the model with `SetWorldPoseCmd` to `offset`, in a
+    frame at the target link's low-pass-filtered (x, y) and heading
+    (τ = 1 s) and at the target's first-seen height.
+  - It never takes roll or pitch.
+  - It holds the heading while the pelvis's forward axis points mostly up or
+    down (lying down).
+- Tested in `test_follow_camera_plugin.cpp`. Both videos were re-recorded.
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

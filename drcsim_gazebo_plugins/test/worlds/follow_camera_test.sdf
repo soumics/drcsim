@@ -1,0 +1,51 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="follow_camera_test">
+    <physics name="1ms" type="ode">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+
+    <!-- Targets: static, so they stay exactly where they are put.
+         "standing" is rolled and pitched (swaying) and turned 0.5 rad;
+         "lying" is on its back (forward axis straight up). -->
+    <model name="standing">
+      <static>true</static>
+      <pose>1 2 0.9 0.2 0.1 0.5</pose>
+      <link name="pelvis"/>
+    </model>
+    <model name="lying">
+      <static>true</static>
+      <pose>-3 0 0.2 0 -1.5708 0.8</pose>
+      <link name="pelvis"/>
+    </model>
+
+    <model name="camera_standing">
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial><mass>0.1</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <plugin filename="FollowCameraPlugin"
+              name="drcsim_gazebo_plugins::FollowCameraPlugin">
+        <target_model>standing</target_model>
+        <offset>3 -2 0.3 0 0.06 2.4</offset>
+      </plugin>
+    </model>
+    <model name="camera_lying">
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial><mass>0.1</mass>
+          <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+        </inertial>
+      </link>
+      <plugin filename="FollowCameraPlugin"
+              name="drcsim_gazebo_plugins::FollowCameraPlugin">
+        <target_model>lying</target_model>
+        <offset>3 0 0.3 0 0 3.14159</offset>
+      </plugin>
+    </model>
+  </world>
+</sdf>

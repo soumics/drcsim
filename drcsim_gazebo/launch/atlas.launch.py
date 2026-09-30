@@ -228,30 +228,37 @@ def _fix_robotiq_passive_joints(robot_description):
     return ET.tostring(root, encoding='unicode')
 
 
-def _add_demo_camera(robot_description):
-    """
-    Add a chase camera riding with the pelvis: front-right, looking back at Atlas.
-
-    It is part of the robot model, so it follows every step and turn, and
-    the gz server renders it (Ogre2, GPU, full PBR look) -- unlike a GUI
-    user camera, which needs a screen and its record button.
-    """
-    root = ET.fromstring(robot_description)
-    gazebo = ET.SubElement(root, 'gazebo', reference='pelvis')
-    sensor = ET.SubElement(gazebo, 'sensor', type='camera', name='demo_camera')
-    ET.SubElement(sensor, 'pose').text = '3.3 -2.8 0.3 0 0.06 2.44'
-    ET.SubElement(sensor, 'update_rate').text = '25'
-    ET.SubElement(sensor, 'topic').text = 'demo_camera/image'
-    camera = ET.SubElement(sensor, 'camera')
-    ET.SubElement(camera, 'horizontal_fov').text = '1.0'
-    image = ET.SubElement(camera, 'image')
-    ET.SubElement(image, 'width').text = '960'
-    ET.SubElement(image, 'height').text = '540'
-    ET.SubElement(image, 'format').text = 'R8G8B8'
-    clip = ET.SubElement(camera, 'clip')
-    ET.SubElement(clip, 'near').text = '0.1'
-    ET.SubElement(clip, 'far').text = '100'
-    return ET.tostring(root, encoding='unicode')
+# Chase camera for demo videos (demo_camera:=true): front-right of Atlas,
+# looking back at it. Its own model, rendered by the gz server (Ogre2, GPU,
+# full PBR look). It used to be a sensor fixed to the pelvis, which rolled
+# with every step and pointed at the sky when Atlas fell; FollowCameraPlugin
+# follows the pelvis's smoothed position and heading at a fixed height.
+DEMO_CAMERA_SDF = """<sdf version="1.9">
+  <model name="demo_camera">
+    <pose>0 0 -10 0 0 0</pose>
+    <link name="link">
+      <gravity>false</gravity>
+      <inertial><mass>0.1</mass>
+        <inertia><ixx>0.001</ixx><iyy>0.001</iyy><izz>0.001</izz></inertia>
+      </inertial>
+      <sensor name="demo_camera" type="camera">
+        <update_rate>25</update_rate>
+        <topic>demo_camera/image</topic>
+        <camera>
+          <horizontal_fov>1.0</horizontal_fov>
+          <image><width>960</width><height>540</height><format>R8G8B8</format></image>
+          <clip><near>0.1</near><far>100</far></clip>
+        </camera>
+      </sensor>
+    </link>
+    <plugin filename="FollowCameraPlugin" name="drcsim_gazebo_plugins::FollowCameraPlugin">
+      <target_model>atlas</target_model>
+      <target_link>pelvis</target_link>
+      <offset>3.3 -2.8 0.3 0 0.06 2.44</offset>
+      <time_constant>1.0</time_constant>
+    </plugin>
+  </model>
+</sdf>"""
 
 
 def _paint_for(name):
@@ -379,8 +386,8 @@ def generate_launch_description():
         DeclareLaunchArgument('cheats_enabled', default_value='true'),
         DeclareLaunchArgument(
             'demo_camera', default_value='false',
-            description='Add a chase camera riding with the pelvis (demo_camera/image, '
-                        '960x540 @ 25 Hz, rendered by the gz server) for demo videos.'),
+            description='Add a chase camera following Atlas (demo_camera/image, 960x540 '
+                        '@ 25 Hz, rendered by the gz server) for demo videos.'),
         DeclareLaunchArgument(
             'lidar_spindle_speed', default_value='1.5',
             description='MultiSense lidar spin rate (rad/s); 0 keeps it still (a 2D scan).'),
@@ -406,8 +413,7 @@ def _launch_setup(context, *args, **kwargs):
     robot_description = _strip_classic_plugins(xacro.process_file(robot_xacro).toxml())
     skin = LaunchConfiguration('skin').perform(context)
     gz_description = _svh_for_gz(robot_description)
-    if LaunchConfiguration('demo_camera').perform(context).lower() in ('true', '1'):
-        gz_description = _add_demo_camera(gz_description)
+    demo_camera = LaunchConfiguration('demo_camera').perform(context).lower() in ('true', '1')
     spawn_description = (
         _skin_sdf(gz_description, paint_body=skin == 'glam') if skin != 'classic'
         else gz_description)
@@ -511,4 +517,10 @@ def _launch_setup(context, *args, **kwargs):
                         ('robot_description', topic.replace('joint_states', 'robot_description'))],
             output='screen')
         for topic in extra_joint_state_topics
-    ]
+    ] + ([
+        Node(
+            package='ros_gz_sim',
+            executable='create',
+            arguments=['-name', 'demo_camera', '-string', DEMO_CAMERA_SDF],
+            output='screen'),
+    ] if demo_camera else [])

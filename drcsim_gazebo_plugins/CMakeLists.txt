@@ -48,6 +48,19 @@ install(TARGETS DRCBuildingPlugin
   RUNTIME DESTINATION bin
 )
 
+add_library(FollowCameraPlugin SHARED src/FollowCameraPlugin.cpp)
+target_link_libraries(FollowCameraPlugin
+  gz-sim8::gz-sim8
+  gz-plugin2::register
+  gz-math7::gz-math7
+  gz-common5::gz-common5
+)
+install(TARGETS FollowCameraPlugin
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
 # Let gz-sim find these plugin libraries at runtime.
 ament_environment_hooks(
   "${CMAKE_CURRENT_SOURCE_DIR}/hooks/${PROJECT_NAME}.dsv.in"
@@ -83,6 +96,15 @@ if(BUILD_TESTING)
   )
   add_dependencies(test_drc_vehicle_plugin
     DRCBuildingPlugin DRCVehiclePlugin)
+
+  ament_add_gtest(test_follow_camera_plugin
+    test/test_follow_camera_plugin.cpp)
+  target_link_libraries(test_follow_camera_plugin gz-sim8::gz-sim8)
+  target_compile_definitions(test_follow_camera_plugin PRIVATE
+    "PLUGIN_BUILD_DIR=\"$<TARGET_FILE_DIR:FollowCameraPlugin>\""
+    "TEST_WORLD_DIR=\"${CMAKE_CURRENT_SOURCE_DIR}/test/worlds\""
+  )
+  add_dependencies(test_follow_camera_plugin FollowCameraPlugin)
 endif()
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
