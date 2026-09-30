@@ -6,6 +6,9 @@
 #     harness  (default) walking in the harness, grasping, a kick
 #              -> OUT_DIR/atlas_demo.mp4
 #     free     free-standing walking (no harness) -> OUT_DIR/atlas_free_demo.mp4
+#     push FX FY DUR NAME "CAPTION"
+#              torque-controlled stand (torque_stand.py), one precise push on
+#              the torso (drcsim_push) -> OUT_DIR/NAME.mp4; exits 1 if Atlas fell
 # The Gazebo side is the chase camera riding with Atlas (rendered by the gz
 # server on the GPU, full PBR look), recorded frame by frame in simulation
 # time; RViz runs on a private virtual display (Xvfb :98), screen-recorded in
@@ -17,6 +20,10 @@ set -e
 OUT="${1:-/tmp/video}"
 MODE="${2:-harness}"
 NAME=$([ "$MODE" = free ] && echo atlas_free_demo || echo atlas_demo)
+CAPTION=$([ "$MODE" = free ] && echo 'Gazebo Harmonic - free-standing, no harness' || echo 'Gazebo Harmonic')
+if [ "$MODE" = push ]; then
+  PUSH_F=("$3" "$4" "$5"); NAME="$6"; CAPTION="$7"
+fi
 mkdir -p "$OUT"
 CONFIG="$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config"
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
@@ -38,8 +45,13 @@ cfg['Window Geometry'].update({'Width': 1280, 'Height': 720, 'Displays': {'colla
 yaml.safe_dump(cfg, open(sys.argv[2], 'w'))
 PY
 DISPLAY=:98 LIBGL_ALWAYS_SOFTWARE=1 __GLX_VENDOR_LIBRARY_NAME=mesa __NV_PRIME_RENDER_OFFLOAD=0 \
+  LP_NUM_THREADS=2 nice -n 19 \
   rviz2 -d /tmp/demo.rviz --ros-args -p use_sim_time:=true > /tmp/demo_rviz.log 2>&1 &
 RVIZ=$!
+# Whatever happens (a take that fails or times out included), don't leave
+# RViz or the recorders running: leftovers from failed takes piled up
+# (eleven software-rendered RViz instances) and starved the simulation.
+trap 'kill $RVIZ ${GZ_REC:-} ${FFMPEG:-} 2> /dev/null' EXIT
 sleep 12
 
 # Start both recordings.
@@ -47,9 +59,9 @@ rm -f "$OUT/gazebo.mp4" "$OUT/rviz.mp4"
 sim_now() {
   gz topic -e -t /stats -n 1 | awk '/sim_time/{f=1} f&&/^ *sec:/{s=$2} f&&/nsec:/{print s + $2 / 1e9; exit}'
 }
-drcsim_record_topic /demo_camera/image "$OUT/gazebo.mp4" 25 sim &
+nice -n 10 drcsim_record_topic /demo_camera/image "$OUT/gazebo.mp4" 25 sim &
 GZ_REC=$!
-ffmpeg -loglevel error -y -f x11grab -draw_mouse 0 -framerate 25 -video_size 1280x720 -i :98 \
+nice -n 19 ffmpeg -loglevel error -y -f x11grab -draw_mouse 0 -framerate 25 -video_size 1280x720 -i :98 \
   -c:v libx264 -preset veryfast -pix_fmt yuv420p "$OUT/rviz.mp4" < /dev/null &
 FFMPEG=$!
 SIM0=$(python3 -c "import time; print(time.time())")
@@ -63,7 +75,23 @@ sim_sleep() {
   end=$(python3 -c "print($(sim_now) + $1)")
   while python3 -c "import sys; sys.exit(0 if $(sim_now) < $end else 1)"; do sleep 0.5; done
 }
-if [ "$MODE" = free ]; then
+if [ "$MODE" = push ]; then
+  # Stand (crouch in position mode, then torque control), push once, watch.
+  # The recorders above run niced (and software RViz on 2 threads): at equal
+  # priority they starved this wall-clock Python controller and Atlas fell
+  # on pushes it catches unrecorded (measured).
+  ros2 run atlas_walking_demo torque_stand.py > /tmp/demo_push.log 2>&1 &
+  STAND=$!
+  until grep -q 'switched to torque control' /tmp/demo_push.log; do sleep 0.5; done
+  sim_sleep 3
+  drcsim_push "${PUSH_F[@]}"
+  sim_sleep 7
+  # A background job of a non-interactive shell ignores SIGINT, so a
+  # Ctrl-C never reached the node (the take hung): TERM it, rclpy handles
+  # that cleanly too.
+  pkill -TERM -f 'lib/atlas_walking_demo/torque_stand.py' || true
+  sleep 1; kill $STAND 2> /dev/null || true; wait $STAND 2> /dev/null || true
+elif [ "$MODE" = free ]; then
   # Free-standing: walk commands start ~2.6 s after the key (the ZMP
   # preview plans that far ahead), so every move gets time to show.
   ( sim_sleep 7; printf w; sim_sleep 16; printf z; sim_sleep 14; printf ' '; sim_sleep 7
@@ -96,8 +124,12 @@ DUR=$(for f in gazebo rviz_simtime; do
   ffprobe -v error -show_entries format=duration -of csv=p=0 "$OUT/$f.mp4"; done | sort -n | head -1)
 LABEL="fontfile=$FONT:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x=24:y=20"
 ffmpeg -loglevel error -y -i "$OUT/gazebo.mp4" -i "$OUT/rviz_simtime.mp4" -t "$DUR" -filter_complex \
-  "[0:v]scale=-2:720,fps=25,drawtext=text='Gazebo Harmonic$([ "$MODE" = free ] && echo ' - free-standing, no harness')':$LABEL[g];\
+  "[0:v]scale=-2:720,fps=25,drawtext=text='$CAPTION':$LABEL[g];\
 [1:v]scale=-2:720,fps=25,drawtext=text='RViz 2 - sensors + TF':$LABEL[r];\
 [g][r]hstack=inputs=2" \
   -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p "$OUT/$NAME.mp4"
 echo "Demo video: $OUT/$NAME.mp4 (${DUR%.*} s)"
+if [ "$MODE" = push ]; then
+  cp /tmp/demo_push.log "$OUT/$NAME.log"
+  if grep -q 'Fell' /tmp/demo_push.log; then echo "Atlas fell in this take."; exit 1; fi
+fi

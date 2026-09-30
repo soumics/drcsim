@@ -35,3 +35,10 @@ docker cp drcsim:/tmp/video/atlas_free_demo.mp4 video/
 ```
 
 The `.mp4` files are git-ignored to keep the repository small.
+
+`atlas_push_sideways.mp4` (18 s): torque-controlled Atlas (`torque_stand.py`) takes a
+106 N s sideways shove on the torso (`drcsim_push 0 525 0.2`) and recovers on the spot.
+Record with `drcsim_record_demo /tmp/video push 0 525 0.2 atlas_push_sideways "CAPTION"`
+(exits 1 if Atlas fell). Recovery-step pushes (90 N s forward/backward) are not
+reliable enough to film yet: 0 of 18 recorded takes recovered, while ~60% of
+unrecorded runs do -- the recording load disturbs the Python controller.
