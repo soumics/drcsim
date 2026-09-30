@@ -2387,10 +2387,13 @@ walking, and pointed at the sky at 1:25 of the free-standing video.
   - It holds the heading while the pelvis's forward axis points mostly up or
     down (lying down).
 - Tested in `test_follow_camera_plugin.cpp`. Both videos were re-recorded.
-- `drcsim_record_demo free` now shoves Atlas from the front (1000 N for
-  0.4 s of sim time), so it falls backward, away from the camera and in
-  view. The earlier 2500 N × 0.6 s shove, once timed in sim time (1500 N·s),
-  threw it metres out of frame.
+- User feedback on the fall in the free demo: the "get up" is a teleport
+  (the harness lifts the whole body upright), not a human-like get-up. The
+  demo now has **no push and no fall**. The reset is documented as a
+  testing aid, `walk_keyboard.py` defaults to `auto_recover:=false`, and a
+  real get-up (roll to prone, push up, kneel, stand) is the next task.
+  - For shoves in sim time: 1000 N × 0.4 s from the front knocks Atlas
+    onto its back in view; 2500 N × 0.6 s threw it metres away.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 

@@ -5,8 +5,7 @@
 #              demo_camera:=true, e.g. drcsim_sim demo_camera:=true
 #     harness  (default) walking in the harness, grasping, a kick
 #              -> OUT_DIR/atlas_demo.mp4
-#     free     free-standing walking (no harness), a push that knocks Atlas
-#              over, getting back up -> OUT_DIR/atlas_free_demo.mp4
+#     free     free-standing walking (no harness) -> OUT_DIR/atlas_free_demo.mp4
 # The Gazebo side is the chase camera riding with Atlas (rendered by the gz
 # server on the GPU, full PBR look), recorded frame by frame in simulation
 # time; RViz runs on a private virtual display (Xvfb :98), screen-recorded in
@@ -64,27 +63,14 @@ sim_sleep() {
   end=$(python3 -c "print($(sim_now) + $1)")
   while python3 -c "import sys; sys.exit(0 if $(sim_now) < $end else 1)"; do sleep 0.5; done
 }
-# A hard shove on the chest, from the front, enough to knock Atlas over
-# backward -- away from the chase camera, so the fall stays in the picture.
-shove() {
-  local force
-  force=$(gz model -m atlas -p 2> /dev/null | tail -1 | tr -d '[]' | python3 -c \
-    "import math, sys; yaw = float(sys.stdin.read().split()[2]); \
-print(f'x: {-$1 * math.cos(yaw):.0f}, y: {-$1 * math.sin(yaw):.0f}')")
-  gz topic -t /world/default/wrench/persistent -m gz.msgs.EntityWrench \
-    -p "entity: {name: \"atlas::utorso\", type: LINK}, wrench: {force: {$force, z: 0}}"
-  sim_sleep 0.4
-  gz topic -t /world/default/wrench/clear -m gz.msgs.Entity -p 'name: "atlas::utorso", type: LINK'
-}
-
 if [ "$MODE" = free ]; then
   # Free-standing: walk commands start ~2.6 s after the key (the ZMP
   # preview plans that far ahead), so every move gets time to show.
   ( sim_sleep 7; printf w; sim_sleep 16; printf z; sim_sleep 14; printf ' '; sim_sleep 7
     printf d; sim_sleep 12; printf ' '; sim_sleep 6; printf q; sim_sleep 14; printf ' '
-    sim_sleep 7; shove 1000; sim_sleep 12; printf w; sim_sleep 14; printf ' '
-    sim_sleep 7; printf '\003'
-  ) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p harness:=false" \
+    sim_sleep 7; printf w; sim_sleep 14; printf ' '; sim_sleep 7; printf '\003'
+  ) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p harness:=false \
+    -p auto_recover:=false" \
     /dev/null > /tmp/demo_teleop.log 2>&1
 else
   # The show: relaxed hands, grip, open, walk, curve, side-step, back, kick, turn.

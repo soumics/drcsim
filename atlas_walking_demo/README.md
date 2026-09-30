@@ -12,8 +12,8 @@ Two ways to walk:
   with a stiff spring-damper while the legs carry the weight. Fast (up to
   0.42 m/s) and can't fall.
 - **Free-standing** (`-p harness:=false`): no harness. ZMP preview control
-  plus balance feedback, in every direction, and Atlas gets back up by
-  itself if it falls. Slower (about 0.1 m/s). See
+  plus balance feedback, in every direction. Slower (about 0.1 m/s). It
+  cannot get up by itself yet after a fall (see below). See
   [Free-standing walking](#free-standing-walking) below.
 
 ## Run it
@@ -40,7 +40,7 @@ torque (see `CLAUDE.md`, bug #8).
 | `g`, `[` / `]` | grip / relax both hands; left / right hand only |
 | `h` | open both hands flat (`g` relaxes them again) |
 | `k` / `l` / `j` | kick Atlas from the right / front / behind (900 N, 0.2 s) |
-| `r` | free-standing: get up after a fall (automatic after 2 s by default) |
+| `r` | free-standing, after a fall: harness reset onto its feet (a testing aid) |
 | Ctrl-C | quit (the harness stays on) |
 
 Any `geometry_msgs/Twist` on `atlas_walk/cmd_vel` also drives it, for
@@ -104,12 +104,14 @@ change that far ahead, and starting sooner jerks the CoM (0.8 s gave 5×
 the ZMP error, offline). Stopping finishes the planned steps and brings
 the feet together.
 
-**Falls.** Past 35° of tilt it stops commanding. Two seconds later (or on
-`r`; `auto_recover:=false` to disable) it gets up: `VRCPlugin`'s
-`recover` mode stands the pelvis upright 15 cm above spawn height in the
-spring harness, the legs blend into the stance in the air, the harness
-lowers until the legs carry the weight, then lets go and it balances
-again.
+**Falls.** Past 35° of tilt it stops commanding. Atlas cannot yet get up
+by itself the way a person does (roll over, push up, kneel, stand); that
+is being built. Until then `r` (or `auto_recover:=true`, 2 s after a fall;
+the default for the scripted `free_walk.py`) does a **harness reset**, a
+testing aid, not a motion: `VRCPlugin`'s `recover` mode lifts the pelvis
+upright 15 cm above spawn height in the spring harness (a teleport), the
+legs blend into the stance in the air, the harness lowers until the legs
+carry the weight, then lets go and it balances again.
 
 | Layer | What it does | Where |
 |---|---|---|
@@ -120,7 +122,7 @@ again.
 | Gravity feedforward | model-based joint torques for each leg's planned load at its planned CoP | `zmp_walk.gravity_feedforward` |
 | Ankle / hip stabilizer | `aky`, `akx`, `hpx` from IMU pitch/roll on the loaded legs | `balance_controller.py` |
 | CoM feedback | measured CoM (leg FK + IMU) vs plan, blended by load; shifts the pelvis target | `FreeWalkController._com_feedback` |
-| Recovery | fall detection, harness get-up sequence | `FreeWalkController.recover` |
+| Reset | fall detection, harness reset onto the feet | `FreeWalkController.recover` |
 
 Measured (Docker, sim time, `free_walk.py`, 10 steps each, all finished
 standing):
@@ -144,7 +146,7 @@ What it took, for anyone tuning further:
   after 2–4 steps; the IMU hip/ankle roll stabilizers alone did not stop
   it (akx has little authority with both feet down, measured). The
   wider 4 cm ZMP inset helped too.
-- Getting up: at spawn height a foot still in its fallen pose dragged on
+- Harness reset: at spawn height a foot still in its fallen pose dragged on
   the floor and stuck (hip roll held 10° off by friction), and a harness
   lowered too far pressed Atlas into the floor (2140 N on the feet for
   1760 N of weight); either way it fell again on release.

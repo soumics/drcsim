@@ -11,14 +11,11 @@
 - **RViz:** the spinning MultiSense lidar's 3D point cloud and scan, plus the head and torso
   camera feeds.
 
-`atlas_free_demo.mp4` (2560×720, 25 fps, ~2 min): the same views with Atlas walking
+`atlas_free_demo.mp4` (2560×720, 25 fps, ~1:45): the same views with Atlas walking
 **free-standing, no harness** (ZMP preview control + balance feedback):
-- walking forward, a curve, side-stepping right, turning in place;
-- a 1000 N, 0.4 s shove on the chest knocks it onto its back; after 2 s it gets back up
-  by itself (an upright harness lifts it, the legs straighten into the stance, it is lowered
-  and let go);
-- then it walks on and stops.
-Real-time factor while recording: 0.67.
+- walking forward, a curve, side-stepping right, turning in place, walking on, stopping.
+No push and no fall: Atlas can't yet get up by itself like a person, and the simulator's
+harness reset (a teleport) is a testing aid that doesn't belong in a demo.
 
 Both are simulation time at true speed. The Gazebo side is a chase camera that follows
 Atlas's position and heading smoothly and stays level (`FollowCameraPlugin`); an earlier

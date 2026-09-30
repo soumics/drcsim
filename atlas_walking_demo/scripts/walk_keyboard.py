@@ -42,8 +42,10 @@ a planner), which takes priority while messages keep arriving.
 
 harness:=false walks free-standing instead, with no harness:
 balance_controller.py's ZMP preview control and balance feedback, at
-200 Hz of sim time. Same keys (slower: about 0.15 m steps), plus r to get
-up after a fall (automatic after 2 s unless auto_recover:=false). Walk
+200 Hz of sim time. Same keys (slower: about 0.15 m steps), plus r to
+reset after a fall: VRCPlugin's harness lifts Atlas upright and sets it
+back on its feet -- a testing aid, not a get-up motion (auto_recover:=true
+does it automatically 2 s after a fall). Walk
 commands take effect after about 2.6 s: the preview plans that far ahead.
 In harness mode the harness stays on when the node quits; publish
 "nominal" on atlas/mode to release it.
@@ -81,7 +83,7 @@ import zmp_walk
 PUBLISH_RATE_HZ = 30.0
 DIAG_PERIOD_SEC = 2.0
 TWIST_TIMEOUT_SEC = 0.5
-RECOVER_WAIT_SEC = 2.0  # free-standing: lying still this long before getting up
+RECOVER_WAIT_SEC = 2.0  # free-standing, auto_recover: lying this long before the reset
 
 # (kp, kd) sent in AtlasCommand for the leg yaw/roll joints while walking
 # in the harness. atlas_v5_gains.yaml's values (hpz p=5, hpx p=900, akx
@@ -103,7 +105,7 @@ atlas_walking_demo -- keyboard teleop (harness:=false to walk free-standing)
   g         grip / relax both hands        [ / ]   grip / relax left / right hand
   h         open both hands flat (relax again with g)
   k / l / j push Atlas: from the right / front / behind
-  r         get up after a fall (free-standing mode)
+  r         after a fall: harness reset onto its feet (free-standing mode)
   Ctrl-C    quit
 Also follows geometry_msgs/Twist on atlas_walk/cmd_vel.
 """
@@ -140,7 +142,7 @@ class WalkKeyboardNode(Node):
         self.speed_index = 2
         self.grippers = {'l': tx.Gripper(), 'r': tx.Gripper()}
         self.harness = self.declare_parameter('harness', True).value
-        self.auto_recover = self.declare_parameter('auto_recover', True).value
+        self.auto_recover = self.declare_parameter('auto_recover', False).value
         self._fell_at = None
         if not self.get_parameter('use_sim_time').value:
             self.set_parameters([Parameter('use_sim_time', value=True)])
@@ -231,7 +233,7 @@ class WalkKeyboardNode(Node):
         self._log_diagnostics()
 
     def _free_tick(self, t):
-        """Free-standing mode: one balance_controller tick, getting up after falls."""
+        """Free-standing mode: one balance_controller tick; harness reset after falls."""
         controller = self.gait
         was_fallen = controller.status == 'fallen'
         out = controller.update(self._last_state, t)
@@ -240,7 +242,8 @@ class WalkKeyboardNode(Node):
                 self._fell_at = t
                 self.get_logger().error(
                     f'Fell ({controller.fall_info}); '
-                    + ('getting up in 2 s.' if self.auto_recover else 'press r to get up.'))
+                    + ('harness reset in 2 s.' if self.auto_recover
+                       else 'press r for a harness reset.'))
             elif self.auto_recover and t - self._fell_at >= RECOVER_WAIT_SEC:
                 self._recover()
             return
@@ -260,7 +263,8 @@ class WalkKeyboardNode(Node):
 
     def _recover(self):
         if self.gait.status == 'fallen':
-            self.get_logger().info('Getting up: harness on, legs into the stance, lower, let go.')
+            self.get_logger().info(
+                'Harness reset: lift upright, legs into the stance, lower, let go.')
             self.gait.stop()
             self.gait.recover()
 
