@@ -64,11 +64,16 @@ sim_sleep() {
   end=$(python3 -c "print($(sim_now) + $1)")
   while python3 -c "import sys; sys.exit(0 if $(sim_now) < $end else 1)"; do sleep 0.5; done
 }
-# A hard shove on the torso (world frame), enough to knock Atlas over.
+# A hard shove on the chest, from the front, enough to knock Atlas over
+# backward -- away from the chase camera, so the fall stays in the picture.
 shove() {
+  local force
+  force=$(gz model -m atlas -p 2> /dev/null | tail -1 | tr -d '[]' | python3 -c \
+    "import math, sys; yaw = float(sys.stdin.read().split()[2]); \
+print(f'x: {-$1 * math.cos(yaw):.0f}, y: {-$1 * math.sin(yaw):.0f}')")
   gz topic -t /world/default/wrench/persistent -m gz.msgs.EntityWrench \
-    -p "entity: {name: \"atlas::utorso\", type: LINK}, wrench: {force: {x: $1, y: $2, z: 0}}"
-  sim_sleep 0.6
+    -p "entity: {name: \"atlas::utorso\", type: LINK}, wrench: {force: {$force, z: 0}}"
+  sim_sleep 0.4
   gz topic -t /world/default/wrench/clear -m gz.msgs.Entity -p 'name: "atlas::utorso", type: LINK'
 }
 
@@ -77,7 +82,7 @@ if [ "$MODE" = free ]; then
   # preview plans that far ahead), so every move gets time to show.
   ( sim_sleep 7; printf w; sim_sleep 16; printf z; sim_sleep 14; printf ' '; sim_sleep 7
     printf d; sim_sleep 12; printf ' '; sim_sleep 6; printf q; sim_sleep 14; printf ' '
-    sim_sleep 7; shove 0 2500; sim_sleep 12; printf w; sim_sleep 14; printf ' '
+    sim_sleep 7; shove 1000; sim_sleep 12; printf w; sim_sleep 14; printf ' '
     sim_sleep 7; printf '\003'
   ) | script -qc "ros2 run atlas_walking_demo walk_keyboard.py --ros-args -p harness:=false" \
     /dev/null > /tmp/demo_teleop.log 2>&1

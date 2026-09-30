@@ -2387,6 +2387,10 @@ walking, and pointed at the sky at 1:25 of the free-standing video.
   - It holds the heading while the pelvis's forward axis points mostly up or
     down (lying down).
 - Tested in `test_follow_camera_plugin.cpp`. Both videos were re-recorded.
+- `drcsim_record_demo free` now shoves Atlas from the front (1000 N for
+  0.4 s of sim time), so it falls backward, away from the camera and in
+  view. The earlier 2500 N × 0.6 s shove, once timed in sim time (1500 N·s),
+  threw it metres out of frame.
 
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
