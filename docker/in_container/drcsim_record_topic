@@ -6,6 +6,7 @@ usage: drcsim_record_topic TOPIC OUT.mp4 [FPS] [wall|sim]   (SIGINT/SIGTERM stop
 - sim (for sensors rendered at FPS Hz of simulation time): every frame is
   written once, so the video plays the simulation at true speed however
   fast or slow it ran.
+Also writes OUT.t0: the first frame's header stamp (s).
 - wall (default): the newest frame is written every 1/FPS s of wall time
   (repeated if none arrived), to stay in step with screen recordings.
 """
@@ -38,6 +39,10 @@ threading.Thread(target=rclpy.spin, args=(node,), daemon=True).start()
 while 'm' not in latest:
     time.sleep(0.05)
 first = latest['m']
+# The first frame's stamp (simulation time for gz sensors), so a recording
+# can be synced to other events: OUT.t0.
+with open(out + '.t0', 'w') as f:
+    f.write(f'{first.header.stamp.sec + first.header.stamp.nanosec * 1e-9:.3f}\n')
 encoding = {'rgb8': 'rgb24', 'bgr8': 'bgr24'}[first.encoding]
 ffmpeg = subprocess.Popen(
     ['ffmpeg', '-loglevel', 'error', '-y', '-f', 'rawvideo', '-pix_fmt', encoding,

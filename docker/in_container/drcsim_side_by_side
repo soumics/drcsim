@@ -1,0 +1,22 @@
+#!/bin/bash
+# Join a reference clip and a Gazebo recording side by side, in sync.
+#   drcsim_side_by_side CLIP GAZEBO.mp4 OFFSET DURATION OUT.mp4 [LEFT_LABEL] [RIGHT_LABEL]
+#     CLIP      the dancer's video (its first frame = the moves' t = 0)
+#     GAZEBO    a sim-time recording (drcsim_record_topic ... sim)
+#     OFFSET    seconds into GAZEBO where the dance starts (dance_player's
+#               'dance start' sim time minus the recording's first frame time)
+#     DURATION  seconds to keep (the moves' length)
+# Both sides are scaled to 720 px high and labelled; the clip's audio is kept.
+set -e
+CLIP="$1"; GZ="$2"; OFFSET="$3"; DUR="$4"; OUT="$5"
+LEFT="${6:-Reference}"; RIGHT="${7:-Atlas - Gazebo Harmonic}"
+FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
+LABEL="fontfile=$FONT:fontsize=30:fontcolor=white:box=1:boxcolor=black@0.45:boxborderw=10:x=24:y=20"
+esc() { printf '%s' "$1" | sed "s/[:']/\\\\&/g"; }
+ffmpeg -loglevel error -y -i "$CLIP" -ss "$OFFSET" -i "$GZ" -t "$DUR" -filter_complex \
+  "[0:v]scale=-2:720,fps=25,setsar=1,drawtext=text='$(esc "$LEFT")':$LABEL[l];\
+[1:v]scale=-2:720,fps=25,setsar=1,drawtext=text='$(esc "$RIGHT")':$LABEL[r];\
+[l][r]hstack=inputs=2[v]" \
+  -map '[v]' -map '0:a?' -c:v libx264 -preset medium -crf 20 -pix_fmt yuv420p -c:a aac \
+  -shortest "$OUT"
+echo "Side by side: $OUT"

@@ -3107,7 +3107,17 @@ package in step 1.1 so this is obvious.
 9. **Docs:** tutorial 05, the package README, `video/README.md`, the top-level README
    table. Commit, push public, sync private. Draft a LinkedIn post.
 
-### 2. Michael Jackson moonwalk, side by side (public) -- waits for the user's clip
+### 2. Michael Jackson moonwalk, side by side (public) -- tools DONE 2026-10-01; waits for the user's clip
+
+Done so far:
+- `drcsim_record_dance` and `drcsim_side_by_side`. `drcsim_record_topic` writes `OUT.t0`
+  (the first frame's sim stamp) for the sync.
+- `dance_player legs:=torque_moonwalk`: QP balance plus a qp_walk backward glide.
+- Tested end to end with the stand-in clip `/root/dance/atlas_left.mp4`: 10 s of
+  dancing, a 0.55 m glide, upright.
+- The position-mode `moonwalk` fell within 4 s once the arms danced.
+
+Remaining: steps 1-4 and 6 below, with the real clip.
 
 1. The user puts the clip at `~/Desktop/drcsim_jazzy_ws/media/moonwalk.mp4`. It's never
    committed, for copyright.

@@ -1,0 +1,39 @@
+#!/bin/bash
+# Record Atlas dancing next to the source clip.
+#   drcsim_record_dance CLIP MOVES.npz OUT.mp4 [LEGS] [-- extra dance_player args]
+#     CLIP   the dancer's video; MOVES its retargeted moves (retarget.py)
+#     LEGS   moonwalk (default) | torque | stand  (dance_player's legs param)
+# Needs a running sim with the chase camera (drcsim_sim demo_camera:=true; add
+# sync_max_per_window:=5.0 sync_max_per_step:=0.05 for legs:=torque). Records
+# the chase camera in simulation time, finds 'dance start' in the player's
+# log and cuts both videos to start together (drcsim_side_by_side).
+# Exits 1 if Atlas fell.
+set -e
+CLIP="$1"; MOVES="$2"; OUT="$3"; LEGS="${4:-moonwalk}"; shift 4 || shift $#
+[ "${1:-}" = "--" ] && shift
+WORK=$(mktemp -d)
+LOG="$WORK/dance.log"; : > "$LOG"
+pkill -f 'lib/atlas_dance/dance_player[.]py' || true
+nice -n 10 drcsim_record_topic /demo_camera/image "$WORK/gazebo.mp4" 25 sim &
+REC=$!
+trap 'kill $REC ${DANCE:-} 2> /dev/null || true' EXIT
+until [ -s "$WORK/gazebo.mp4.t0" ]; do sleep 0.5; done
+ros2 run atlas_dance dance_player.py --ros-args -p moves:="$MOVES" -p legs:="$LEGS" "$@" \
+  > "$LOG" 2>&1 &
+DANCE=$!
+until grep -qE 'dance finished|Fell' "$LOG"; do
+  kill -0 $DANCE 2> /dev/null || { echo "dance_player.py exited:"; tail -5 "$LOG"; exit 1; }
+  sleep 1
+done
+sleep 3
+kill -INT $REC; wait $REC 2> /dev/null || true
+pkill -TERM -f 'lib/atlas_dance/dance_player[.]py' || true
+START=$(grep -o 'dance start at sim time [0-9.]*' "$LOG" | awk '{print $NF}')
+DUR=$(python3 -c "import numpy as np; print(float(np.load('$MOVES')['t'][-1]))")
+T0=$(cat "$WORK/gazebo.mp4.t0")
+OFFSET=$(python3 -c "print(max(0.0, $START - $T0))")
+echo "dance start $START s (sim), recording from $T0 s: offset $OFFSET s, $DUR s of moves"
+drcsim_side_by_side "$CLIP" "$WORK/gazebo.mp4" "$OFFSET" "$DUR" "$OUT"
+cp "$LOG" "${OUT%.mp4}.log"
+if grep -q 'Fell' "$LOG"; then echo "Atlas fell in this take."; exit 1; fi
+exit 0

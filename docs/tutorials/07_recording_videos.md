@@ -35,6 +35,9 @@ docker exec -e DEMO_PUSH_CONTROLLER=policy drcsim /entrypoint.sh \
 `push` and `pick` exit with status 1 if Atlas fell, so a script can retry until it gets a
 clean take. Restart the simulation between takes (`docker/sim.sh`).
 
+For a dance next to its source clip, use `drcsim_record_dance`
+([tutorial 6](06_dance.md)).
+
 Other tools:
 - `drcsim_record_topic TOPIC OUT.mp4 [FPS] [wall|sim]` records any image topic.
 - `drcsim_grab_frame TOPIC OUT.png` saves a single GPU-rendered frame.

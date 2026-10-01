@@ -18,10 +18,12 @@
 Play a retargeted dance on Atlas in Gazebo, balancing free-standing.
 
 usage: ros2 run atlas_dance dance_player.py --ros-args -p moves:=moonwalk.npz
-       [-p legs:=moonwalk|stand|torque] [-p glide_speed:=0.06] [-p skim_height:=0.05]
-       [-p start_delay:=2.0]
+       [-p legs:=torque_moonwalk|moonwalk|stand|torque] [-p glide_speed:=0.06]
+       [-p skim_height:=0.05] [-p start_delay:=2.0]
 'torque': the whole-body torque QP balances (torque_balance.py) and the dance
-sets its posture targets -- survives full-amplitude moves. Otherwise the legs
+sets its posture targets -- survives full-amplitude moves. 'torque_moonwalk':
+the same, walking backward through the dance (qp_walk), the swing foot
+skimming the floor; start the sim with sync_max_per_window:=5.0. Otherwise the legs
 are atlas_walking_demo's free-standing controller (ZMP walking, balance
 feedback): 'stand' keeps the stance, 'moonwalk' walks backward with
 the swing foot skimming the floor, so Atlas glides back while its legs look
@@ -82,7 +84,7 @@ class DancePlayerNode(Node):
         self.last_tick = -1.0
         self.torque = None   # legs:=torque: torque_balance.TorqueBalance once standing
         self.urdf = None
-        if self.legs == 'torque':
+        if self.legs in ('torque', 'torque_moonwalk'):
             self.create_subscription(
                 String, '/robot_description', lambda m: setattr(self, 'urdf', m.data),
                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
@@ -120,11 +122,30 @@ class DancePlayerNode(Node):
         return out
 
     def _torque_tick(self, s, t):
-        """legs:=torque -- whole-body QP balance; the dance sets the posture targets."""
+        """
+        legs:=torque(_moonwalk) -- whole-body QP; the dance sets the posture targets.
+
+        torque_moonwalk also walks backward (qp_walk) through the dance, the
+        swing foot skimming the floor: the QP balances the swinging arms and
+        the steps together. Position-mode moonwalking with the arms dancing
+        tipped forward within 4 s (measured).
+        """
         tq = self.torque
         current = {n: tq.posture[bc.N.index(n)] for n in UPPER}
         for n, v in self._upper_targets(t, current).items():
             tq.posture[bc.N.index(n)] = v
+        if self.legs == 'torque_moonwalk' and self.dance_t0 is not None:
+            if tq.walk is None and t >= self.dance_t0 and not self.done and \
+                    not getattr(self, 'walked', False):
+                self.walked = True
+                zw.SWING_HEIGHT = self.skim
+                tq.start_walk(s, t).set_velocity(-self.glide, 0.0, 0.0)
+            elif tq.walk is not None and self.done:
+                if tq.walk.walker.walking:
+                    tq.walk.stop()
+                elif tq.walk.idle:
+                    tq.end_walk()
+                    self.get_logger().info('glide finished; standing')
         roll, pitch = bc.rpy(s.orientation)
         if max(abs(roll), abs(pitch)) > bc.FALL_TILT:
             if not getattr(self, 'fell_logged', False):
@@ -157,14 +178,14 @@ class DancePlayerNode(Node):
         if c is None:
             c = self.controller = bc.FreeWalkController(s)
             self.get_logger().info('Took over; crouching.')
-        if c.status == 'ready' and self.legs == 'torque' and self.urdf is not None:
+        if c.status == 'ready' and self.legs.startswith('torque') and self.urdf is not None:
             import torque_balance as tb
             self.torque = tb.TorqueBalance(self.urdf, bc.N, s, {'stepping': False})
             self.stance_upper = {n: self.torque.posture[bc.N.index(n)] for n in UPPER}
             self.dance_t0 = t + self.start_delay
             self.get_logger().info('Standing; torque control holds the balance.')
             return
-        if c.status == 'ready' and self.dance_t0 is None and self.legs != 'torque':
+        if c.status == 'ready' and self.dance_t0 is None and not self.legs.startswith('torque'):
             self.dance_t0 = t + self.start_delay
             self.stance_upper = {n: c._target({})[bc.N.index(n)] for n in UPPER}
         if self.dance_t0 is not None and not self.done:

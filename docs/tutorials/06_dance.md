@@ -31,6 +31,22 @@ python3 $S/retarget.py pose.npz moves.npz
 ros2 run atlas_dance dance_player.py --ros-args -p moves:=/root/dance/moves.npz -p legs:=torque
 ```
 
+## Side-by-side video
+
+`drcsim_record_dance` plays the dance and records the chase camera in simulation time. It
+then puts the source clip next to it, synced on the player's `dance start` against the
+clip's first frame, with the clip's audio kept:
+
+```bash
+docker/sim.sh demo_camera:=true sync_max_per_window:=5.0 sync_max_per_step:=0.05
+docker exec drcsim /entrypoint.sh bash -c "cd /root/dance && \
+  drcsim_record_dance my_dance.mp4 moves.npz /tmp/video/dance_side_by_side.mp4 torque_moonwalk"
+docker cp drcsim:/tmp/video/dance_side_by_side.mp4 video/
+```
+
+`drcsim_side_by_side CLIP GAZEBO.mp4 OFFSET DURATION OUT.mp4` is the composing step on its
+own.
+
 ## Retargeting
 
 The upper body only. The legs carry 180 kg and stay with the balance controller.
@@ -50,8 +66,9 @@ The upper body only. The legs carry 180 kg and stay with the balance controller.
 
 | Mode | What it does |
 |---|---|
+| `torque_moonwalk` | whole-body QP balance, walking backward through the dance with the swing foot skimming 5 cm above the floor (`qp_walk`). The moonwalk to use |
 | `torque` | whole-body QP balance; the dance sets posture targets. Survives full-amplitude moves |
-| `moonwalk` | backward glide: ZMP walking backward, the swing foot skimming 5 cm above the floor |
+| `moonwalk` | position-mode backward glide. With the arms dancing it tipped forward within 4 s |
 | `stand` | position-mode standing. Large moves can topple it (no fore-aft CoM feedback) |
 
 Other parameters:
