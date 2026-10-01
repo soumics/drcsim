@@ -6,6 +6,7 @@ find_package(ament_cmake REQUIRED)
 install(PROGRAMS
   scripts/dance_player.py
   scripts/extract_pose.py
+  scripts/moonwalk.py
   scripts/retarget.py
   DESTINATION lib/${PROJECT_NAME}
 )

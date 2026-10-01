@@ -59,7 +59,8 @@ def test_a_swing_foot_leaves_the_contacts_and_lands_ahead_in_the_qp_frame():
         t += zw.DT
         walk.advance(t)
         contacts = walk.contacts('')
-        for side, (pos, foot_yaw) in walk.foot_targets(contacts).items():
+        for side, (pos, foot_yaw, pitch) in walk.foot_targets(contacts).items():
+            assert pitch == 0.0
             seen.add(side)
             assert pos[2] >= 0.5 - 0.011 and foot_yaw == pytest.approx(yaw, abs=1e-6)
         assert contacts in ('lr', 'l', 'r')
@@ -78,3 +79,22 @@ def test_a_route_turns_and_ends_standing_where_predict_says():
     gap = soles['l'][0] - soles['r'][0]
     assert np.linalg.norm(gap) == pytest.approx(2 * zw.FOOT_Y, abs=0.02)
     assert 10.0 < duration < 60.0
+
+
+def test_a_swing_style_sets_the_swing_foots_height_and_pitch():
+    soles = qw.nominal_soles()
+    walk = qw.QpWalk(soles, (soles['l'][0] + soles['r'][0]) / 2, 0.0)
+    walk.swing_style = lambda s: (0.02 + 0.1 * s, 0.4)
+    walk.set_velocity(-0.08, 0.0, 0.0)
+    t, seen = 0.0, 0
+    while t < 8.0:
+        t += zw.DT
+        walk.advance(t)
+        contacts = walk.contacts('')
+        s = walk.swing_progress()
+        for side, (pos, _, pitch) in walk.foot_targets(contacts).items():
+            if walk.phase == f'swing_{side}':
+                seen += 1
+                s = 1.0 if s is None else s
+                assert pitch == 0.4 and pos[2] == pytest.approx(0.02 + 0.1 * s)
+    assert seen > 100

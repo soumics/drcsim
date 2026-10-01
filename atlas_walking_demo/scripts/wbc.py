@@ -148,7 +148,8 @@ class WholeBodyController:
         orientation (world); posture: desired joint angles (default: now);
         contacts: the feet on the ground -- a lifted foot gets no wrench and
         no no-slip constraint, but a task bringing it level to
-        foot_targets[side] (world sole position, or (position, yaw); default: where it left the
+        foot_targets[side] (world sole position, or (position, yaw[, pitch]);
+        default: where it left the
         ground). Without that task the CoM task used the free leg's mass and
         held it up, and Atlas toppled off the other foot (measured).
         hand_targets: {side: (palm position, palm rotation)} in the world --
@@ -205,9 +206,11 @@ class WholeBodyController:
             af = pin.getFrameAcceleration(m, d, f, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
             Rf = d.oMf[f].rotation
             yaw = np.arctan2(Rf[1, 0], Rf[0, 0])
-            if isinstance(target, tuple):  # (position, yaw): a walking step that turns
-                target, yaw = target
-            level = pin.rpy.rpyToMatrix(0.0, 0.0, yaw)
+            pitch = 0.0
+            if isinstance(target, tuple):  # (position, yaw[, pitch]): a walking step
+                target, yaw, *rest = target
+                pitch = rest[0] if rest else 0.0  # > 0: toe down, heel up
+            level = pin.rpy.rpyToMatrix(0.0, pitch, yaw)
             want = np.concatenate([
                 kp_foot * (np.asarray(target) - d.oMf[f].translation) - kd_foot * vf[:3],
                 kp_foot * (Rf @ pin.log3(Rf.T @ level)) - kd_foot * vf[3:]])

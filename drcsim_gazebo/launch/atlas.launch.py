@@ -249,6 +249,9 @@ def _fix_robotiq_passive_joints(robot_description):
 # full PBR look). It used to be a sensor fixed to the pelvis, which rolled
 # with every step and pointed at the sky when Atlas fell; FollowCameraPlugin
 # follows the pelvis's smoothed position and heading at a fixed height.
+# demo_camera_fixed:=true leaves it where it starts (a huge time constant), so
+# travel shows -- a dance gliding across the floor, for example.
+DEMO_CAMERA_OFFSET = '3.3 -2.8 0.3 0 0.06 2.44'
 DEMO_CAMERA_SDF = """<sdf version="1.9">
   <model name="demo_camera">
     <pose>0 0 -10 0 0 0</pose>
@@ -270,8 +273,8 @@ DEMO_CAMERA_SDF = """<sdf version="1.9">
     <plugin filename="FollowCameraPlugin" name="drcsim_gazebo_plugins::FollowCameraPlugin">
       <target_model>atlas</target_model>
       <target_link>pelvis</target_link>
-      <offset>3.3 -2.8 0.3 0 0.06 2.44</offset>
-      <time_constant>1.0</time_constant>
+      <offset>{offset}</offset>
+      <time_constant>{time_constant}</time_constant>
     </plugin>
   </model>
 </sdf>"""
@@ -404,6 +407,13 @@ def generate_launch_description():
             'demo_camera', default_value='false',
             description='Add a chase camera following Atlas (demo_camera/image, 960x540 '
                         '@ 25 Hz, rendered by the gz server) for demo videos.'),
+        DeclareLaunchArgument(
+            'demo_camera_fixed', default_value='false',
+            description='The demo camera stays where it starts instead of following Atlas.'),
+        DeclareLaunchArgument(
+            'demo_camera_offset', default_value=DEMO_CAMERA_OFFSET,
+            description='Demo camera pose relative to Atlas (x y z roll pitch yaw, its '
+                        'heading frame); default front-right, looking back at it.'),
         DeclareLaunchArgument(
             'sync_max_per_step', default_value='0.025',
             description='Controller lockstep: max wall time (s) one physics step waits for '
@@ -552,6 +562,9 @@ def _launch_setup(context, *args, **kwargs):
         Node(
             package='ros_gz_sim',
             executable='create',
-            arguments=['-name', 'demo_camera', '-string', DEMO_CAMERA_SDF],
+            arguments=['-name', 'demo_camera', '-string', DEMO_CAMERA_SDF.format(
+                offset=LaunchConfiguration('demo_camera_offset').perform(context),
+                time_constant='1e9' if LaunchConfiguration('demo_camera_fixed').perform(
+                    context).lower() in ('true', '1') else '1.0')],
             output='screen'),
     ] if demo_camera else [])

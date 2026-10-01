@@ -81,6 +81,9 @@ class QpWalk:
         self.landed = {}      # side -> time its swing ended
         self.phase = 'double'
         self.prev_phase = 'double'
+        # Optional swing-foot style: f(s) -> (sole height above the ground,
+        # pitch) for swing progress s in [0, 1], instead of the walker's arc.
+        self.swing_style = None
 
     # --- frames --------------------------------------------------------
 
@@ -152,8 +155,16 @@ class QpWalk:
             out += side
         return out or 'lr'
 
+    def swing_progress(self):
+        """Return how far the current swing is, 0..1 (None in double support)."""
+        w = self.walker
+        for t0, t1, *_ in w.steps:
+            if t0 <= w.t < t1:
+                return (w.t - t0) / (t1 - t0)
+        return None
+
     def foot_targets(self, contacts):
-        """Return {side: (sole position (3,), yaw)} for the feet not in contacts."""
+        """Return {side: (sole position (3,), yaw, pitch)} for the feet not in contacts."""
         out = {}
         for side in 'lr':
             if side in contacts:
@@ -161,10 +172,16 @@ class QpWalk:
             x, y, z, yaw = self.walker.feet[side]
             sx, sy = _rot(SOLE_X, 0.0, yaw)
             pos = self._to_world((x + sx, y + sy))
+            pitch = 0.0
+            if self.phase == f'swing_{side}' and self.swing_style is not None:
+                # The walker's clock is one tick ahead of its phase: on the
+                # swing's last tick no step contains it any more.
+                s = self.swing_progress()
+                z, pitch = self.swing_style(1.0 if s is None else s)
             # Not yet loaded after the planned touchdown: press a little.
             down = -0.01 if not self.phase.startswith('swing') else 0.0
             out[side] = (np.array([pos[0], pos[1], self.ground + z + down]),
-                         zw._wrap(yaw + self.yaw0))
+                         zw._wrap(yaw + self.yaw0), pitch)
         return out
 
     def heading(self):

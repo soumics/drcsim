@@ -1,8 +1,12 @@
 #!/bin/bash
 # Record Atlas dancing next to the source clip.
 #   drcsim_record_dance CLIP MOVES.npz OUT.mp4 [LEGS] [-- extra dance_player args]
+#   drcsim_record_dance CLIP routine OUT.mp4 - [-- extra moonwalk.py args]
 #     CLIP   the dancer's video; MOVES its retargeted moves (retarget.py)
-#     LEGS   moonwalk (default) | torque | stand  (dance_player's legs param)
+#     LEGS   torque_moonwalk | torque | moonwalk | stand (dance_player's legs)
+#     routine: the scripted moonwalk routine (moonwalk.py) instead of moves
+#     CLIP_SPEED=0.5 (environment): show the clip at half speed; CLIP_LABEL,
+#     ATLAS_LABEL: the two captions
 # Needs a running sim with the chase camera (drcsim_sim demo_camera:=true; add
 # sync_max_per_window:=5.0 sync_max_per_step:=0.05 for legs:=torque). Records
 # the chase camera in simulation time, finds 'dance start' in the player's
@@ -13,13 +17,17 @@ CLIP="$1"; MOVES="$2"; OUT="$3"; LEGS="${4:-moonwalk}"; shift 4 || shift $#
 [ "${1:-}" = "--" ] && shift
 WORK=$(mktemp -d)
 LOG="$WORK/dance.log"; : > "$LOG"
-pkill -f 'lib/atlas_dance/dance_player[.]py' || true
+pkill -f 'lib/atlas_dance/(dance_player|moonwalk)[.]py' || true
 nice -n 10 drcsim_record_topic /demo_camera/image "$WORK/gazebo.mp4" 25 sim &
 REC=$!
 trap 'kill $REC ${DANCE:-} 2> /dev/null || true' EXIT
 until [ -s "$WORK/gazebo.mp4.t0" ]; do sleep 0.5; done
-ros2 run atlas_dance dance_player.py --ros-args -p moves:="$MOVES" -p legs:="$LEGS" "$@" \
-  > "$LOG" 2>&1 &
+if [ "$MOVES" = routine ]; then
+  ros2 run atlas_dance moonwalk.py --ros-args "$@" > "$LOG" 2>&1 &
+else
+  ros2 run atlas_dance dance_player.py --ros-args -p moves:="$MOVES" -p legs:="$LEGS" "$@" \
+    > "$LOG" 2>&1 &
+fi
 DANCE=$!
 until grep -qE 'dance finished|Fell' "$LOG"; do
   kill -0 $DANCE 2> /dev/null || { echo "dance_player.py exited:"; tail -5 "$LOG"; exit 1; }
@@ -27,13 +35,18 @@ until grep -qE 'dance finished|Fell' "$LOG"; do
 done
 sleep 3
 kill -INT $REC; wait $REC 2> /dev/null || true
-pkill -TERM -f 'lib/atlas_dance/dance_player[.]py' || true
+pkill -TERM -f 'lib/atlas_dance/(dance_player|moonwalk)[.]py' || true
 START=$(grep -o 'dance start at sim time [0-9.]*' "$LOG" | awk '{print $NF}')
-DUR=$(python3 -c "import numpy as np; print(float(np.load('$MOVES')['t'][-1]))")
+if [ "$MOVES" = routine ]; then
+  DUR=$(grep -o 'Moonwalk routine: [0-9.]*' "$LOG" | awk '{print $NF}')
+else
+  DUR=$(python3 -c "import numpy as np; print(float(np.load('$MOVES')['t'][-1]))")
+fi
 T0=$(cat "$WORK/gazebo.mp4.t0")
 OFFSET=$(python3 -c "print(max(0.0, $START - $T0))")
 echo "dance start $START s (sim), recording from $T0 s: offset $OFFSET s, $DUR s of moves"
-drcsim_side_by_side "$CLIP" "$WORK/gazebo.mp4" "$OFFSET" "$DUR" "$OUT"
+drcsim_side_by_side "$CLIP" "$WORK/gazebo.mp4" "$OFFSET" "$DUR" "$OUT" \
+  "${CLIP_LABEL:-Reference}" "${ATLAS_LABEL:-Atlas - Gazebo Harmonic}"
 cp "$LOG" "${OUT%.mp4}.log"
 if grep -q 'Fell' "$LOG"; then echo "Atlas fell in this take."; exit 1; fi
 exit 0
