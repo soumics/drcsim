@@ -1,0 +1,18 @@
+#!/bin/bash
+# Install the optional learning + dance tools into this container (~6 GB):
+#   - MuJoCo, Stable-Baselines3, Gymnasium, TensorBoard, PyTorch (CUDA 12.8 build,
+#     needed for RTX 50-series GPUs) -- for atlas_learning (training)
+#   - MediaPipe + OpenCV in their own venv (/opt/mp_venv; they need numpy 2,
+#     ROS Jazzy's is 1.26) and the Pose Landmarker model -- for atlas_dance
+set -e
+pip install --break-system-packages -q --index-url https://download.pytorch.org/whl/cu128 torch
+pip install --break-system-packages -q mujoco stable-baselines3 gymnasium tensorboard
+python3 -m venv /opt/mp_venv 2> /dev/null || {
+  apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3-venv
+  python3 -m venv /opt/mp_venv; }
+/opt/mp_venv/bin/pip install -q mediapipe opencv-python-headless
+mkdir -p /root/dance
+curl -sSfL -o /root/dance/pose_landmarker_heavy.task \
+  https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_heavy/float16/latest/pose_landmarker_heavy.task
+python3 -c 'import torch, mujoco, stable_baselines3; print("learning tools OK; CUDA:", torch.cuda.is_available())'
+/opt/mp_venv/bin/python -c 'import mediapipe; print("MediaPipe OK")'

@@ -2557,6 +2557,55 @@ forward/back, where standing falls. Smaller pushes trigger no steps.
 - **Decision:** stepping stays experimental and on (it never fires below
   ~75 N·s). Next is the learned policy.
 
+### Learned policy and dance pipeline (2026-10-01, in progress)
+
+**`atlas_learning` (new):** a MuJoCo model built from the same URDF Gazebo
+spawns (`build_mjcf.py`).
+- Model notes:
+  - The URDF `floating` joint frees the pelvis.
+  - Finger and lidar joints are fixed and visuals dropped.
+  - **Self-collision off** (`contype` 2 / `conaffinity` 1, floor 1 / 2); the
+    URDF's torso and hip shapes overlap by up to 5 cm and pushed Atlas
+    over.
+  - Floor `solref` 0.005: the default was too soft, sinking 7 mm, and the
+    heel rolled.
+  - AtlasPlugin's PD law runs as position actuators (kp, kv, forcerange).
+  - Checked: 179.7 kg, the zero pose stands with the same −3° rocking as
+    Gazebo, and the crouch falls without balance help, as in Gazebo.
+- Policy: PPO (SB3), 50 Hz, 15 actions (leg and back targets, ±0.4 rad
+  around the stance) and 51 observations (`policy_io.py`, shared by
+  training and Gazebo).
+- **push_v1** (30 M steps, narrow randomisation): in MuJoCo it holds
+  forward/back 90–150 N·s at 60–100 % (sideways weaker). **In Gazebo it
+  drifts over in about 3 s.** Frames and signs were checked and are fine;
+  it's a sim-to-sim gap.
+- **push_v2** is fine-tuning with wide randomisation (contact stiffness,
+  gains, damping, CoM shift, drift force, start tilt).
+- `policy_stand.py` (Gazebo): sends `kd_position` 0 and −kd·q̇ as effort,
+  because AtlasPlugin's kd acts on d(error)/dt and spiked at every 50 Hz
+  target change.
+
+**`atlas_dance` (new):**
+- `extract_pose.py`: MediaPipe Tasks Pose Landmarker (heavy). It runs in
+  `/opt/mp_venv` because MediaPipe needs numpy 2 and ROS Jazzy has 1.26.
+- `retarget.py`:
+  - Back angles from the chest frame relative to the pelvis frame (z-y-x).
+  - Arms by direction-matching IK. The shoulder point must be the `shz`
+    joint, fixed to the torso; `shx` moves with `shz`.
+  - A constant chest/pelvis calibration from Atlas's neutral pose.
+  - The round-trip test passes with 0.8–3.4° error.
+- `dance_player.py`:
+  - `legs:=torque` (whole-body QP; the dance sets posture targets) survives
+    100 % amplitude of wild moves.
+  - `legs:=moonwalk` is a backward glide in position mode: 5 cm swing
+    height works, lower skims and the toe-point trick fall.
+  - `legs:=stand` (position mode) falls on big moves, because it has no
+    fore-aft CoM feedback.
+- **Waiting for the user's MJ moonwalk clip** (they supply it; copyright).
+
+**Tools:** `docker/in_container/drcsim_install_learning` installs it all
+(torch cu128 for the RTX 50-series).
+
 ## `drcsim_gazebo_plugins` — design decisions and lessons (done, keep as reference)
 
 Two plugins, `DRCBuildingPlugin` (door+handle, small) and `DRCVehiclePlugin`

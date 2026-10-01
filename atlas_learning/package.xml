@@ -1,0 +1,33 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>atlas_learning</name>
+  <version>0.1.0</version>
+  <description>
+    Learned (reinforcement learning) controllers for Atlas: a MuJoCo model
+    built from the Gazebo URDF, training environments, and ROS 2 nodes that
+    run the trained policies in Gazebo.
+  </description>
+  <maintainer email="soumic4it@gmail.com">Soumic Sarkar</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>atlas_msgs</exec_depend>
+  <exec_depend>atlas_walking_demo</exec_depend>
+  <exec_depend>drcsim_gazebo</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>xacro</exec_depend>
+
+  <test_depend>ament_cmake_copyright</test_depend>
+  <test_depend>ament_cmake_flake8</test_depend>
+  <test_depend>ament_cmake_pep257</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

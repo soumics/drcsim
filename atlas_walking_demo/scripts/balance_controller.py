@@ -114,6 +114,7 @@ class FreeWalkController:
                 self.gains_p[i], self.gains_d[i] = GAIN_OVERRIDES[joint]
         self.status = 'crouch'
         self.messages = []  # human-readable events for the node to log
+        self.upper_body = {}  # joint -> absolute target overriding the stance (arms, back, neck)
         self.trace_until = -1.0  # debug trace after a push (walker time)
         self.tilt_rate = (0.0, 0.0)  # low-passed IMU (roll, pitch) rate for push detection
         self.t_start = None
@@ -161,6 +162,8 @@ class FreeWalkController:
             cmd[N.index(name)] = value
         for name, delta in hg.ARM_REST.items():
             cmd[N.index(name)] = self.base[N.index(name)] + delta
+        for name, value in self.upper_body.items():  # e.g. atlas_dance's moves
+            cmd[N.index(name)] = value
         return cmd
 
     def update(self, state, t):
