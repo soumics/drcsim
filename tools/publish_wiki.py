@@ -22,9 +22,11 @@ usage: tools/publish_wiki.py WIKI_CLONE_DIR [REPO_URL] [BRANCH]
                   only once the wiki's first page has been saved in the web UI
   REPO_URL        default https://github.com/soumics/drcsim
   BRANCH          default ros2-jazzy-harmonic
-Writes Home.md (the tutorials index) and one page per tutorial, with links
-rewritten for the wiki: tutorial -> wiki page, other repo files -> their
-GitHub page on BRANCH. Then commit and push in WIKI_CLONE_DIR yourself.
+Writes Home.md (the tutorials index), one page per tutorial and _Sidebar.md,
+with links rewritten for the wiki: tutorial -> wiki page, other repo files ->
+their GitHub page on BRANCH. A GitHub wiki belongs to the whole repository,
+not a branch, so every page says which branch it documents. Then commit and
+push in WIKI_CLONE_DIR yourself.
 """
 
 import pathlib
@@ -62,10 +64,17 @@ def main():
     out = pathlib.Path(sys.argv[1])
     repo = sys.argv[2] if len(sys.argv) > 2 else 'https://github.com/soumics/drcsim'
     branch = sys.argv[3] if len(sys.argv) > 3 else 'ros2-jazzy-harmonic'
+    banner = (f'> These tutorials are for the [`{branch}`]({repo}/tree/{branch}) branch '
+              '(ROS 2 Jazzy + Gazebo Harmonic), not the repository\'s default branch.\n\n')
+    sidebar = [f'**[Tutorials](Home)** -- [`{branch}`]({repo}/tree/{branch})', '']
     for source in sorted(DOCS.glob('*.md')):
         text = rewrite(source.read_text(), source, repo, branch)
-        (out / f'{page_name(source)}.md').write_text(text)
+        (out / f'{page_name(source)}.md').write_text(banner + text)
         print(f'{source.name} -> {page_name(source)}.md')
+        if source.name != 'README.md':
+            title = source.read_text().splitlines()[0].lstrip('# ').strip()
+            sidebar.append(f'- [{title}]({page_name(source)})')
+    (out / '_Sidebar.md').write_text('\n'.join(sidebar) + '\n')
 
 
 if __name__ == '__main__':
