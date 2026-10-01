@@ -66,6 +66,9 @@ class DancePlayerNode(Node):
         path = self.declare_parameter('moves', '').value
         self.legs = self.declare_parameter('legs', 'moonwalk').value
         self.glide = self.declare_parameter('glide_speed', 0.06).value
+        # s into the dance the backward walk is commanded (torque_moonwalk);
+        # the steps start about zmp_walk.START_DELAY + FIRST_SHIFT later.
+        self.glide_start = self.declare_parameter('glide_start', 0.0).value
         self.skim = self.declare_parameter('skim_height', 0.05).value
         # Off by default: pointing the swinging toe (heel up) tipped the
         # already marginal backward glide over sideways (measured, 0.2-0.4 rad).
@@ -135,7 +138,7 @@ class DancePlayerNode(Node):
         for n, v in self._upper_targets(t, current).items():
             tq.posture[bc.N.index(n)] = v
         if self.legs == 'torque_moonwalk' and self.dance_t0 is not None:
-            if tq.walk is None and t >= self.dance_t0 and not self.done and \
+            if tq.walk is None and t >= self.dance_t0 + self.glide_start and not self.done and \
                     not getattr(self, 'walked', False):
                 self.walked = True
                 zw.SWING_HEIGHT = self.skim
