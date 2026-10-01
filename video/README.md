@@ -42,3 +42,9 @@ Record with `drcsim_record_demo /tmp/video push 0 525 0.2 atlas_push_sideways "C
 (exits 1 if Atlas fell). Recovery-step pushes (90 N s forward/backward) are not
 reliable enough to film yet: 0 of 18 recorded takes recovered, while ~60% of
 unrecorded runs do -- the recording load disturbs the Python controller.
+
+**Learned push recovery** (`atlas_learning`, policy `push_v2`, trained in MuJoCo with
+PPO and domain randomisation, run in Gazebo): `atlas_rl_push_forward.mp4` (120 N s from
+behind), `atlas_rl_push_backward.mp4` (120 N s from the front), `atlas_rl_push_sideways.mp4`
+(90 N s from the side) -- each recovered on the first take. Record with
+`DEMO_PUSH_CONTROLLER=policy drcsim_record_demo /tmp/video push FX FY 0.2 NAME "CAPTION"`.

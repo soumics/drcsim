@@ -2579,8 +2579,19 @@ spawns (`build_mjcf.py`).
   forward/back 90–150 N·s at 60–100 % (sideways weaker). **In Gazebo it
   drifts over in about 3 s.** Frames and signs were checked and are fine;
   it's a sim-to-sim gap.
-- **push_v2** is fine-tuning with wide randomisation (contact stiffness,
-  gains, damping, CoM shift, drift force, start tilt).
+- **push_v2** (fine-tuned 30 M steps from v1 with wide randomisation:
+  contact stiffness, gains, damping, torso CoM shift, steady force, start
+  tilt) **transfers to Gazebo**. Precise pushes, lockstep:
+  - 90 N·s ok in all directions;
+  - 120 and 150 N·s ok forward and backward;
+  - 120 N·s sideways falls.
+
+  That is better than the torque controller (which falls at 90 N·s forward
+  standing). It is the package default; there are first-take videos in
+  `video/atlas_rl_push_*.mp4`.
+- Recorder fix: the EXIT trap's `kill` of already-dead processes made the
+  script's exit status 1, so successful takes were reported as falls. The
+  trap now has `|| true` and the script ends with `exit 0`.
 - `policy_stand.py` (Gazebo): sends `kd_position` 0 and −kd·q̇ as effort,
   because AtlasPlugin's kd acts on d(error)/dt and spiked at every 50 Hz
   target change.

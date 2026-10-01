@@ -51,7 +51,7 @@ RVIZ=$!
 # Whatever happens (a take that fails or times out included), don't leave
 # RViz or the recorders running: leftovers from failed takes piled up
 # (eleven software-rendered RViz instances) and starved the simulation.
-trap 'kill $RVIZ ${GZ_REC:-} ${FFMPEG:-} 2> /dev/null' EXIT
+trap 'kill $RVIZ ${GZ_REC:-} ${FFMPEG:-} 2> /dev/null || true' EXIT
 sleep 12
 
 # Start both recordings.
@@ -83,10 +83,18 @@ if [ "$MODE" = push ]; then
   # Lockstep (sync_period_ms): AtlasPlugin holds each physics step for a
   # fresh torque command, so the recording's CPU load can't delay the
   # controller (start the sim with sync_max_per_window:=5.0 for a full budget).
-  ros2 run atlas_walking_demo torque_stand.py --ros-args -p sync_period_ms:=2 \
-    > /tmp/demo_push.log 2>&1 &
+  # DEMO_PUSH_CONTROLLER=policy: the learned policy (atlas_learning) instead
+  # of the whole-body torque controller.
+  if [ "${DEMO_PUSH_CONTROLLER:-torque}" = policy ]; then
+    ros2 run atlas_learning policy_stand.py > /tmp/demo_push.log 2>&1 &
+    READY='has control'
+  else
+    ros2 run atlas_walking_demo torque_stand.py --ros-args -p sync_period_ms:=2 \
+      > /tmp/demo_push.log 2>&1 &
+    READY='switched to torque control'
+  fi
   STAND=$!
-  until grep -q 'switched to torque control' /tmp/demo_push.log; do sleep 0.5; done
+  until grep -q "$READY" /tmp/demo_push.log; do sleep 0.5; done
   sim_sleep 3
   drcsim_push "${PUSH_F[@]}"
   sim_sleep 7
@@ -94,6 +102,7 @@ if [ "$MODE" = push ]; then
   # Ctrl-C never reached the node (the take hung): TERM it, rclpy handles
   # that cleanly too.
   pkill -TERM -f 'lib/atlas_walking_demo/torque_stand.py' || true
+  pkill -TERM -f 'lib/atlas_learning/policy_stand.py' || true
   sleep 1; kill $STAND 2> /dev/null || true; wait $STAND 2> /dev/null || true
 elif [ "$MODE" = free ]; then
   # Free-standing: walk commands start ~2.6 s after the key (the ZMP
@@ -137,3 +146,4 @@ if [ "$MODE" = push ]; then
   cp /tmp/demo_push.log "$OUT/$NAME.log"
   if grep -q 'Fell' /tmp/demo_push.log; then echo "Atlas fell in this take."; exit 1; fi
 fi
+exit 0

@@ -17,7 +17,7 @@
 """
 Run a learned balance policy (trained in MuJoCo) on Atlas in Gazebo.
 
-usage: ros2 run atlas_learning policy_stand.py --ros-args -p policy:=push_v1
+usage: ros2 run atlas_learning policy_stand.py --ros-args -p policy:=push_v2
 Takes over and crouches in position mode (atlas_walking_demo's
 balance_controller), then hands the legs and back to the policy at 50 Hz of
 sim time. The PD law matches training exactly: AtlasPlugin gets the policy's
@@ -96,7 +96,7 @@ class PolicyStandNode(Node):
     def __init__(self):
         super().__init__('atlas_policy_stand',
                          parameter_overrides=[Parameter('use_sim_time', value=True)])
-        name = self.declare_parameter('policy', 'push_v1').value
+        name = self.declare_parameter('policy', 'push_v2').value
         directory = name if os.path.isdir(name) else os.path.join(
             get_package_share_directory('atlas_learning'), 'models', name)
         self.policy = Policy(directory)
