@@ -2949,7 +2949,8 @@ should).
 
 ### Pick-and-place, README and tutorials (2026-10-01)
 
-**`atlas_walking_demo/scripts/pick_place.py`:**
+**`atlas_walking_demo/scripts/pick_place.py`** (standing only; the user didn't accept
+this as the finished task. See "Plan: what's left" below):
 - What it does: spawns a table and a 10 kg box, picks the box up with a two-handed
   squeeze (SVH palm tasks), carries it 25 cm sideways and places it, all under
   `TorqueBalance`.
@@ -2983,3 +2984,95 @@ Fixes, in order, each measured:
 - `atlas_learning/README.md` and `atlas_dance/README.md` are new.
 - Tests: atlas_walking_demo + atlas_dance, 0 failures (new: `test_pick_place.py`,
   QP joint-limit, payload and hand-task tests).
+
+## Plan: what's left, in order (set 2026-10-01, update as steps finish)
+
+**User feedback on the 2026-10-01 pick-and-place:** not accepted. Atlas stood in one place
+the whole time. The task is pick from table A, **walk** carrying the box, place on table B
+somewhere else. The standing version stays as the first milestone of the real task.
+`pick_place.py` lives in `atlas_walking_demo` (not `atlas_dance`). It moves to its own
+package in step 1.1 so this is obvious.
+
+**Repo rules:**
+- **Public work:** the branch `ros2-jazzy-harmonic` of `soumics/drcsim`.
+  - Push over SSH: `git push git@github.com:soumics/drcsim.git ros2-jazzy-harmonic`. The
+    HTTPS `origin` has no credentials.
+- **Research work:** only the private `soumics/atlas-research`, remote `research`. When
+  it starts, its plan and notes go in `RESEARCH.md` there, never in this public file.
+- **Keep them in step:** after each public step, update the private repo.
+  - While the private `main` is still an exact copy:
+    `git push research ros2-jazzy-harmonic:main`.
+  - Once research commits exist there, merge instead, in a local branch tracking
+    `research/main`: `git merge ros2-jazzy-harmonic`, then push it.
+  - Merge public into research, never the reverse.
+- **Timing:** the private repo was created before the public items were finished, which
+  is earlier than planned. That's harmless: it keeps receiving the public work this way.
+- **Commits:** authored by Soumic Sarkar; never a Claude co-author line.
+
+### 1. Walking pick-and-place (public)
+
+1. **Package.** Move `pick_place.py` and its test to a new package `atlas_manipulation`,
+   which depends on `atlas_walking_demo` for `wbc`/`torque_balance`. Update the docs and
+   the `drcsim_record_demo pick` path.
+2. **Scene.** Two tables:
+   - A in front of Atlas, holding the box;
+   - B about 2 m away, e.g. 2 m ahead and 1 m to the left, so the walk includes a turn.
+
+   Both are spawned with `ros_gz_sim create -x -y -z`, because it ignores the SDF
+   `<pose>`.
+3. **Walk empty-handed under torque control first.** That is the milestone that decides
+   the approach:
+   - **Recommended:** feed `ZmpWalker`'s footstep plan and preview CoM trajectory into
+     `TorqueBalance`/`wbc.py`. That means:
+     - a CoM trajectory task instead of the fixed DCM target;
+     - planned contact switches;
+     - the existing lifted-foot task as the swing-foot trajectory.
+
+     This keeps the hand tasks, so the box stays in a QP-controlled grip while walking.
+   - **Fallback:** hand over from torque mode to position-mode `FreeWalkController`, with
+     the arms on IK holding the palms 2 cm inside the box (the squeeze comes from the PD
+     error). Add the box to the CoM offset and gravity feed-forward. The handover must be
+     bumpless; reuse the takeover rule (setpoint = position + effort/kp).
+   - **Pass:** 10 steps forward, a side step and a 90° turn, all standing, measured as in
+     the free-walk table.
+4. **Walk carrying the box:**
+   - `set_payload` stays on;
+   - shorter steps (0.10–0.15 m);
+   - the box held close to the chest while walking (a new `carry_walk` palm pose);
+   - stop with the feet side by side in front of table B.
+5. **Navigate:** a simple scripted route: back away from A, turn, walk, stop at B's
+   approach pose using odometry from the sole positions. No Nav2.
+6. **Place on B:** reuse the lower, release, retreat and home waypoints relative to B.
+   Check that the box ends on B with `gz model -m box -p`.
+7. **Tests:**
+   - unit tests for the route and the two-table geometry;
+   - an offline check (WBC on the model, no sim) that the carry pose is within joint and
+     torque limits.
+8. **Proof:** 3 of 3 sim runs successful. Then a video: `drcsim_record_demo … pick`,
+   camera from the side so the tables don't hide the legs, first good take only.
+9. **Docs:** tutorial 05, the package README, `video/README.md`, the top-level README
+   table. Commit, push public, sync private. Draft a LinkedIn post.
+
+### 2. Michael Jackson moonwalk, side by side (public) -- waits for the user's clip
+
+1. The user puts the clip at `~/Desktop/drcsim_jazzy_ws/media/moonwalk.mp4`. It's never
+   committed, for copyright.
+2. `extract_pose.py` (`/opt/mp_venv`) → `pose.npz`; check the detection rate and the
+   overlay.
+3. `retarget.py` → `moves.npz`. Check the arm and back angles against the clip frame by
+   frame.
+4. Play with `dance_player.py legs:=moonwalk`. Tune `glide_speed` to the dancer's
+   backward speed, and `amplitude`. If big moves topple it, try `legs:=torque` for the
+   arms with the glide.
+5. **New:** `drcsim_side_by_side CLIP RECORDING OUT`:
+   - ffmpeg hstack, MJ clip left, Gazebo right;
+   - synced on the node's `dance start` (sim time) against the clip's start frame;
+   - an optional pose-skeleton overlay on the clip.
+6. Record (only fully successful takes), a tutorial 06 update, a LinkedIn post. Commit,
+   push, sync private.
+
+### 3. Then
+
+- README "what to run" and tutorials re-checked end to end on a fresh container
+  (`docker/build.sh`). Every command in them must actually be run once.
+- Research items continue in the private repo; start its `RESEARCH.md` then.
