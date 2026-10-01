@@ -78,3 +78,53 @@ def test_pushing_the_com_forward_moves_the_centre_of_pressure_forward(ctrl):
     f = ctrl.last['f']
     cop_x = [-f[4] / f[2], -f[10] / f[8]]  # CoP x = -m_y / f_z, sole frames
     assert all(c < -0.02 for c in cop_x)  # the ground pushes the CoM forward from behind
+
+
+def test_a_joint_moving_into_its_limit_is_braked(ctrl):
+    q, v = _stance(ctrl)
+    j = N.index('l_arm_elx')  # lower limit 0: the arm straight
+    i, k = ctrl.iq[j], ctrl.iv[j]
+    q[i] = ctrl.model.lowerPositionLimit[i] + 0.03
+    v[k] = -2.0
+    ctrl.solve(q, v, np.zeros(3), posture=np.full(len(N), -1.0))  # posture pulls past it
+    assert ctrl.last['qdd'][k] > 0.0
+
+
+@pytest.fixture(scope='module')
+def svh_ctrl():
+    try:
+        share = ament_index.get_package_share_directory('atlas_svh_hands')
+        urdf = xacro.process_file(
+            os.path.join(share, 'robots', 'atlas_v5_svh_hands.urdf.xacro')).toxml()
+    except Exception:
+        pytest.skip('atlas_svh_hands (with the SVH description) not installed')
+    return wbc.WholeBodyController(urdf, N)
+
+
+def test_a_payload_adds_its_mass_at_the_palms_and_comes_off_again(svh_ctrl):
+    c = svh_ctrl
+    q, _ = _stance(c)
+    bare = c.mass
+    com0 = pin.centerOfMass(c.model, c.data, q).copy()
+    c.set_payload(10.0, 0.15)
+    assert c.mass == pytest.approx(bare + 10.0)
+    pin.framesForwardKinematics(c.model, c.data, q)
+    palms = np.mean([c.data.oMf[f].translation for f in c.palms.values()], axis=0)
+    com = pin.centerOfMass(c.model, c.data, q)
+    # The CoM moves toward the hands by about 10 / total of the way.
+    assert np.linalg.norm(com - com0) > 0.5 * 10.0 / c.mass * np.linalg.norm(palms - com0)
+    c.set_payload(0.0, 0.15)
+    assert c.mass == pytest.approx(bare)
+
+
+def test_the_hand_task_moves_the_palm_toward_its_target(svh_ctrl):
+    c = svh_ctrl
+    q, v = _stance(c)
+    pin.framesForwardKinematics(c.model, c.data, q)
+    f = c.palms['l']
+    p0, r0 = c.data.oMf[f].translation.copy(), c.data.oMf[f].rotation.copy()
+    c.solve(q, v, np.zeros(3), hand_targets={'l': (p0 + [0.0, 0.0, 0.1], r0)})
+    pin.forwardKinematics(c.model, c.data, q, v, c.last['qdd'])
+    acc = pin.getFrameClassicalAcceleration(c.model, c.data, f,
+                                            pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+    assert acc.linear[2] > 1.0

@@ -94,6 +94,7 @@ class TorqueBalance:
         self.com = self.com_target.copy()
         self.vcom = np.zeros(3)
         self.step = None      # dict(side, start, end, t0) while stepping
+        self.hand_targets = {}  # side -> (palm position, palm rotation), world frame
         self.landed_at = -1e9
         self.outside_since = None  # time the capture point left the feet
         self.vcom_f = np.zeros(3)  # low-passed CoM velocity
@@ -197,7 +198,7 @@ class TorqueBalance:
         return self.wbc.solve(q, v, acc, self.rot_target, self.posture, contacts,
                               w_com=p['w_com'], w_rot=p['w_rot'], w_post=p['w_post'],
                               w_foot=p['w_foot'], kp_foot=p['kp_foot'], kd_foot=p['kd_foot'],
-                              foot_targets=targets)
+                              foot_targets=targets, hand_targets=self.hand_targets or None)
 
     # --- stepping ----------------------------------------------------
 

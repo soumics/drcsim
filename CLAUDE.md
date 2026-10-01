@@ -2946,3 +2946,40 @@ runtime-computed keys needs those keys to be provably distinct, and any
 call site inside a per-`PreUpdate`/per-tick path is almost certainly wrong
 unless the name itself changes every time (which parameter names never
 should).
+
+### Pick-and-place, README and tutorials (2026-10-01)
+
+**`atlas_walking_demo/scripts/pick_place.py`:**
+- What it does: spawns a table and a 10 kg box, picks the box up with a two-handed
+  squeeze (SVH palm tasks), carries it 25 cm sideways and places it, all under
+  `TorqueBalance`.
+- Result: 3/3 runs with the final code.
+
+Fixes, in order, each measured:
+- **`ros_gz_sim create` ignores the SDF `<pose>`.** It uses its own `-x/-y/-z`,
+  default 0, so the box and table appeared inside Atlas. The pose is now passed
+  as arguments.
+- **Joint limits added to the QP** (`wbc.py`, acceleration bounds: stop within
+  0.15 s, 0.02 rad margin).
+  - Before, the QP reached by hyperextending `elx` past its 0 stop. The real arm
+    hit the stop, the hips whipped between their yaw limits and Atlas fell.
+  - The hand-task position error is also saturated at 8 cm.
+- **Hands came up over the table first** (`raise` waypoint). The palms start low
+  at the sides; the straight path ran into the table's side and they stuck
+  0.45 m from target. It looked like a frame bug, but logging palm vs. target
+  showed z 0.81 < table 0.85.
+- **Payload:** `wbc.set_payload(mass, reach)` puts half the box's mass in front of
+  each palm in the model, ramped in during `lift` and out during `release`.
+- **`clear` / `home` waypoints** return the palms to their start before the hand
+  task is dropped. Dropping it with the arms up made the posture task swing them
+  down at once, and Atlas fell after "finished".
+- **`drcsim_record_demo /tmp/video pick [KG]`** records it.
+
+**Docs:**
+- The top-level `README.md` was rewritten. It covers what the repo is, Docker and
+  native setup, what to run, layout, tests, limits and license.
+- `docs/tutorials/01`–`08` are new (getting started, walking, torque control,
+  learned policy, pick-and-place, dance, videos, your own controller).
+- `atlas_learning/README.md` and `atlas_dance/README.md` are new.
+- Tests: atlas_walking_demo + atlas_dance, 0 failures (new: `test_pick_place.py`,
+  QP joint-limit, payload and hand-task tests).

@@ -48,3 +48,9 @@ PPO and domain randomisation, run in Gazebo): `atlas_rl_push_forward.mp4` (120 N
 behind), `atlas_rl_push_backward.mp4` (120 N s from the front), `atlas_rl_push_sideways.mp4`
 (90 N s from the side) -- each recovered on the first take. Record with
 `DEMO_PUSH_CONTROLLER=policy drcsim_record_demo /tmp/video push FX FY 0.2 NAME "CAPTION"`.
+
+**Pick-and-place** (`atlas_pick_place.mp4`, 38 s): torque-controlled Atlas
+(`pick_place.py`, whole-body QP with palm tasks) picks up a 10 kg box from a table with
+both hands, carries it 25 cm to the side, sets it down and lowers its arms. It's the
+first take. Record it with `drcsim_record_demo /tmp/video pick 10`, on a sim started
+with `demo_camera:=true sync_max_per_window:=5.0`.

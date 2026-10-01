@@ -18,10 +18,12 @@
 Play a retargeted dance on Atlas in Gazebo, balancing free-standing.
 
 usage: ros2 run atlas_dance dance_player.py --ros-args -p moves:=moonwalk.npz
-       [-p legs:=moonwalk|stand] [-p glide_speed:=0.06] [-p skim_height:=0.03]
+       [-p legs:=moonwalk|stand|torque] [-p glide_speed:=0.06] [-p skim_height:=0.05]
        [-p start_delay:=2.0]
-The legs are atlas_walking_demo's free-standing controller (ZMP walking,
-balance feedback): 'stand' keeps the stance, 'moonwalk' walks backward with
+'torque': the whole-body torque QP balances (torque_balance.py) and the dance
+sets its posture targets -- survives full-amplitude moves. Otherwise the legs
+are atlas_walking_demo's free-standing controller (ZMP walking, balance
+feedback): 'stand' keeps the stance, 'moonwalk' walks backward with
 the swing foot skimming the floor, so Atlas glides back while its legs look
 like they walk. The back, arms and neck follow the dance (retarget.py),
 blended in over BLEND s; the controller's CoM feedback absorbs the swinging

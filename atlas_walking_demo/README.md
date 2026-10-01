@@ -200,8 +200,9 @@ capture point lands to mid-stance. Measured (precise pushes, same as above):
 | sideways 150 N s | fell | fell (crossover steps don't catch yet) |
 
 Stepping is **experimental**: it detects pushes and lands steps, but chains
-of short steps or a sideways runaway after landing still end in falls. Next
-approach: a learned policy (see the roadmap in the top-level README).
+of short steps or a sideways runaway after landing still end in falls. The
+learned policy in `atlas_learning` handles pushes better (see
+`docs/tutorials/04_learned_push_recovery.md`).
 
 **Lockstep for repeatable runs** (`sync_period_ms`): with
 `atlas.launch.py sync_max_per_window:=5.0 sync_max_per_step:=0.05` and
@@ -210,6 +211,33 @@ physics step until the torque command for the newest state has arrived, so
 CPU load (e.g. recording video) can't delay the Python controller.
 `free_walk.py`'s capture-point stepping in position mode (`push_recovery`,
 off by default) detects pushes but does not catch them.
+
+## Pick-and-place (torque control)
+
+`pick_place.py` spawns a table and a 10 kg box, then picks the box up with
+both hands, carries it 25 cm sideways and sets it down, under the same
+whole-body QP, with 6D palm tasks added. Full walk-through:
+`docs/tutorials/05_pick_and_place.md`.
+
+```bash
+ros2 launch drcsim_gazebo atlas.launch.py sync_max_per_window:=5.0 sync_max_per_step:=0.05
+ros2 run atlas_walking_demo pick_place.py     # -p box_mass:=10.0 -p debug:=true
+```
+
+Three things made it work (each measured):
+- **Joint limits in the QP.** It reached by hyperextending the elbows (they
+  stop at 0) instead of leaning; the arms hit their stops and dragged Atlas
+  over.
+- **Up and over the table.** The hands rest low at the sides, so a
+  straight path ran them into the table's side.
+- **Payload in the model, and a way home.** From lift-off to release, half
+  the box's mass sits in front of each palm in the model. At the end the
+  palms go back to their start before the hand task is dropped: dropping
+  it with the arms up made the posture task swing them down at once, and
+  Atlas fell.
+
+Result: 3 of 3 runs succeeded with the final code. The box ends 24 cm to
+the side, on the table.
 
 The original keyframe gait (`gait_controller.py`'s lean/lift/plant
 `WALK_CYCLE`, no balance control) is no longer used by the nodes; it

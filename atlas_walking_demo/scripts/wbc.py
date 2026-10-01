@@ -39,6 +39,11 @@ import pinocchio as pin
 import proxsuite
 
 SOLE = (0.023, 0.0, -0.0741)  # sole centre from the ankle (foot frame), atlas_v5 URDF
+# Palm centre in the SCHUNK SVH base frame (fingers +z, palm faces +y, thumb +x).
+SVH_PALM = (0.0, 0.03, 0.09)
+HAND_ERR_MAX = 0.08   # m: hand task position error saturation
+LIMIT_HORIZON = 0.15  # s: joints must be able to stop within this before a limit
+LIMIT_MARGIN = 0.02   # rad
 SOLE_HALF = (0.100, 0.060)    # usable CoP extent behind the sole centre / half-width
 SOLE_FRONT = 0.130            # usable CoP extent ahead of it (sole to 0.114, toe pad to 0.15)
 MU = 0.6
@@ -68,6 +73,16 @@ class WholeBodyController:
             placement = frame.placement * pin.SE3(np.eye(3), np.array(SOLE))
             self.feet[side] = m.addFrame(pin.Frame(
                 f'{side}_sole', frame.parentJoint, foot, placement, pin.FrameType.OP_FRAME))
+        # Palm frames, when the model has SVH hands (manipulation tasks).
+        self.palms = {}
+        for side in 'lr':
+            if m.existFrame(f'{side}_svh_base_link'):
+                base = m.getFrameId(f'{side}_svh_base_link')
+                frame = m.frames[base]
+                self.palms[side] = m.addFrame(pin.Frame(
+                    f'{side}_palm', frame.parentJoint, base,
+                    frame.placement * pin.SE3(np.eye(3), np.array(SVH_PALM)),
+                    pin.FrameType.OP_FRAME))
         self.data = m.createData()
         self.mass = pin.computeTotalMass(m)
         self.tau_max = m.effortLimit[self.iv]
@@ -123,7 +138,8 @@ class WholeBodyController:
     def solve(self, q, v, com_acc, rot_des=np.eye(3), posture=None, contacts='lr',
               kp_rot=100.0, kd_rot=20.0, kp_post=60.0, kd_post=15.0,
               w_com=100.0, w_rot=30.0, w_post=1.0, foot_targets=None,
-              kp_foot=200.0, kd_foot=28.0, w_foot=300.0):
+              kp_foot=200.0, kd_foot=28.0, w_foot=300.0, hand_targets=None,
+              kp_hand=150.0, kd_hand=25.0, w_hand=200.0):
         """
         Return the joint torques (AtlasCommand order) for the tasks.
 
@@ -134,6 +150,9 @@ class WholeBodyController:
         foot_targets[side] (world sole position; default: where it left the
         ground). Without that task the CoM task used the free leg's mass and
         held it up, and Atlas toppled off the other foot (measured).
+        hand_targets: {side: (palm position, palm rotation)} in the world --
+        a 6D task per palm (SVH hands). Pushing a target into an object makes
+        the hand press on it (about kp_hand x depth x the arm's mass).
         """
         m, d = self.model, self.data
         nv = m.nv
@@ -186,6 +205,20 @@ class WholeBodyController:
                 kp_foot * (np.asarray(target) - d.oMf[f].translation) - kd_foot * vf[:3],
                 kp_foot * (Rf @ pin.log3(Rf.T @ level)) - kd_foot * vf[3:]])
             tasks.append((w_foot,) + task(Jf, want - af.vector))
+        for side, (target_pos, target_rot) in (hand_targets or {}).items():
+            f = self.palms[side]
+            Jh = pin.getFrameJacobian(m, d, f, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+            vh = Jh @ v
+            ah = pin.getFrameAcceleration(m, d, f, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
+            Rh = d.oMf[f].rotation
+            # Saturated: a palm far behind its target asked for a huge
+            # acceleration and the arm dragged the body over (measured).
+            err = np.asarray(target_pos) - d.oMf[f].translation
+            err *= min(1.0, HAND_ERR_MAX / max(np.linalg.norm(err), 1e-9))
+            want = np.concatenate([
+                kp_hand * err - kd_hand * vh[:3],
+                kp_hand * (Rh @ pin.log3(Rh.T @ np.asarray(target_rot))) - kd_hand * vh[3:]])
+            tasks.append((w_hand,) + task(Jh, want - ah.vector))
         H = 1e-6 * np.eye(n)
         H[nv:, nv:] += 1e-5 * np.eye(12)
         g = np.zeros(n)
@@ -220,18 +253,32 @@ class WholeBodyController:
         ])
         nc = cone.shape[0]
         nj = len(self.iv)
-        C = np.zeros((2 * nc + nj, n))
-        lo = np.full(2 * nc + nj, -1e20)
-        hi = np.zeros(2 * nc + nj)
+        C = np.zeros((2 * nc + 2 * nj, n))
+        lo = np.full(2 * nc + 2 * nj, -1e20)
+        hi = np.zeros(2 * nc + 2 * nj)
         for k, side in enumerate('lr'):
             C[k * nc:(k + 1) * nc, nv + 6 * k:nv + 6 * k + 6] = cone
             lo[k * nc] = FZ_MIN if side in contacts else -1e20
             hi[k * nc] = 1e20
         # tau = M_j qdd + h_j - J_j^T f
-        C[2 * nc:, :nv] = M[self.iv]
-        C[2 * nc:, nv:] = -Jc[:, self.iv].T
-        lo[2 * nc:] = -self.tau_max - h[self.iv]
-        hi[2 * nc:] = self.tau_max - h[self.iv]
+        C[2 * nc:2 * nc + nj, :nv] = M[self.iv]
+        C[2 * nc:2 * nc + nj, nv:] = -Jc[:, self.iv].T
+        lo[2 * nc:2 * nc + nj] = -self.tau_max - h[self.iv]
+        hi[2 * nc:2 * nc + nj] = self.tau_max - h[self.iv]
+        # Joint limits as acceleration bounds: stop within LIMIT_HORIZON. The
+        # QP didn't know the elbow can't straighten past 0 and reached for a
+        # box by hyperextending it instead of leaning (measured).
+        qj, vj = q[self.iq], v[self.iv]
+        T = LIMIT_HORIZON
+        q_lo = m.lowerPositionLimit[self.iq] + LIMIT_MARGIN
+        q_hi = m.upperPositionLimit[self.iq] - LIMIT_MARGIN
+        a_lo = 2 * (q_lo - qj - vj * T) / T ** 2
+        a_hi = 2 * (q_hi - qj - vj * T) / T ** 2
+        bad = a_lo > a_hi  # already past a limit: just brake
+        a_lo[bad] = a_hi[bad] = -vj[bad] / T
+        rows = slice(2 * nc + nj, 2 * nc + 2 * nj)
+        C[rows, :nv] = selj
+        lo[rows], hi[rows] = np.clip(a_lo, -1e20, 1e20), np.clip(a_hi, -1e20, 1e20)
 
         qp = proxsuite.proxqp.dense.QP(n, 18, C.shape[0])
         qp.settings.eps_abs = 1e-6
@@ -241,9 +288,30 @@ class WholeBodyController:
         x = qp.results.x
         qdd, f = x[:nv], x[nv:]
         tau = M[self.iv] @ qdd + h[self.iv] - Jc[:, self.iv].T @ f
-        self.last = {'com': com, 'f': f, 'status': qp.results.info.status,
+        self.last = {'com': com, 'f': f, 'qdd': qdd, 'status': qp.results.info.status,
                      'iter': qp.results.info.iter}
         return tau
+
+    def set_payload(self, mass, reach):
+        """
+        Add (or with mass 0, remove) a held object, split between the palms.
+
+        Half the mass sits reach m in front of each palm (along its +y
+        normal), so the CoM, gravity and dynamics include it: without it a
+        10 kg box held out in front pulled Atlas over (measured).
+        """
+        m = self.model
+        if not hasattr(self, '_bare_inertia'):
+            self._bare_inertia = {s: m.inertias[m.frames[f].parentJoint].copy()
+                                  for s, f in self.palms.items()}
+        for side, f in self.palms.items():
+            frame = m.frames[f]
+            inertia = self._bare_inertia[side].copy()
+            if mass > 0:
+                at = frame.placement.act(np.array([0.0, reach, 0.0]))
+                inertia += pin.Inertia(mass / 2, at, np.zeros((3, 3)))
+            m.inertias[frame.parentJoint] = inertia
+        self.mass = pin.computeTotalMass(m)
 
     def com_velocity(self, q, v):
         """Return the CoM velocity (world)."""
