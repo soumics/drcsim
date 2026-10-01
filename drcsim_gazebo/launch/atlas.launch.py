@@ -412,8 +412,9 @@ def generate_launch_description():
             description='The demo camera stays where it starts instead of following Atlas.'),
         DeclareLaunchArgument(
             'demo_camera_offset', default_value=DEMO_CAMERA_OFFSET,
-            description='Demo camera pose relative to Atlas (x y z roll pitch yaw, its '
-                        'heading frame); default front-right, looking back at it.'),
+            description='Demo camera pose relative to Atlas (x,y,z,roll,pitch,yaw, commas or '
+                        'spaces, in its heading frame); default front-right, looking back at '
+                        'it.'),
         DeclareLaunchArgument(
             'sync_max_per_step', default_value='0.025',
             description='Controller lockstep: max wall time (s) one physics step waits for '
@@ -563,7 +564,8 @@ def _launch_setup(context, *args, **kwargs):
             package='ros_gz_sim',
             executable='create',
             arguments=['-name', 'demo_camera', '-string', DEMO_CAMERA_SDF.format(
-                offset=LaunchConfiguration('demo_camera_offset').perform(context),
+                offset=LaunchConfiguration('demo_camera_offset').perform(context).replace(
+                    ',', ' '),
                 time_constant='1e9' if LaunchConfiguration('demo_camera_fixed').perform(
                     context).lower() in ('true', '1') else '1.0')],
             output='screen'),

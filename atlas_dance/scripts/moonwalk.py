@@ -53,9 +53,10 @@ import torque_balance as tb  # noqa: E402
 
 N = bc.N
 BEAT = 1.2                 # s per beat (the step period while gliding)
-# rad the gliding foot pitches toe-down (heel up): 0.15 and 0.25 danced the
-# whole routine, 0.35 rocked the torso until Atlas fell (measured).
-TOE_DOWN = 0.25
+# rad the gliding foot pitches toe-down (heel up): 0.15 danced the whole
+# routine reliably; 0.2-0.25 sometimes, 0.35 rocked the torso until Atlas fell
+# (measured).
+TOE_DOWN = 0.15
 TOE_CLEAR = 0.02           # m the toes skim above the floor
 TOE_AHEAD = 0.13           # m from the sole centre to the toe (wbc.SOLE_FRONT)
 # zmp_walk timing for the glide (set only while gliding: the crouch shares
@@ -100,7 +101,7 @@ class MoonwalkNode(Node):
         self.start_delay = float(p('start_delay', 2.0).value)
         self.glide_start = float(p('glide_start', 8.5).value)    # first glide step
         self.glide_steps = int(p('glide_steps', 5).value)
-        self.glide_speed = float(p('glide_speed', 0.15).value)   # m/s backward
+        self.glide_speed = float(p('glide_speed', 0.12).value)   # m/s backward
         self.finale = float(p('finale', 14.0).value)
         self.length = float(p('length', 19.5).value)
         self.bounce = float(p('bounce', 0.03).value)             # m knee bounce
@@ -138,8 +139,10 @@ class MoonwalkNode(Node):
         g = self.style
         # Torso: a twist on the beat while grooving; leaning forward to glide.
         self._joint('back_bkz', 0.3 * g * groove * math.sin(beat / 2))
-        self._joint('back_bky', 0.12 * glide + 0.08 * g * groove * max(0.0, math.sin(beat)))
-        self._joint('neck_ry', 0.15 * glide + 0.15 * g * groove * math.sin(beat))
+        # (No forward lean while gliding: it pitched Atlas over the toes at the
+        # end of a backward step, measured.)
+        self._joint('back_bky', 0.08 * g * groove * max(0.0, math.sin(beat)))
+        self._joint('neck_ry', 0.15 * g * groove * math.sin(beat))
         # Elbows: pumping in turn on the beat, then bent and loose to glide.
         pump = 0.9 * g * groove * (0.5 + 0.5 * math.sin(beat))
         pump_r = 0.9 * g * groove * (0.5 - 0.5 * math.sin(beat))
