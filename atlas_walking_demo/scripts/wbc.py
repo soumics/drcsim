@@ -42,6 +42,7 @@ SOLE = (0.023, 0.0, -0.0741)  # sole centre from the ankle (foot frame), atlas_v
 # Palm centre in the SCHUNK SVH base frame (fingers +z, palm faces +y, thumb +x).
 SVH_PALM = (0.0, 0.03, 0.09)
 HAND_ERR_MAX = 0.08   # m: hand task position error saturation
+MAX_ITER = 200        # ProxQP iterations per solve
 LIMIT_HORIZON = 0.15  # s: joints must be able to stop within this before a limit
 LIMIT_MARGIN = 0.02   # rad
 SOLE_HALF = (0.100, 0.060)    # usable CoP extent behind the sole centre / half-width
@@ -139,7 +140,7 @@ class WholeBodyController:
               kp_rot=100.0, kd_rot=20.0, kp_post=60.0, kd_post=15.0,
               w_com=100.0, w_rot=30.0, w_post=1.0, foot_targets=None,
               kp_foot=200.0, kd_foot=28.0, w_foot=300.0, hand_targets=None,
-              kp_hand=150.0, kd_hand=25.0, w_hand=200.0):
+              kp_hand=150.0, kd_hand=25.0, w_hand=200.0, squeeze=0.0):
         """
         Return the joint torques (AtlasCommand order) for the tasks.
 
@@ -147,12 +148,16 @@ class WholeBodyController:
         orientation (world); posture: desired joint angles (default: now);
         contacts: the feet on the ground -- a lifted foot gets no wrench and
         no no-slip constraint, but a task bringing it level to
-        foot_targets[side] (world sole position; default: where it left the
+        foot_targets[side] (world sole position, or (position, yaw); default: where it left the
         ground). Without that task the CoM task used the free leg's mass and
         held it up, and Atlas toppled off the other foot (measured).
         hand_targets: {side: (palm position, palm rotation)} in the world --
         a 6D task per palm (SVH hands). Pushing a target into an object makes
         the hand press on it (about kp_hand x depth x the arm's mass).
+        squeeze: N each palm presses along its normal on an object held between
+        them -- modelled as the object pushing back on the palms, so the torques
+        produce the squeeze and the balance accounts for it. (Squeeze torques
+        added after the solve tilted Atlas forward, 20 deg at 200 N: measured.)
         """
         m, d = self.model, self.data
         nv = m.nv
@@ -200,6 +205,8 @@ class WholeBodyController:
             af = pin.getFrameAcceleration(m, d, f, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
             Rf = d.oMf[f].rotation
             yaw = np.arctan2(Rf[1, 0], Rf[0, 0])
+            if isinstance(target, tuple):  # (position, yaw): a walking step that turns
+                target, yaw = target
             level = pin.rpy.rpyToMatrix(0.0, 0.0, yaw)
             want = np.concatenate([
                 kp_foot * (np.asarray(target) - d.oMf[f].translation) - kd_foot * vf[:3],
@@ -219,6 +226,12 @@ class WholeBodyController:
                 kp_hand * err - kd_hand * vh[:3],
                 kp_hand * (Rh @ pin.log3(Rh.T @ np.asarray(target_rot))) - kd_hand * vh[3:]])
             tasks.append((w_hand,) + task(Jh, want - ah.vector))
+        if squeeze > 0.0:
+            ext = np.zeros(nv)
+            for f in self.palms.values():
+                Jp = pin.getFrameJacobian(m, d, f, pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)[:3]
+                ext += Jp.T @ (-squeeze * d.oMf[f].rotation[:, 1])
+            h = h - ext  # M qdd + h = S tau + Jc^T f + ext
         H = 1e-6 * np.eye(n)
         H[nv:, nv:] += 1e-5 * np.eye(12)
         g = np.zeros(n)
@@ -283,13 +296,26 @@ class WholeBodyController:
         qp = proxsuite.proxqp.dense.QP(n, 18, C.shape[0])
         qp.settings.eps_abs = 1e-6
         qp.settings.verbose = False
+        # Capped: ProxQP's default limits let one hard (nearly infeasible)
+        # problem run for ~2 minutes, and with lockstep the simulation went
+        # on without commands until Atlas fell (measured). A solve normally
+        # takes a few dozen iterations.
+        qp.settings.max_iter = MAX_ITER
+        qp.settings.max_iter_in = MAX_ITER
         qp.init(H, g, A_eq, b_eq, C, lo, hi)
         qp.solve()
+        status = qp.results.info.status
+        if status != proxsuite.proxqp.QPSolverOutput.PROXQP_SOLVED and 'tau' in self.last:
+            # Not solved this tick: keep the last good torques (1 ms old).
+            self.last.update(status=status, iter=qp.results.info.iter,
+                             failures=self.last.get('failures', 0) + 1)
+            return self.last['tau']
         x = qp.results.x
         qdd, f = x[:nv], x[nv:]
         tau = M[self.iv] @ qdd + h[self.iv] - Jc[:, self.iv].T @ f
-        self.last = {'com': com, 'f': f, 'qdd': qdd, 'status': qp.results.info.status,
-                     'iter': qp.results.info.iter}
+        self.last = {'com': com, 'f': f, 'qdd': qdd, 'status': status,
+                     'iter': qp.results.info.iter, 'tau': tau,
+                     'failures': self.last.get('failures', 0)}
         return tau
 
     def set_payload(self, mass, reach):

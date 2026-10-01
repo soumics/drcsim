@@ -158,6 +158,9 @@ def _rpy_matrix(roll, pitch, yaw):
             [-sp, cp * sr, cp * cr]]
 
 
+SVH_FRICTION = 2.0  # rubber-padded hands
+
+
 def _svh_for_gz(robot_description):
     """
     Adapt the SCHUNK SVH hands in a URDF for gz-sim (spawn only).
@@ -165,6 +168,9 @@ def _svh_for_gz(robot_description):
     * Collision meshes become their bounding boxes
       (atlas_svh_hands/config/svh_collision_boxes.yaml): DART's ODE
       collision backend segfaults on the meshes' degenerate submeshes.
+    * The hands get rubber-like friction (SVH_FRICTION; gz's default is
+      1.0, and DART uses the lower of two surfaces' values): a 10 kg box
+      squeezed between the palms slid out while Atlas walked (measured).
     * <mimic> couplings move into each hand's HandJointController config:
       DART has no mimic constraints (gz logs an error per joint and ignores
       them); the controller enforces them instead.
@@ -175,6 +181,16 @@ def _svh_for_gz(robot_description):
                            'svh_collision_boxes.yaml')) as boxes_file:
         boxes = yaml.safe_load(boxes_file)
     root = ET.fromstring(robot_description)
+    hand_links = set()
+    for link in root.findall('link'):
+        for collision in link.findall('collision'):
+            mesh = collision.find('geometry/mesh')
+            if mesh is not None and 'schunk_svh_description' in mesh.get('filename', ''):
+                hand_links.add(link.get('name'))
+    for name in sorted(hand_links):
+        gazebo = ET.SubElement(root, 'gazebo', reference=name)
+        ET.SubElement(gazebo, 'mu1').text = str(SVH_FRICTION)
+        ET.SubElement(gazebo, 'mu2').text = str(SVH_FRICTION)
     for collision in root.iter('collision'):
         mesh = collision.find('geometry/mesh')
         if mesh is None or 'schunk_svh_description' not in mesh.get('filename', ''):

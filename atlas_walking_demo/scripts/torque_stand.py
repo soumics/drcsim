@@ -24,6 +24,10 @@ kp_position = 0 and a small joint damping, effort = torque_balance's
 torques, every AtlasState message (1 kHz of sim time; each solve takes
 about 0.5 ms). Needs Pinocchio and ProxQP (in the Docker image). Stops
 commanding past 35 deg of tilt. Parameters: torque_balance.DEFAULTS.
+
+Walking under torque control (qp_walk): -p walk_steps:=10 walks that many
+steps at (walk_vx, walk_vy, walk_wz) m/s, m/s, rad/s, starting walk_delay s
+after torque mode, then stops with the feet together and stands.
 """
 
 import math
@@ -50,6 +54,10 @@ class TorqueStandNode(Node):
                          parameter_overrides=[Parameter('use_sim_time', value=True)])
         self.params = {name: self.declare_parameter(name, value).value
                        for name, value in tb.DEFAULTS.items()}
+        self.walk = {name: self.declare_parameter(name, value).value for name, value in
+                     (('walk_steps', 0), ('walk_vx', 0.1), ('walk_vy', 0.0), ('walk_wz', 0.0),
+                      ('walk_delay', 2.0))}
+        self.walk_state = 'waiting'
         self.urdf = None
         self.position = None
         self.torque = None
@@ -95,8 +103,10 @@ class TorqueStandNode(Node):
             cmd.kp_position, cmd.kd_position = out.kp, out.kd
             if self.position.status == 'ready':
                 self.torque = tb.TorqueBalance(self.urdf, N, s, self.params)
+                self.torque_t0 = t
                 self.get_logger().info('Standing; switched to torque control.')
         else:
+            self._walk(s, t)
             tau = self.torque.update(s, t)
             while self.torque.messages:
                 self.get_logger().warn(self.torque.messages.pop(0))
@@ -116,8 +126,27 @@ class TorqueStandNode(Node):
             err = 100 * (self.torque.com - self.torque.com_target)
             self.get_logger().info(
                 f'torque mode: roll={math.degrees(roll):+.1f} pitch={math.degrees(pitch):+.1f} '
-                f'contacts={self.torque.contacts(s)} CoM error=({err[0]:+.1f}, {err[1]:+.1f}, '
-                f'{err[2]:+.1f}) cm')
+                f'contacts={"".join(c for c in "lr" if self.torque.in_contact[c])} '
+                f'CoM error=({err[0]:+.1f}, {err[1]:+.1f}, {err[2]:+.1f}) cm'
+                + (f' walk={self.torque.walk.phase} steps={self.torque.walk.steps_planned}'
+                   if self.torque.walk else ''))
+
+    def _walk(self, s, t):
+        """Run the optional walk: start, count steps, stop, hand back to standing."""
+        w, tq = self.walk, self.torque
+        if w['walk_steps'] <= 0 or self.walk_state == 'done':
+            return
+        if self.walk_state == 'waiting' and t - self.torque_t0 >= w['walk_delay']:
+            tq.start_walk(s, t).set_velocity(w['walk_vx'], w['walk_vy'], w['walk_wz'])
+            self.walk_state = 'walking'
+            self.get_logger().info('Walking (torque control).')
+        elif self.walk_state == 'walking' and tq.walk.steps_planned >= w['walk_steps']:
+            tq.walk.stop()
+            self.walk_state = 'stopping'
+        elif self.walk_state == 'stopping' and tq.walk.idle:
+            tq.end_walk()
+            self.walk_state = 'done'
+            self.get_logger().info('Walk finished; standing.')
 
 
 def main(args=None):

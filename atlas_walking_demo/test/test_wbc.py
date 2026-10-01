@@ -128,3 +128,28 @@ def test_the_hand_task_moves_the_palm_toward_its_target(svh_ctrl):
     acc = pin.getFrameClassicalAcceleration(c.model, c.data, f,
                                             pin.ReferenceFrame.LOCAL_WORLD_ALIGNED)
     assert acc.linear[2] > 1.0
+
+
+def test_a_squeeze_is_modelled_as_the_object_pushing_back_on_the_palms(svh_ctrl):
+    c = svh_ctrl
+    q, v = _stance(c)
+    c.solve(q, v, np.zeros(3))
+    f0, tau0 = c.last['f'].copy(), c.last['tau'].copy()
+    c.solve(q, v, np.zeros(3), squeeze=100.0)
+    f1, tau1 = c.last['f'], c.last['tau']
+    # The object pushes each palm back along -normal; the feet carry the
+    # rest of the weight. (Palms facing each other: the pushes cancel.)
+    pin.framesForwardKinematics(c.model, c.data, q)
+    push = sum(-100.0 * c.data.oMf[f].rotation[:, 1] for f in c.palms.values())
+    assert f1[2] + f1[8] == pytest.approx(f0[2] + f0[8] - push[2], abs=1.0)
+    # The arms do the pushing.
+    arm = [N.index(n) for n in N if '_arm_' in n]
+    assert np.abs(tau1[arm] - tau0[arm]).max() > 5.0
+
+
+def test_qp_iterations_are_capped_and_a_failed_solve_keeps_the_last_torques(ctrl):
+    q, v = _stance(ctrl)
+    tau = ctrl.solve(q, v, np.zeros(3))
+    assert wbc.MAX_ITER <= 500 and ctrl.last['iter'] < wbc.MAX_ITER
+    ctrl.last['status'] = None  # what a capped, unsolved problem would leave
+    assert np.allclose(ctrl.last['tau'], tau)

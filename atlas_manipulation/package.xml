@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>atlas_manipulation</name>
+  <version>0.1.0</version>
+  <description>
+    Manipulation with Atlas under whole-body torque control: pick a heavy box
+    off a table with both hands, walk it to another table and set it down.
+  </description>
+  <maintainer email="soumic4it@gmail.com">Soumic Sarkar</maintainer>
+  <license>Apache 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <exec_depend>atlas_msgs</exec_depend>
+  <exec_depend>atlas_svh_hands</exec_depend>
+  <exec_depend>atlas_walking_demo</exec_depend>
+  <exec_depend>pinocchio</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+
+  <test_depend>ament_cmake_copyright</test_depend>
+  <test_depend>ament_cmake_flake8</test_depend>
+  <test_depend>ament_cmake_pep257</test_depend>
+  <test_depend>ament_cmake_lint_cmake</test_depend>
+  <test_depend>ament_cmake_pytest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

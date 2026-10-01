@@ -36,6 +36,7 @@ import math
 
 import numpy as np
 import pinocchio as pin
+import qp_walk
 import wbc
 import zmp_walk as zw
 
@@ -47,6 +48,7 @@ DEFAULTS = {
     'kp_height': 30.0, 'kd_height': 11.0,
     'w_com': 1000.0, 'w_rot': 10.0, 'w_post': 1.0,
     'w_foot': 5000.0, 'kp_foot': 1600.0, 'kd_foot': 80.0,
+    'w_hand': 200.0,       # palm tasks (manipulation)
     'kd_joint': 1.0,       # AtlasPlugin joint damping in torque mode (N m s/rad)
     'com_ahead': 0.02,     # CoM target ahead of the soles' midpoint (m)
     'sync_period_ms': 0,   # >0: ask AtlasPlugin to hold physics for fresh commands (lockstep)
@@ -95,6 +97,8 @@ class TorqueBalance:
         self.vcom = np.zeros(3)
         self.step = None      # dict(side, start, end, t0) while stepping
         self.hand_targets = {}  # side -> (palm position, palm rotation), world frame
+        self.walk = None        # qp_walk.QpWalk while walking
+        self.squeeze = 0.0      # N each palm pushes along its normal (holding an object)
         self.landed_at = -1e9
         self.outside_since = None  # time the capture point left the feet
         self.vcom_f = np.zeros(3)  # low-passed CoM velocity
@@ -116,19 +120,56 @@ class TorqueBalance:
         return self.wbc.state(np.array(state.position), np.array(state.velocity),
                               [o.x, o.y, o.z, o.w], [w.x, w.y, w.z], contacts)
 
+    def start_walk(self, state, t):
+        """Start walking (plan anchored at the current feet); drive it via self.walk."""
+        q, _ = self._state(state)
+        soles = self._soles(q)
+        com = pin.centerOfMass(self.wbc.model, self.wbc.data, q)
+        self.step = None
+        self.walk = qp_walk.QpWalk(soles, com, t)
+        # Standing, the balance holds the CoM off its target by a steady
+        # offset where the model and the robot disagree (8 cm behind with a
+        # 10 kg box held, measured): that offset is what keeps it balanced.
+        # Starting the walk with the reference at the CoM dropped it, and
+        # Atlas fell backward within a second (measured). Keep it, in the
+        # body frame.
+        bias = self.com_target[:2] - com[:2]
+        bias *= min(1.0, 0.12 / max(np.linalg.norm(bias), 1e-9))
+        yaw = self.walk.yaw0
+        c, s = math.cos(-yaw), math.sin(-yaw)
+        self.walk_bias = (c * bias[0] - s * bias[1], s * bias[0] + c * bias[1])
+        return self.walk
+
+    def end_walk(self):
+        """Stop following the walking plan; balance over the feet where they are."""
+        yaw = self.walk.heading()
+        self.walk = None
+        self.rot_target = pin.rpy.rpyToMatrix(0.0, 0.0, yaw)
+        # The standing target, as at construction: between the soles,
+        # com_ahead forward (the steady offset comes back by itself).
+        soles = self.wbc.sole_world
+        mid = (soles['l'][:2] + soles['r'][:2]) / 2
+        self.com_target[:2] = mid + self.p['com_ahead'] * np.array([math.cos(yaw), math.sin(yaw)])
+        self.mid_target = None
+
     def update(self, state, t):
         """Return the joint torques (AtlasCommand order) for this state at time t (s)."""
         self.t = t
         contacts = self.contacts(state)
-        if self.step is None and t < getattr(self, 'planted_until', -1.0):
+        if self.walk is not None:
+            self.walk.advance(t)
+            contacts = self.walk.contacts(contacts)
+            self.in_contact.update({s: s in contacts for s in 'lr'})
+        elif self.step is None and t < getattr(self, 'planted_until', -1.0):
             # Just landed: both feet count as planted, so the QP brakes on the
             # new foot; the landed foot unloaded again and Atlas ran on over
             # the stance foot (measured).
             contacts = 'lr'
             self.in_contact.update({'l': True, 'r': True})
-        if self.step is not None:
+        if self.step is not None and self.walk is None:
             contacts = self._stepping_contacts(contacts)
         q, v = self._state(state, contacts)
+        self.q = q
         m, d = self.wbc.model, self.wbc.data
         if getattr(self, '_retarget', False):
             self._retarget = False
@@ -181,9 +222,21 @@ class TorqueBalance:
                 f'vcom=({self.vcom[0]:+.2f},{self.vcom[1]:+.2f}) xi=({xi[0]:+.3f},{xi[1]:+.3f}) '
                 f'target=({self.com_target[0]:+.3f},{self.com_target[1]:+.3f}) '
                 f'acc=({acc[0]:+.1f},{acc[1]:+.1f})')
-        if self.step is None and p['stepping']:
+        if self.walk is not None:
+            # Track the walking plan: DCM feedback around the planned ZMP.
+            c_ref, v_ref, _, p_ref = self.walk.com_reference(t)
+            xi_ref = c_ref + v_ref / OMEGA
+            yaw = self.walk.heading()
+            c, s = math.cos(yaw), math.sin(yaw)
+            bx, by = self.walk_bias
+            bias = np.array([c * bx - s * by, s * bx + c * by])
+            cmp = p_ref + (1 + p['k_dcm']) * (xi - xi_ref) - p['k_dcm'] * bias
+            acc[:2] = OMEGA ** 2 * (self.com[:2] - cmp)
+            self.rot_target = pin.rpy.rpyToMatrix(0.0, 0.0, self.walk.heading())
+            targets = self.walk.foot_targets(contacts)
+        elif self.step is None and p['stepping']:
             self._check_step(q, xi, contacts)
-        if self.step is not None:
+        if self.step is not None and self.walk is None:
             # Replan the landing spot from the current capture point until
             # 70% of the swing: the push may still be acting when the step
             # starts, and a target fixed then landed far short (measured).
@@ -195,10 +248,13 @@ class TorqueBalance:
                 st['end'] = self._step_target(soles, st['side'], (float(xi[0]), float(xi[1])),
                                               remaining)
             targets = {st['side']: self._swing_point()}
-        return self.wbc.solve(q, v, acc, self.rot_target, self.posture, contacts,
-                              w_com=p['w_com'], w_rot=p['w_rot'], w_post=p['w_post'],
-                              w_foot=p['w_foot'], kp_foot=p['kp_foot'], kd_foot=p['kd_foot'],
-                              foot_targets=targets, hand_targets=self.hand_targets or None)
+        self.last_acc = acc
+        tau = self.wbc.solve(q, v, acc, self.rot_target, self.posture, contacts,
+                             w_com=p['w_com'], w_rot=p['w_rot'], w_post=p['w_post'],
+                             w_foot=p['w_foot'], kp_foot=p['kp_foot'], kd_foot=p['kd_foot'],
+                             foot_targets=targets, hand_targets=self.hand_targets or None,
+                             w_hand=p['w_hand'], squeeze=self.squeeze)
+        return tau
 
     # --- stepping ----------------------------------------------------
 

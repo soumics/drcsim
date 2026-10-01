@@ -4,15 +4,15 @@ The Boston Dynamics **Atlas** humanoid from the DARPA Robotics Challenge
 simulator ([osrf/drcsim](https://github.com/osrf/drcsim)), ported from ROS 1 +
 Gazebo Classic to **ROS 2 Jazzy + Gazebo Harmonic (gz-sim 8)**. It also adds
 new controllers: walking, whole-body torque control, a learned push-recovery
-policy, two-handed pick-and-place and dance retargeting from video.
+policy, carrying a box between tables and dance retargeting from video.
 
 | | |
 |---|---|
 | **Simulation** | Atlas v5 with its sensors (MultiSense SL stereo + spinning lidar, IMUs, foot/wrist F/T). Hands: five-finger SCHUNK SVH (default), Sandia or Robotiq |
 | **Teleop walking** | keyboard or `Twist`, in every direction, in a harness or free-standing (ZMP preview control) |
-| **Torque control** | whole-body QP (Pinocchio + ProxQP) at 1 kHz: DCM balance, contact-aware, joint and torque limits, hand tasks |
+| **Torque control** | whole-body QP (Pinocchio + ProxQP) at 1 kHz: DCM balance, walking, joint and torque limits, hand tasks |
 | **Learned policy** | PPO push-recovery policy trained in MuJoCo, runs in Gazebo (sim-to-sim transfer) |
-| **Manipulation** | picks up a 10 kg box with both hands, carries it, sets it down, balancing all the way |
+| **Manipulation** | picks a 10 kg box off a table with both hands, walks it to another table and sets it down |
 | **Dance** | MediaPipe pose from a video, retargeted onto Atlas's upper body; moonwalk glide |
 
 Demo videos are listed in [video/README.md](video/README.md) (the `.mp4` files themselves
@@ -68,7 +68,8 @@ standing controller without a jolt.
 | Scripted free walk | `ros2 run atlas_walking_demo free_walk.py --ros-args -p steps:=10` | [2](docs/tutorials/02_walking.md) |
 | Torque-controlled standing + pushes | `ros2 run atlas_walking_demo torque_stand.py`, then `drcsim_push 0 525 0.2` | [3](docs/tutorials/03_torque_control.md) |
 | Learned push recovery | `ros2 run atlas_learning policy_stand.py` | [4](docs/tutorials/04_learned_push_recovery.md) |
-| Pick-and-place (10 kg box) | `ros2 run atlas_walking_demo pick_place.py` | [5](docs/tutorials/05_pick_and_place.md) |
+| Torque-controlled walking | `ros2 run atlas_walking_demo torque_stand.py --ros-args -p walk_steps:=8` | [3](docs/tutorials/03_torque_control.md) |
+| Pick-and-place: carry a 10 kg box to another table | `ros2 run atlas_manipulation pick_place.py` | [5](docs/tutorials/05_pick_and_place.md) |
 | Dance from a video | `extract_pose.py` → `retarget.py` → `dance_player.py` | [6](docs/tutorials/06_dance.md) |
 | Record a demo video | `drcsim_record_demo /tmp/video [harness\|free\|push\|pick]` | [7](docs/tutorials/07_recording_videos.md) |
 
@@ -81,16 +82,18 @@ docker/sim.sh sync_max_per_window:=5.0 sync_max_per_step:=0.05
 
 ## Tutorials
 
-All tutorials are in [docs/tutorials/](docs/tutorials/README.md):
+All tutorials are in [docs/tutorials/](docs/tutorials/README.md). `tools/publish_wiki.py`
+copies them to the repository wiki, with links rewritten for the wiki.
 
 1. [Getting started](docs/tutorials/01_getting_started.md): launch options, hands, sensors,
    topics, RViz.
 2. [Walking](docs/tutorials/02_walking.md): harness gait, free-standing ZMP walking, teleop.
 3. [Whole-body torque control](docs/tutorials/03_torque_control.md): the QP, DCM balance,
-   pushes, lockstep.
+   walking, pushes, lockstep.
 4. [Learned push recovery](docs/tutorials/04_learned_push_recovery.md): MuJoCo model,
    training, evaluation, running in Gazebo.
-5. [Pick-and-place](docs/tutorials/05_pick_and_place.md): hand tasks, payload, joint limits.
+5. [Pick-and-place](docs/tutorials/05_pick_and_place.md): grasp, squeeze, carry while
+   walking, place.
 6. [Dance from a video](docs/tutorials/06_dance.md): pose extraction, retargeting, playback.
 7. [Recording videos](docs/tutorials/07_recording_videos.md).
 8. [Writing your own controller](docs/tutorials/08_your_own_controller.md): the AtlasCommand
@@ -105,7 +108,8 @@ All tutorials are in [docs/tutorials/](docs/tutorials/README.md):
 | `drcsim_gazebo_plugins` | vehicle/building plugins, `FollowCameraPlugin`, `HandJointController` |
 | `atlas_description`, `*_hand_description`, `multisense_sl_description`, `atlas_svh_hands` | robot models |
 | `atlas_msgs`, `handle_msgs`, `sandia_hand_msgs`, `osrf-common` | messages |
-| `atlas_walking_demo` | walking, balance, whole-body QP, pick-and-place |
+| `atlas_walking_demo` | walking, balance, whole-body QP (standing, walking, hand tasks) |
+| `atlas_manipulation` | pick a box off a table, walk it to another, place it |
 | `atlas_learning` | MuJoCo model, PPO training, learned policy node |
 | `atlas_dance` | video → pose → Atlas retargeting and playback |
 | `drcsim_tutorials` | the original tutorials, ported (teleop, joint sliders) |

@@ -44,6 +44,30 @@ per foot.
 
 The torques come from the joint rows of the dynamics: `τ = M q̈ + h − Jᵀ f`.
 
+## Walking
+
+`TorqueBalance.start_walk()` hands the CoM to a walking plan (`qp_walk.QpWalk`, built on
+the position-mode walker's ZMP preview planner):
+
+- **CoM:** tracked with DCM feedback around the planned ZMP,
+  `CMP = p_ref + (1 + k)(ξ − ξ_ref)`.
+- **Swing foot:** leaves the contact set and follows its planned sole path and heading
+  (a 6D task).
+- **Landing:** the foot rejoins the contacts when its load cell sees it, or 60 ms after
+  the planned touchdown.
+
+```bash
+ros2 run atlas_walking_demo torque_stand.py --ros-args -p sync_period_ms:=2 -p walk_steps:=8 -p walk_vx:=0.1
+```
+
+`qp_walk.Route` scripts a walk (segments of velocity and step count), and
+`qp_walk.predict()` says where it will end. Both are used by pick-and-place
+([tutorial 5](05_pick_and_place.md)).
+
+The QP solver is capped at 200 iterations. Once, one solve on a hard problem ran for
+about 2 minutes while the simulation went on without commands. When a solve doesn't
+converge, the last good torques are reused for that tick.
+
 ## Balance law
 
 Divergent component of motion (capture point) ξ = c + ċ/ω:

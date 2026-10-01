@@ -10,9 +10,10 @@
 #              torque-controlled stand (torque_stand.py), one precise push on
 #              the torso (drcsim_push) -> OUT_DIR/NAME.mp4; exits 1 if Atlas fell
 #     pick [BOX_KG]
-#              torque-controlled two-handed pick-and-place (pick_place.py) of a
-#              BOX_KG (default 10) box -> OUT_DIR/atlas_pick_place.mp4; exits 1
-#              if Atlas fell. Start the sim with sync_max_per_window:=5.0.
+#              pick-and-place (atlas_manipulation pick_place.py): picks a
+#              BOX_KG (default 10) box off one table, walks it to another and
+#              sets it down -> OUT_DIR/atlas_pick_place.mp4; exits 1 if Atlas
+#              fell. Start the sim with sync_max_per_window:=5.0.
 # The Gazebo side is the chase camera riding with Atlas (rendered by the gz
 # server on the GPU, full PBR look), recorded frame by frame in simulation
 # time; RViz runs on a private virtual display (Xvfb :98), screen-recorded in
@@ -29,9 +30,12 @@ if [ "$MODE" = push ]; then
   PUSH_F=("$3" "$4" "$5"); NAME="$6"; CAPTION="$7"
 elif [ "$MODE" = pick ]; then
   BOX_KG="${3:-10}"; NAME=atlas_pick_place
-  CAPTION="Gazebo Harmonic - whole-body torque control, ${BOX_KG} kg box"
+  CAPTION="Gazebo Harmonic - torque-controlled pick, carry and place, ${BOX_KG} kg box"
 fi
 TASK_LOG=/tmp/demo_push.log
+# Empty it now: a background job's own '> file' runs later, and the wait
+# below read the previous take's last line and ended this one at once.
+: > "$TASK_LOG"
 mkdir -p "$OUT"
 CONFIG="$(ros2 pkg prefix drcsim_gazebo)/share/drcsim_gazebo/config"
 FONT=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf
@@ -94,15 +98,15 @@ if [ "$MODE" = push ]; then
   # DEMO_PUSH_CONTROLLER=policy: the learned policy (atlas_learning) instead
   # of the whole-body torque controller.
   if [ "${DEMO_PUSH_CONTROLLER:-torque}" = policy ]; then
-    ros2 run atlas_learning policy_stand.py > /tmp/demo_push.log 2>&1 &
+    ros2 run atlas_learning policy_stand.py > "$TASK_LOG" 2>&1 &
     READY='has control'
   else
     ros2 run atlas_walking_demo torque_stand.py --ros-args -p sync_period_ms:=2 \
-      > /tmp/demo_push.log 2>&1 &
+      > "$TASK_LOG" 2>&1 &
     READY='switched to torque control'
   fi
   STAND=$!
-  until grep -q "$READY" /tmp/demo_push.log; do sleep 0.5; done
+  until grep -q "$READY" "$TASK_LOG"; do sleep 0.5; done
   sim_sleep 3
   drcsim_push "${PUSH_F[@]}"
   sim_sleep 7
@@ -113,10 +117,10 @@ if [ "$MODE" = push ]; then
   pkill -TERM -f 'lib/atlas_learning/policy_stand.py' || true
   sleep 1; kill $STAND 2> /dev/null || true; wait $STAND 2> /dev/null || true
 elif [ "$MODE" = pick ]; then
-  # Spawns the table and box itself, stands, picks, carries, places, then
-  # lowers the arms; runs in lockstep like the push takes.
+  # Spawns the tables and the box itself, stands, picks, walks the box to
+  # table B, places it, lowers the arms; runs in lockstep like the push takes.
   # box_mass is a double parameter: "10" would arrive as an integer and abort.
-  ros2 run atlas_walking_demo pick_place.py --ros-args \
+  ros2 run atlas_manipulation pick_place.py --ros-args \
     -p box_mass:="$(python3 -c "print(float('$BOX_KG'))")" \
     > "$TASK_LOG" 2>&1 &
   TASK=$!
@@ -125,7 +129,7 @@ elif [ "$MODE" = pick ]; then
     sleep 0.5
   done
   sim_sleep 3
-  pkill -TERM -f 'lib/atlas_walking_demo/pick_place.py' || true
+  pkill -TERM -f 'lib/atlas_manipulation/pick_place.py' || true
   sleep 1; kill $TASK 2> /dev/null || true; wait $TASK 2> /dev/null || true
 elif [ "$MODE" = free ]; then
   # Free-standing: walk commands start ~2.6 s after the key (the ZMP

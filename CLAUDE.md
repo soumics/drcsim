@@ -2985,6 +2985,60 @@ Fixes, in order, each measured:
 - Tests: atlas_walking_demo + atlas_dance, 0 failures (new: `test_pick_place.py`,
   QP joint-limit, payload and hand-task tests).
 
+### Walking pick-and-place: carry a box to another table (2026-10-01)
+
+**Done.** `atlas_manipulation/scripts/pick_place.py`:
+- picks a 10 kg box off table A;
+- steps back 4 steps, turns right about 82° in 24 short steps, walks 8 steps;
+- places the box on table B (spawned where `qp_walk.predict(ROUTE)` says the walk ends);
+- lowers its arms.
+
+All of it runs under torque control with no harness.
+
+Result: 3/3 runs, with the box ending on table B at the same spot to within 2 mm.
+
+**New pieces:**
+- **`atlas_walking_demo/scripts/qp_walk.py`:**
+  - `QpWalk` wraps `ZmpWalker`'s plan for the QP: CoM reference and planned ZMP,
+    planned contacts, swing sole targets with heading, pelvis heading.
+  - `Route` scripts velocity segments.
+  - `predict()` gives a route's end pose (the walker is open-loop on footsteps).
+- **`TorqueBalance`:** `start_walk` / `end_walk`, DCM tracking around the plan;
+  `squeeze`; `w_hand`; `self.q`.
+- **`torque_stand.py`:** `walk_steps` / `walk_vx` / `walk_vy` / `walk_wz`.
+- **`wbc.py`:**
+  - `squeeze` (the object's push-back on the palms as known external forces in the
+    dynamics);
+  - the foot task accepts (position, yaw);
+  - ProxQP capped at `MAX_ITER` 200, falling back to the last torques.
+- **`atlas.launch.py`:** SVH hand links get μ 2 (`SVH_FRICTION`).
+
+**Measured, in the order found** (the log of this work):
+1. The walk plan started with the ZMP reference between the feet while a held box had
+   moved the CoM, and the first preview jerk failed the QP. Fix: start at rest at the
+   CoM.
+2. A CoM bias of about 8 cm standing with the box came from the hand task outvoting the
+   CoM task. Fix: `w_com` 10000, which needs `w_rot` 100 (with `w_rot` 10 the pelvis
+   pitched to 30°).
+3. Grip:
+   - μ 1 was not enough;
+   - squeeze torques added after the solve tilted Atlas forward 20° at 200 N, so the
+     squeeze is now modelled in the QP;
+   - curled fingers took the squeeze on weak finger joints, so the hands hold flat.
+4. Turning toppled Atlas at the same step every run: the box and arm brushed table A.
+   Fix: step back 4 steps, not 2. Turning with the box also needs slower steps (SS 1.0 /
+   DS 0.6 s, ZMP inset 0, set only during the walk: the crouch shares zmp_walk's
+   constants) and 0.12 rad per leading step (the 0.25 cap toppled it).
+5. Solid-block tables caught the toes on the last step. Tables now have legs.
+6. **Sudden falls after ~2 minutes of silence:**
+   - one ProxQP solve ran about 115 s (found with a watchdog thread dumping the stack);
+   - lockstep then let physics run on without commands.
+   - Fix: cap the solver iterations. This likely also explains earlier one-off "standing
+     falls".
+7. **Test-harness pitfall:** nodes keep running after they log "Fell". Leftover
+   controllers from earlier runs (3 found, running for minutes) subscribed to each new
+   sim. Kill `lib/atlas_*/…py` before every run.
+
 ## Plan: what's left, in order (set 2026-10-01, update as steps finish)
 
 **User feedback on the 2026-10-01 pick-and-place:** not accepted. Atlas stood in one place
@@ -3009,7 +3063,7 @@ package in step 1.1 so this is obvious.
   is earlier than planned. That's harmless: it keeps receiving the public work this way.
 - **Commits:** authored by Soumic Sarkar; never a Claude co-author line.
 
-### 1. Walking pick-and-place (public)
+### 1. Walking pick-and-place (public) -- DONE 2026-10-01 (see the section above)
 
 1. **Package.** Move `pick_place.py` and its test to a new package `atlas_manipulation`,
    which depends on `atlas_walking_demo` for `wbc`/`torque_balance`. Update the docs and
